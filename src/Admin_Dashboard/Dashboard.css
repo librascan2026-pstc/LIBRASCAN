@@ -24,13 +24,13 @@
      --gold-border:    rgba(201,168,76,0.45);
    
      /* Cream/Parchment — main content background (from reference) */
-     --cream:          #E8D8A8;
-     --cream-light:    #EFE3BB;
-     --cream-dark:     #D9C99A;
-     --cream-bg:       #E2D0A0;
+     --cream:          #FDF8F0;
+     --cream-light:    #FDF8F0;
+     --cream-dark:     #FDF8F0;
+     --cream-bg:       #FDF8F0;
    
      /* Backgrounds */
-     --bg-base:        #E0CFA0;   /* Parchment/cream main area */
+     --bg-base:        #FDF8F0;   /* Parchment/cream main area */
      --bg-sidebar:     #6E0000;   /* Deep maroon sidebar */
      --bg-surface:     #EAD9B4;
      --bg-card:        #7A0000;   /* Maroon cards (stat cards, panels) */
@@ -470,7 +470,7 @@
      content: '';
      position: absolute;
      inset: 0;
-     background: #F5E4A8;
+     background: #FDF8F0;
      z-index: 0;
    }
    

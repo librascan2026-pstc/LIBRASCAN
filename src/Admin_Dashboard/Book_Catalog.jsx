@@ -1,179 +1,520 @@
-// src/Admin_Dashboard/OnlineCatalog.jsx
-// Extracted from Dashboard.jsx — self-contained catalog module.
-// Requires CSS classes injected by Dashboard.jsx.
+// src/Admin_Dashboard/Book_Catalog.jsx
+// Full-featured Book Catalog — LIBRASCAN Library Management System
+// Supabase DB + Storage · QR Code · Image Upload · CRUD · View/Edit/Delete
 
-import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../supabaseClient';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase, supabaseAdmin } from '../supabaseClient';
+import QRCode from 'qrcode';
 
+// ─── Constants ────────────────────────────────────────────────────────────────
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
+const BUCKET = 'book-images';
 
-function Toast({ message }) {
-  if (!message) return null;
-  return <div className="lm-toast">{message}</div>;
+const SHELF_LOCATIONS = [
+  'All Book',
+  'Filipiniana Section',
+  'Circulation Section',
+  'Reference Section',
+  'Thesis/Capstone',
+  'Online Book Section',
+];
+
+const GENRES = [
+  'Fiction',
+  'Non-Fiction',
+  'Science',
+  'Technology',
+  'History',
+  'Education',
+  'Thesis/Capstone',
+  'Others',
+];
+
+const EMPTY_FORM = {
+  title: '',
+  volume_title: '',
+  authors: '',
+  publisher: '',
+  place_of_publication: '',
+  year: new Date().getFullYear(),
+  volume_number: '',
+  edition: '',
+  isbn: '',
+  shelf_location: SHELF_LOCATIONS[0],
+  pages: '',
+  genre: GENRES[0],
+  copies: 1,
+  color: '',
+  abstract_image_url: '',
+  cover_image_url: '',
+  qr_code_url: '',
+};
+
+// ─── Icons ────────────────────────────────────────────────────────────────────
+const Ic = {
+  search:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
+  plus:     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
+  edit:     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
+  trash:    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
+  eye:      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
+  qr:       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>,
+  download: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  close:    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
+  upload:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>,
+  book:     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+  refresh:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>,
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function uploadImage(file, folder = 'covers') {
+  const ext  = file.name.split('.').pop();
+  const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+  // Use supabaseAdmin to bypass storage RLS policies
+  const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, file, { upsert: true });
+  if (error) throw error;
+  const { data } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
+  return data.publicUrl;
 }
 
-function StatusBadge({ available }) {
+async function generateAndUploadQR(value) {
+  const dataUrl = await QRCode.toDataURL(value, { width: 300, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
+  const res     = await fetch(dataUrl);
+  const blob    = await res.blob();
+  const file    = new File([blob], `qr_${value}.png`, { type: 'image/png' });
+  return uploadImage(file, 'qrcodes');
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function Toast({ message, type = 'success' }) {
+  if (!message) return null;
+  const colors = {
+    success: { bg: 'rgba(30,0,0,0.95)', border: 'rgba(201,168,76,0.40)', dot: '#81c784' },
+    error:   { bg: 'rgba(100,0,0,0.96)', border: 'rgba(239,154,154,0.40)', dot: '#ef9a9a' },
+  };
+  const c = colors[type] || colors.success;
   return (
-    <span className="lm-status-badge" style={{
-      background: available ? 'rgba(46,125,50,0.12)' : 'rgba(198,40,40,0.12)',
-      color: available ? '#81c784' : '#ef9a9a',
-      border: `1px solid ${available ? 'rgba(129,199,132,0.25)' : 'rgba(239,154,154,0.25)'}`,
+    <div style={{
+      position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+      background: c.bg, border: `1px solid ${c.border}`,
+      borderRadius: 12, padding: '13px 20px',
+      display: 'flex', alignItems: 'center', gap: 10,
+      fontFamily: 'var(--font-sans)', fontSize: 13, color: GP,
+      boxShadow: '0 10px 32px rgba(40,0,0,0.44)',
+      animation: 'lm-toast-in 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+      maxWidth: 340,
     }}>
-      <span style={{ width:6, height:6, borderRadius:'50%', background:'currentColor', display:'inline-block' }}/>
-      {available ? 'Available' : 'Checked Out'}
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: c.dot, flexShrink: 0 }} />
+      {message}
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const avail = status === 'Available';
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+      fontFamily: 'var(--font-sans)',
+      background: avail ? 'rgba(46,125,50,0.10)' : 'rgba(198,40,40,0.10)',
+      color: avail ? '#5a9e5c' : '#c0564e',
+      border: `1px solid ${avail ? 'rgba(90,158,92,0.25)' : 'rgba(192,86,78,0.25)'}`,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+      {status || 'Available'}
     </span>
   );
 }
 
-const Icon = {
-  search: (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
-  plus:   (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
-  edit:   (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>,
-  trash:  (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
-  eye:    (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
-  eyeOff: (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
-};
+function FieldLabel({ children, required }) {
+  return (
+    <label style={{
+      display: 'block', fontFamily: 'var(--font-sans)',
+      fontSize: 10.5, fontWeight: 600, letterSpacing: '0.07em',
+      textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 5,
+    }}>
+      {children}{required && <span style={{ color: '#c0564e', marginLeft: 3 }}>*</span>}
+    </label>
+  );
+}
 
-const GENRES = ['Fiction','Non-Fiction','Science','Technology','History','Philosophy','Literature','Mathematics','Engineering','Social Science','Arts','Reference'];
+const inputStyle = (error) => ({
+  width: '100%', padding: '9px 12px',
+  background: 'var(--cream-light)', color: 'var(--text-primary)',
+  border: `1px solid ${error ? 'rgba(192,86,78,0.5)' : 'var(--border-cream)'}`,
+  borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-sans)',
+  outline: 'none', transition: 'border-color 0.18s',
+  boxSizing: 'border-box',
+});
 
-const SAMPLE_BOOKS = [
-  { id:'b1', title:'Introduction to Algorithms', author:'Cormen, Leiserson, Rivest, Stein', genre:'Technology', isbn:'978-0-262-03384-8', publisher:'MIT Press', year:2022, copies:3, available:true, description:'A comprehensive introduction to algorithms.' },
-  { id:'b2', title:'Database System Concepts', author:'Abraham Silberschatz', genre:'Technology', isbn:'978-0-07-802215-9', publisher:'McGraw-Hill', year:2020, copies:2, available:false, description:'The definitive resource for database systems.' },
-  { id:'b3', title:'Discrete Mathematics', author:'Kenneth H. Rosen', genre:'Mathematics', isbn:'978-0-07-338309-5', publisher:'McGraw-Hill', year:2019, copies:4, available:true, description:'Covers mathematical foundations of computer science.' },
-  { id:'b4', title:'The Great Gatsby', author:'F. Scott Fitzgerald', genre:'Literature', isbn:'978-0-7432-7356-5', publisher:'Scribner', year:1925, copies:2, available:true, description:'A story of the American dream.' },
-  { id:'b5', title:'Clean Code', author:'Robert C. Martin', genre:'Technology', isbn:'978-0-13-235088-4', publisher:'Prentice Hall', year:2008, copies:2, available:false, description:'A handbook of agile software craftsmanship.' },
-  { id:'b6', title:'Sapiens: A Brief History', author:'Yuval Noah Harari', genre:'History', isbn:'978-0-06-231609-7', publisher:'Harper Perennial', year:2015, copies:1, available:true, description:'How Homo sapiens came to dominate Earth.' },
-];
+function ImageUploadField({ label, value, preview, onFileChange, accept = 'image/*' }) {
+  const ref = useRef();
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <div
+        onClick={() => ref.current?.click()}
+        style={{
+          border: '1.5px dashed rgba(139,0,0,0.28)', borderRadius: 10,
+          padding: preview ? 0 : '18px 12px',
+          cursor: 'pointer', textAlign: 'center',
+          background: 'rgba(253,248,240,0.7)',
+          transition: 'border-color 0.18s, background 0.18s',
+          overflow: 'hidden', position: 'relative',
+        }}
+        onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.55)'}
+        onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.28)'}
+      >
+        {preview ? (
+          <div style={{ position: 'relative' }}>
+            <img src={preview} alt="preview"
+              style={{ width: '100%', maxHeight: 130, objectFit: 'cover', display: 'block' }} />
+            <div style={{
+              position: 'absolute', inset: 0, background: 'rgba(90,0,0,0.45)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              opacity: 0, transition: 'opacity 0.18s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.opacity = 1}
+              onMouseLeave={e => e.currentTarget.style.opacity = 0}
+            >
+              <span style={{ color: GP, fontSize: 12, fontFamily: 'var(--font-sans)' }}>
+                {Ic.upload} Change
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
+            <span style={{ color: 'var(--text-dim)', opacity: 0.6 }}>{Ic.upload}</span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+              Click to upload
+            </span>
+            {value && <span style={{ fontSize: 10, color: 'var(--text-dim)', wordBreak: 'break-all' }}>Has existing image</span>}
+          </div>
+        )}
+      </div>
+      <input ref={ref} type="file" accept={accept} style={{ display: 'none' }}
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFileChange(f); e.target.value = ''; }} />
+    </div>
+  );
+}
 
-function BookModal({ book, onClose, onSave }) {
+// ─── Add/Edit Modal ───────────────────────────────────────────────────────────
+function BookFormModal({ book, onClose, onSaved }) {
   const isEdit = Boolean(book?.id);
-  const [form, setForm] = useState({
-    title: book?.title || '', author: book?.author || '', isbn: book?.isbn || '',
-    genre: book?.genre || GENRES[0], publisher: book?.publisher || '',
-    year: book?.year || new Date().getFullYear(), copies: book?.copies || 1,
-    available: book?.available !== undefined ? book.available : true,
-    description: book?.description || '',
-  });
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const [apiErr, setApiErr] = useState('');
+  const [form, setForm]         = useState(book ? { ...EMPTY_FORM, ...book } : { ...EMPTY_FORM });
+  const [errors, setErrors]     = useState({});
+  const [saving, setSaving]     = useState(false);
+  const [apiErr, setApiErr]     = useState('');
+  const [coverFile, setCoverFile]    = useState(null);
+  const [abstractFile, setAbstractFile] = useState(null);
+  const [coverPreview, setCoverPreview]    = useState(book?.cover_image_url || '');
+  const [abstractPreview, setAbstractPreview] = useState(book?.abstract_image_url || '');
+  const [qrProgress, setQrProgress] = useState('');
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
 
+  const handleCoverFile = (f) => {
+    setCoverFile(f);
+    setCoverPreview(URL.createObjectURL(f));
+  };
+  const handleAbstractFile = (f) => {
+    setAbstractFile(f);
+    setAbstractPreview(URL.createObjectURL(f));
+  };
+
   const validate = () => {
-    const errs = {};
-    if (!form.title.trim())  errs.title  = 'Title is required.';
-    if (!form.author.trim()) errs.author = 'Author is required.';
-    return errs;
+    const e = {};
+    if (!form.title.trim())   e.title   = 'Title is required.';
+    if (!form.authors.trim()) e.authors = 'Author(s) required.';
+    return e;
   };
 
   const handleSave = async () => {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true); setApiErr('');
-    try { await onSave({ ...form, id: book?.id }); onClose(); }
-    catch (err) { setApiErr(err.message || 'An error occurred.'); }
-    finally { setSaving(false); }
+    try {
+      const payload = { ...form };
+
+      // Auto-compute status from copies
+      payload.status = parseInt(payload.copies) > 0 ? 'Available' : 'Borrowed';
+
+      // Upload images via supabaseAdmin (bypasses storage RLS)
+      if (coverFile) {
+        payload.cover_image_url = await uploadImage(coverFile, 'covers');
+      }
+      if (abstractFile) {
+        payload.abstract_image_url = await uploadImage(abstractFile, 'abstracts');
+      }
+      // Generate + upload QR
+      const qrValue = form.isbn?.trim() || form.title?.trim();
+      if (qrValue) {
+        setQrProgress('Generating QR…');
+        payload.qr_code_url = await generateAndUploadQR(qrValue);
+        setQrProgress('');
+      }
+
+      const { id, ...rest } = payload;
+
+      // supabaseAdmin uses the service-role key — fully bypasses RLS on the books table
+      if (isEdit) {
+        const { error } = await supabaseAdmin.from('books').update(rest).eq('id', id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabaseAdmin.from('books').insert(rest);
+        if (error) throw error;
+      }
+
+      onSaved();
+      onClose();
+    } catch (err) {
+      setApiErr(err.message || 'An unexpected error occurred.');
+    } finally {
+      setSaving(false);
+      setQrProgress('');
+    }
   };
 
+  // Section divider
+  const SectionTitle = ({ children }) => (
+    <div style={{
+      fontFamily: 'var(--font-display)', fontSize: 11.5, letterSpacing: '0.1em',
+      textTransform: 'uppercase', color: 'var(--maroon-mid)',
+      borderBottom: '1px solid rgba(139,0,0,0.13)',
+      paddingBottom: 8, marginBottom: 14, marginTop: 6,
+    }}>{children}</div>
+  );
+
   return (
-    <div className="lm-modal-bg" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="lm-modal" style={{ maxWidth: 580 }}>
-        <div className="lm-modal-header">
-          <h2 className="lm-modal-title">{isEdit ? 'Edit Book' : 'Add New Book'}</h2>
-          <button className="lm-modal-close" onClick={onClose}>✕</button>
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.55)',
+      display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+      zIndex: 1000, padding: '24px 16px', overflowY: 'auto',
+      backdropFilter: 'blur(4px)',
+    }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: 'var(--cream)', borderRadius: 14,
+        border: '1px solid rgba(139,0,0,0.20)',
+        boxShadow: '0 20px 60px rgba(30,0,0,0.38)',
+        width: '100%', maxWidth: 720,
+        animation: 'lm-fade-in 0.25s ease',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '18px 24px',
+          background: 'linear-gradient(135deg, var(--maroon-deep), var(--maroon-mid))',
+          borderBottom: '1px solid rgba(201,168,76,0.20)',
+          borderRadius: '14px 14px 0 0',
+          position: 'relative',
+        }}>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1,
+            background: 'linear-gradient(90deg,transparent,rgba(201,168,76,0.40),transparent)' }} />
+          <div>
+            <h2 style={{
+              fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600,
+              color: '#F5E4A8', letterSpacing: '0.05em',
+            }}>
+              {isEdit ? 'Edit Book Record' : 'Add New Book'}
+            </h2>
+            <p style={{ fontSize: 12, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>
+              {isEdit ? 'Update the book information below.' : 'Fill in the details to add a new book to the catalog.'}
+            </p>
+          </div>
+          <button onClick={onClose} style={{
+            width: 30, height: 30, borderRadius: '50%',
+            background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
+            color: 'rgba(245,228,168,0.70)', fontSize: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,228,168,0.22)'; e.currentTarget.style.color = '#F5E4A8'; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'rgba(245,228,168,0.10)'; e.currentTarget.style.color = 'rgba(245,228,168,0.70)'; }}
+          >
+            {Ic.close}
+          </button>
         </div>
-        <div className="lm-modal-body">
-          {apiErr && <div className="lm-error-banner">{apiErr}</div>}
-          <div className="lm-form-group">
-            <label className="lm-label">Title *</label>
-            <input className={`lm-input${errors.title ? ' lm-input--error' : ''}`}
-              value={form.title} onChange={e => set('title', e.target.value)} placeholder="Book title" />
-            {errors.title && <span className="lm-field-error">{errors.title}</span>}
+
+        {/* Body */}
+        <div style={{ padding: '22px 24px', maxHeight: 'calc(90vh - 140px)', overflowY: 'auto' }}>
+          {apiErr && (
+            <div style={{
+              background: 'rgba(139,0,0,0.08)', border: '1px solid rgba(139,0,0,0.22)',
+              borderRadius: 8, padding: '10px 14px', marginBottom: 16,
+              fontSize: 12.5, color: 'var(--maroon-light)', fontFamily: 'var(--font-sans)',
+            }}>{apiErr}</div>
+          )}
+
+          <SectionTitle>Book Information</SectionTitle>
+          {/* Title */}
+          <div style={{ marginBottom: 14 }}>
+            <FieldLabel required>Book Title</FieldLabel>
+            <input style={inputStyle(errors.title)} value={form.title}
+              onChange={e => set('title', e.target.value)} placeholder="Enter book title" />
+            {errors.title && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)' }}>{errors.title}</span>}
           </div>
-          <div className="lm-form-row">
-            <div className="lm-form-group">
-              <label className="lm-label">Author *</label>
-              <input className={`lm-input${errors.author ? ' lm-input--error' : ''}`}
-                value={form.author} onChange={e => set('author', e.target.value)} placeholder="Author name" />
-              {errors.author && <span className="lm-field-error">{errors.author}</span>}
+          {/* Volume Title */}
+          <div style={{ marginBottom: 14 }}>
+            <FieldLabel>Volume Title</FieldLabel>
+            <input style={inputStyle()} value={form.volume_title}
+              onChange={e => set('volume_title', e.target.value)} placeholder="Volume title (if any)" />
+          </div>
+          {/* Authors */}
+          <div style={{ marginBottom: 14 }}>
+            <FieldLabel required>Authors</FieldLabel>
+            <input style={inputStyle(errors.authors)} value={form.authors}
+              onChange={e => set('authors', e.target.value)} placeholder="e.g. Cormen, Leiserson, Rivest" />
+            {errors.authors && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)' }}>{errors.authors}</span>}
+          </div>
+          {/* Publisher + Place */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <FieldLabel>Publisher</FieldLabel>
+              <input style={inputStyle()} value={form.publisher}
+                onChange={e => set('publisher', e.target.value)} placeholder="Publisher name" />
             </div>
-            <div className="lm-form-group">
-              <label className="lm-label">ISBN</label>
-              <input className="lm-input" value={form.isbn} onChange={e => set('isbn', e.target.value)} placeholder="978-x-xxx-xxxxx-x" />
+            <div>
+              <FieldLabel>Place of Publication</FieldLabel>
+              <input style={inputStyle()} value={form.place_of_publication}
+                onChange={e => set('place_of_publication', e.target.value)} placeholder="City, Country" />
             </div>
           </div>
-          <div className="lm-form-row">
-            <div className="lm-form-group">
-              <label className="lm-label">Genre</label>
-              <select className="lm-select" value={form.genre} onChange={e => set('genre', e.target.value)} style={{ width:'100%', borderRadius:10 }}>
+          {/* Year + Volume + Edition */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <FieldLabel>Year Published</FieldLabel>
+              <input style={inputStyle()} type="number" min="1800" max={new Date().getFullYear() + 1}
+                value={form.year} onChange={e => set('year', e.target.value)} />
+            </div>
+            <div>
+              <FieldLabel>Volume Number</FieldLabel>
+              <input style={inputStyle()} value={form.volume_number}
+                onChange={e => set('volume_number', e.target.value)} placeholder="e.g. Vol. 2" />
+            </div>
+            <div>
+              <FieldLabel>Edition</FieldLabel>
+              <input style={inputStyle()} value={form.edition}
+                onChange={e => set('edition', e.target.value)} placeholder="e.g. 3rd" />
+            </div>
+          </div>
+          {/* ISBN + Pages */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <FieldLabel>ISBN</FieldLabel>
+              <input style={inputStyle()} value={form.isbn}
+                onChange={e => set('isbn', e.target.value)} placeholder="978-x-xxx-xxxxx-x" />
+            </div>
+            <div>
+              <FieldLabel>Total Pages</FieldLabel>
+              <input style={inputStyle()} type="number" min="1"
+                value={form.pages} onChange={e => set('pages', e.target.value)} placeholder="e.g. 512" />
+            </div>
+          </div>
+
+          <SectionTitle>Classification</SectionTitle>
+          {/* Shelf + Genre */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <FieldLabel>Shelf Location</FieldLabel>
+              <select style={{ ...inputStyle(), appearance: 'none', cursor: 'pointer' }}
+                value={form.shelf_location} onChange={e => set('shelf_location', e.target.value)}>
+                {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <FieldLabel>Genre</FieldLabel>
+              <select style={{ ...inputStyle(), appearance: 'none', cursor: 'pointer' }}
+                value={form.genre} onChange={e => set('genre', e.target.value)}>
                 {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
-            <div className="lm-form-group">
-              <label className="lm-label">Publisher</label>
-              <input className="lm-input" value={form.publisher} onChange={e => set('publisher', e.target.value)} placeholder="Publisher name" />
+          </div>
+          {/* Copies + Color — Status is auto-computed */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
+            <div>
+              <FieldLabel>Copies</FieldLabel>
+              <input style={inputStyle()} type="number" min="0"
+                value={form.copies} onChange={e => set('copies', e.target.value)} />
+            </div>
+            <div>
+              <FieldLabel>Color</FieldLabel>
+              <input style={inputStyle()} value={form.color}
+                onChange={e => set('color', e.target.value)} placeholder="e.g. Red" />
             </div>
           </div>
-          <div className="lm-form-row">
-            <div className="lm-form-group">
-              <label className="lm-label">Year Published</label>
-              <input className="lm-input" type="number" value={form.year} min="1800" max={new Date().getFullYear()}
-                onChange={e => set('year', e.target.value)} />
-            </div>
-            <div className="lm-form-group">
-              <label className="lm-label">Total Copies</label>
-              <input className="lm-input" type="number" value={form.copies} min="1"
-                onChange={e => set('copies', e.target.value)} />
-            </div>
+          {/* Auto status preview */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
+            padding: '8px 12px', borderRadius: 8,
+            background: parseInt(form.copies) > 0 ? 'rgba(46,125,50,0.07)' : 'rgba(192,86,78,0.07)',
+            border: `1px solid ${parseInt(form.copies) > 0 ? 'rgba(90,158,92,0.22)' : 'rgba(192,86,78,0.22)'}`,
+          }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+              background: parseInt(form.copies) > 0 ? '#5a9e5c' : '#c0564e' }} />
+            <span style={{ fontSize: 12, fontFamily: 'var(--font-sans)', color: 'var(--text-muted)' }}>
+              Status will be set to <strong style={{ color: parseInt(form.copies) > 0 ? '#5a9e5c' : '#c0564e' }}>
+                {parseInt(form.copies) > 0 ? 'Available' : 'Borrowed'}
+              </strong> — automatically based on copies
+            </span>
           </div>
-          <div className="lm-form-group">
-            <label className="lm-label">Availability</label>
-            <div style={{ display:'flex', gap:12 }}>
-              {[{ v: true, label:'Available' }, { v: false, label:'Checked Out' }].map(({ v, label }) => (
-                <label key={label} style={{ display:'flex', alignItems:'center', gap:7, cursor:'pointer', fontSize:13, color:'var(--text-muted)' }}>
-                  <input type="radio" checked={form.available === v} onChange={() => set('available', v)} style={{ accentColor: G }} />
-                  {label}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="lm-form-group">
-            <label className="lm-label">Description</label>
-            <textarea className="lm-textarea" value={form.description}
-              onChange={e => set('description', e.target.value)} placeholder="Brief description of the book…" />
-          </div>
-        </div>
-        <div className="lm-modal-footer">
-          <button className="lm-btn lm-btn--ghost" onClick={onClose} disabled={saving}>Cancel</button>
-          <button className="lm-btn lm-btn--primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : (isEdit ? 'Save Changes' : 'Add Book')}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
-function ConfirmDeleteBookModal({ book, loading, onClose, onConfirm }) {
-  return (
-    <div className="lm-modal-bg" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="lm-modal lm-modal--sm">
-        <div className="lm-modal-header">
-          <h2 className="lm-modal-title" style={{ color:'#ef9a9a' }}>Remove Book</h2>
-          <button className="lm-modal-close" onClick={onClose}>✕</button>
-        </div>
-        <div className="lm-modal-body">
-          <p style={{ color:'rgba(245,228,168,0.8)', fontSize:14, lineHeight:1.65, margin:0 }}>
-            Remove <strong style={{ color:GP }}>"{book?.title}"</strong> from the catalog?<br/>
-            <span style={{ fontSize:12, color:'rgba(239,154,154,0.7)', fontStyle:'italic' }}>This action cannot be undone.</span>
+          <SectionTitle>Images & Media</SectionTitle>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 8 }}>
+            <ImageUploadField
+              label="Cover Image"
+              value={form.cover_image_url}
+              preview={coverPreview}
+              onFileChange={handleCoverFile}
+            />
+            <ImageUploadField
+              label="Abstract Image"
+              value={form.abstract_image_url}
+              preview={abstractPreview}
+              onFileChange={handleAbstractFile}
+            />
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 4 }}>
+            A QR code will be auto-generated from the ISBN (or title if no ISBN) and saved to storage.
           </p>
         </div>
-        <div className="lm-modal-footer">
-          <button className="lm-btn lm-btn--ghost" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="lm-btn lm-btn--danger" onClick={onConfirm} disabled={loading}>
-            {loading ? 'Removing…' : 'Remove Book'}
+
+        {/* Footer */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10,
+          padding: '16px 24px',
+          borderTop: '1px solid rgba(139,0,0,0.12)',
+          background: 'rgba(253,248,240,0.6)',
+          borderRadius: '0 0 14px 14px',
+        }}>
+          {qrProgress && (
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginRight: 'auto' }}>
+              {qrProgress}
+            </span>
+          )}
+          <button onClick={onClose} disabled={saving} style={{
+            padding: '9px 20px', borderRadius: 8, fontSize: 13,
+            border: '1px solid rgba(139,0,0,0.22)', background: 'transparent',
+            color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >Cancel</button>
+          <button onClick={handleSave} disabled={saving} style={{
+            padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: '1px solid rgba(201,168,76,0.45)',
+            background: saving ? 'rgba(139,0,0,0.5)' : 'linear-gradient(135deg,#8B0000,#5A0000)',
+            color: GP, fontFamily: 'var(--font-sans)', cursor: saving ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', gap: 7,
+            boxShadow: '0 3px 12px rgba(80,0,0,0.30)', transition: 'all 0.18s',
+          }}>
+            {saving
+              ? <><span style={{ width: 13, height: 13, border: `2px solid rgba(245,228,168,0.3)`, borderTopColor: GP, borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Saving…</>
+              : (isEdit ? 'Save Changes' : 'Add Book')}
           </button>
         </div>
       </div>
@@ -181,200 +522,718 @@ function ConfirmDeleteBookModal({ book, loading, onClose, onConfirm }) {
   );
 }
 
-const getEmoji = (genre) => {
-  const map = { Technology:'💻', Mathematics:'📐', Literature:'📖', History:'🏛️', Science:'🔬', Philosophy:'🧠', Fiction:'✨', Arts:'🎨', Engineering:'⚙️', Reference:'📚' };
-  return map[genre] || '📗';
-};
+// ─── View Details Modal ───────────────────────────────────────────────────────
+function ViewModal({ book, onClose, onEdit }) {
+  const [qrModalOpen, setQrModalOpen] = useState(false);
 
-export default function OnlineCatalog({ onStatsRefresh }) {
-  const [books,      setBooks]      = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [search,     setSearch]     = useState('');
-  const [genreFilter, setGenreFilter] = useState('all');
-  const [availFilter, setAvailFilter] = useState('all');
-  const [showModal,  setShowModal]  = useState(false);
-  const [modalBook,  setModalBook]  = useState(null);
+  const detail = (label, value) => value ? (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{
+        fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
+        color: 'var(--text-dim)', marginBottom: 2, fontFamily: 'var(--font-sans)',
+      }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)' }}>{value}</div>
+    </div>
+  ) : null;
+
+  const downloadQR = () => {
+    if (!book.qr_code_url) return;
+    const a = document.createElement('a');
+    a.href = book.qr_code_url;
+    a.download = `${book.isbn || book.title}_QR.png`;
+    a.click();
+  };
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.60)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, padding: 24, backdropFilter: 'blur(4px)',
+    }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: 'var(--cream)', borderRadius: 14,
+        border: '1px solid rgba(139,0,0,0.18)',
+        boxShadow: '0 20px 60px rgba(30,0,0,0.42)',
+        width: '100%', maxWidth: 740, maxHeight: '90vh',
+        display: 'flex', flexDirection: 'column',
+        animation: 'lm-fade-in 0.22s ease',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '18px 24px',
+          background: 'linear-gradient(135deg, var(--maroon-deep), var(--maroon-mid))',
+          borderBottom: '1px solid rgba(201,168,76,0.20)',
+          borderRadius: '14px 14px 0 0',
+          flexShrink: 0, position: 'relative',
+        }}>
+          <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1,
+            background: 'linear-gradient(90deg,transparent,rgba(201,168,76,0.40),transparent)' }} />
+          <div>
+            <h2 style={{
+              fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 600,
+              color: '#F5E4A8', letterSpacing: '0.05em',
+            }}>Book Details</h2>
+            <p style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>
+              Full record from the catalog
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => onEdit(book)} style={{
+              padding: '7px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 500,
+              border: '1px solid rgba(245,228,168,0.25)', background: 'rgba(245,228,168,0.12)',
+              color: '#F5E4A8', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 5, transition: 'all 0.18s',
+            }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(245,228,168,0.22)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'rgba(245,228,168,0.12)'}
+            >
+              {Ic.edit} Edit
+            </button>
+            <button onClick={onClose} style={{
+              width: 30, height: 30, borderRadius: '50%',
+              background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
+              color: 'rgba(245,228,168,0.70)', fontSize: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', transition: 'all 0.18s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(245,228,168,0.22)'; e.currentTarget.style.color = '#F5E4A8'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(245,228,168,0.10)'; e.currentTarget.style.color = 'rgba(245,228,168,0.70)'; }}
+            >{Ic.close}</button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ display: 'flex', gap: 0, overflowY: 'auto', flex: 1 }}>
+          {/* Left: images */}
+          <div style={{
+            width: 200, flexShrink: 0, padding: '20px 16px',
+            borderRight: '1px solid rgba(139,0,0,0.10)',
+            display: 'flex', flexDirection: 'column', gap: 14,
+          }}>
+            {/* Cover */}
+            <div>
+              <div style={{
+                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
+                color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
+              }}>Cover</div>
+              <div style={{
+                width: '100%', height: 160, borderRadius: 8, overflow: 'hidden',
+                border: '1px solid rgba(139,0,0,0.15)',
+                background: 'linear-gradient(135deg,rgba(139,0,0,0.10),rgba(201,168,76,0.06))',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {book.cover_image_url
+                  ? <img src={book.cover_image_url} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  : <span style={{ color: 'var(--text-dim)', opacity: 0.4 }}>{Ic.book}</span>
+                }
+              </div>
+            </div>
+            {/* Abstract */}
+            {book.abstract_image_url && (
+              <div>
+                <div style={{
+                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
+                  color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
+                }}>Abstract</div>
+                <div style={{
+                  width: '100%', height: 120, borderRadius: 8, overflow: 'hidden',
+                  border: '1px solid rgba(139,0,0,0.15)',
+                }}>
+                  <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                </div>
+              </div>
+            )}
+            {/* QR */}
+            {book.qr_code_url && (
+              <div>
+                <div style={{
+                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
+                  color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
+                }}>QR Code</div>
+                <div
+                  onClick={() => setQrModalOpen(true)}
+                  style={{
+                    width: '100%', height: 100, borderRadius: 8, overflow: 'hidden',
+                    border: '1px solid rgba(139,0,0,0.15)', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <img src={book.qr_code_url} alt="QR" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
+                </div>
+                <button onClick={downloadQR} style={{
+                  width: '100%', marginTop: 6, padding: '6px 0',
+                  borderRadius: 7, border: '1px solid rgba(139,0,0,0.18)',
+                  background: 'transparent', color: 'var(--maroon-mid)',
+                  fontSize: 11, fontFamily: 'var(--font-sans)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  transition: 'all 0.18s',
+                }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  {Ic.download} Download QR
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Right: details */}
+          <div style={{ flex: 1, padding: '24px 28px', overflowY: 'auto' }}>
+            <div style={{ marginBottom: 20 }}>
+              <h3 style={{
+                fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--maroon-deep)',
+                lineHeight: 1.3, marginBottom: 4, letterSpacing: '0.03em',
+              }}>{book.title}</h3>
+              {book.volume_title && (
+                <div style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic', fontFamily: 'var(--font-serif)' }}>
+                  {book.volume_title}
+                </div>
+              )}
+              <div style={{ marginTop: 10 }}><StatusBadge status={book.status} /></div>
+            </div>
+
+            <div style={{
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px',
+              borderTop: '1px solid rgba(139,0,0,0.10)', paddingTop: 18,
+            }}>
+              {[
+                ['Authors', book.authors],
+                ['Publisher', book.publisher],
+                ['Place of Publication', book.place_of_publication],
+                ['Year Published', book.year],
+                ['Volume Number', book.volume_number],
+                ['Edition', book.edition],
+                ['ISBN', book.isbn],
+                ['Total Pages', book.pages],
+                ['Shelf Location', book.shelf_location],
+                ['Genre', book.genre],
+                ['Copies', book.copies],
+                ['Color', book.color],
+              ].filter(([, v]) => v).map(([label, value]) => (
+                <div key={label} style={{ marginBottom: 14 }}>
+                  <div style={{
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                    color: 'var(--text-dim)', marginBottom: 3, fontFamily: 'var(--font-sans)',
+                  }}>{label}</div>
+                  <div style={{ fontSize: 13.5, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>{value}</div>
+                </div>
+              ))}
+            </div>
+            {book.created_at && (
+              <div style={{
+                marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(139,0,0,0.08)',
+                fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center',
+              }}>
+                Added on {new Date(book.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* QR Full Modal */}
+      {qrModalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.75)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1100, backdropFilter: 'blur(6px)',
+        }}
+          onClick={() => setQrModalOpen(false)}
+        >
+          <div style={{
+            background: 'var(--cream)', borderRadius: 14, padding: 28,
+            border: '1px solid rgba(139,0,0,0.20)',
+            boxShadow: '0 20px 60px rgba(30,0,0,0.50)',
+            textAlign: 'center',
+            animation: 'lm-fade-in 0.2s ease',
+          }}
+            onClick={e => e.stopPropagation()}
+          >
+            <h3 style={{
+              fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--maroon-deep)',
+              marginBottom: 16, letterSpacing: '0.04em',
+            }}>QR Code — {book.isbn || book.title}</h3>
+            <img src={book.qr_code_url} alt="QR"
+              style={{ width: 240, height: 240, objectFit: 'contain', display: 'block', margin: '0 auto', borderRadius: 8 }} />
+            <button onClick={downloadQR} style={{
+              marginTop: 18, padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 500,
+              border: '1px solid rgba(201,168,76,0.40)',
+              background: 'linear-gradient(135deg,#8B0000,#5A0000)',
+              color: GP, fontFamily: 'var(--font-sans)', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 7,
+            }}>
+              {Ic.download} Download
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
+function DeleteModal({ book, loading, onClose, onConfirm }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.60)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, backdropFilter: 'blur(4px)',
+    }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: 'var(--cream)', borderRadius: 14, padding: '28px 28px 22px',
+        border: '1px solid rgba(139,0,0,0.22)', maxWidth: 400, width: '100%',
+        boxShadow: '0 20px 60px rgba(30,0,0,0.44)',
+        animation: 'lm-fade-in 0.22s ease', textAlign: 'center',
+      }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 14, margin: '0 auto 16px',
+          background: 'rgba(192,86,78,0.10)', border: '1px solid rgba(192,86,78,0.22)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          color: '#c0564e',
+        }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
+            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
+          </svg>
+        </div>
+        <h3 style={{
+          fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--maroon-deep)',
+          marginBottom: 8,
+        }}>Delete Book Record</h3>
+        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', lineHeight: 1.6 }}>
+          Are you sure you want to delete <strong style={{ color: 'var(--text-primary)' }}>"{book.title}"</strong>?
+          This action cannot be undone.
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
+          <button onClick={onClose} disabled={loading} style={{
+            padding: '9px 22px', borderRadius: 8, fontSize: 13,
+            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
+            color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.05)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >Cancel</button>
+          <button onClick={onConfirm} disabled={loading} style={{
+            padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: '1px solid rgba(192,86,78,0.35)',
+            background: loading ? 'rgba(192,86,78,0.5)' : 'linear-gradient(135deg,#c0564e,#922)',
+            color: '#fff', fontFamily: 'var(--font-sans)', cursor: loading ? 'not-allowed' : 'pointer',
+            display: 'flex', alignItems: 'center', gap: 7,
+          }}>
+            {loading
+              ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Deleting…</>
+              : 'Delete Book'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+export default function Book_Catalog() {
+  const [books, setBooks]         = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [search, setSearch]       = useState('');
+  const [genreFilter, setGenreFilter]   = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [shelfFilter, setShelfFilter]   = useState('all');
+
+  const [showForm, setShowForm]     = useState(false);
+  const [editBook, setEditBook]     = useState(null);
+  const [viewBook, setViewBook]     = useState(null);
   const [deleteBook, setDeleteBook] = useState(null);
-  const [deleting,   setDeleting]   = useState(false);
-  const [toast,      setToast]      = useState('');
-  const [viewMode,   setViewMode]   = useState('grid');
+  const [deleting, setDeleting]     = useState(false);
 
-  const showToast = msg => { setToast(msg); setTimeout(() => setToast(''), 3500); };
+  const [toast, setToast]   = useState({ msg: '', type: 'success' });
+  const toastRef = useRef();
 
-  const loadBooks = useCallback(async () => {
+  const showToast = (msg, type = 'success') => {
+    setToast({ msg, type });
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast({ msg: '', type: 'success' }), 3200);
+  };
+
+  const fetchBooks = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('books').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('books')
+        .select('*')
+        .order('created_at', { ascending: false });
       if (error) throw error;
       setBooks(data || []);
-    } catch {
-      setBooks(SAMPLE_BOOKS);
-    } finally { setLoading(false); }
+    } catch (err) {
+      showToast('Failed to load books: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  useEffect(() => { loadBooks(); }, [loadBooks]);
+  useEffect(() => { fetchBooks(); }, [fetchBooks]);
 
-  const handleSave = async (formData) => {
-    if (formData.id) {
-      const { error } = await supabase.from('books').update({ ...formData, updated_at: new Date().toISOString() }).eq('id', formData.id);
-      if (error) throw error;
-      showToast('✓ Book updated.');
-    } else {
-      const { error } = await supabase.from('books').insert({ ...formData, created_at: new Date().toISOString() });
-      if (error) throw error;
-      showToast('✓ Book added to catalog.');
-    }
-    await loadBooks(); onStatsRefresh?.();
+  const handleSaved = () => {
+    fetchBooks();
+    showToast(editBook ? 'Book updated successfully.' : 'Book added successfully.');
   };
 
   const handleDelete = async () => {
     if (!deleteBook) return;
     setDeleting(true);
     try {
-      const { error } = await supabase.from('books').delete().eq('id', deleteBook.id);
+      // supabaseAdmin bypasses RLS — safe to delete without policy restrictions
+      const { error } = await supabaseAdmin.from('books').delete().eq('id', deleteBook.id);
       if (error) throw error;
-      showToast('✓ Book removed.'); setDeleteBook(null);
-      await loadBooks(); onStatsRefresh?.();
-    } catch (err) { showToast('⚠ ' + err.message); }
-    finally { setDeleting(false); }
+      setBooks(b => b.filter(x => x.id !== deleteBook.id));
+      setDeleteBook(null);
+      showToast('Book deleted successfully.');
+    } catch (err) {
+      showToast('Delete failed: ' + err.message, 'error');
+    } finally {
+      setDeleting(false);
+    }
   };
 
-  const uniqueGenres = ['all', ...new Set(books.map(b => b.genre).filter(Boolean))];
-  const filtered = books.filter(b => {
+  const openEdit = (book) => {
+    setViewBook(null);
+    setEditBook(book);
+    setShowForm(true);
+  };
+  const openAdd = () => {
+    setEditBook(null);
+    setShowForm(true);
+  };
+
+  // Derive auto-status from copies so the filter always works correctly
+  const booksWithStatus = books.map(b => ({
+    ...b,
+    status: parseInt(b.copies) > 0 ? 'Available' : 'Borrowed',
+  }));
+
+  // Filtering
+  const filtered = booksWithStatus.filter(b => {
     const q = search.toLowerCase();
-    const matchSearch = !q || [b.title, b.author, b.isbn].join(' ').toLowerCase().includes(q);
-    const matchGenre = genreFilter === 'all' || b.genre === genreFilter;
-    const matchAvail = availFilter === 'all' || (availFilter === 'available' ? b.available : !b.available);
-    return matchSearch && matchGenre && matchAvail;
+    const matchSearch = !q || [b.title, b.authors, b.isbn, b.publisher].join(' ').toLowerCase().includes(q);
+    const matchGenre  = genreFilter === 'all' || b.genre === genreFilter;
+    const matchStatus = statusFilter === 'all' || b.status === statusFilter;
+    const matchShelf  = shelfFilter === 'all' || b.shelf_location === shelfFilter;
+    return matchSearch && matchGenre && matchStatus && matchShelf;
   });
+
+  // Action button style
+  const actionBtn = (variant) => {
+    const variants = {
+      view:   { color: '#5a7eb5', bg: 'rgba(90,126,181,0.10)', border: 'rgba(90,126,181,0.22)', hover: 'rgba(90,126,181,0.18)' },
+      edit:   { color: 'var(--maroon-mid)', bg: 'rgba(139,0,0,0.07)', border: 'rgba(139,0,0,0.20)', hover: 'rgba(139,0,0,0.14)' },
+      delete: { color: '#c0564e', bg: 'rgba(192,86,78,0.07)', border: 'rgba(192,86,78,0.20)', hover: 'rgba(192,86,78,0.14)' },
+      qr:     { color: G, bg: 'rgba(201,168,76,0.08)', border: 'rgba(201,168,76,0.24)', hover: 'rgba(201,168,76,0.16)' },
+    };
+    const v = variants[variant];
+    return {
+      base: {
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        padding: '4px 9px', borderRadius: 6, fontSize: 11.5, fontWeight: 500,
+        fontFamily: 'var(--font-sans)', cursor: 'pointer',
+        border: `1px solid ${v.border}`, background: v.bg, color: v.color,
+        transition: 'background 0.15s, transform 0.12s',
+      },
+      hover: v.hover,
+    };
+  };
+
+  const ActionBtn = ({ variant, onClick, children }) => {
+    const s = actionBtn(variant);
+    const [hov, setHov] = useState(false);
+    return (
+      <button
+        onClick={onClick}
+        style={{ ...s.base, background: hov ? s.hover : s.base.background, transform: hov ? 'translateY(-1px)' : 'none' }}
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+      >{children}</button>
+    );
+  };
+
+  // Stats for header
+  const totalBooks    = booksWithStatus.length;
+  const totalCopies   = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
+  const availableCount = booksWithStatus.filter(b => b.status === 'Available').length;
+
+  const selectStyle = {
+    padding: '8px 12px', borderRadius: 8,
+    border: '1px solid var(--border-cream)',
+    background: 'var(--cream-light)', color: 'var(--text-primary)',
+    fontFamily: 'var(--font-sans)', fontSize: 12.5,
+    cursor: 'pointer', appearance: 'none', outline: 'none',
+  };
 
   return (
     <div className="lm-module">
-      <Toast message={toast} />
+      <Toast message={toast.msg} type={toast.type} />
+
+      {/* ── Header ── */}
       <div className="lm-module-header">
         <div>
-          <h2 className="lm-module-title">Online Catalog</h2>
-          <p className="lm-module-subtitle">Browse, search, and manage the library's book collection.</p>
+          <h2 className="lm-module-title">Book Catalog</h2>
+          <p className="lm-module-subtitle">
+            Manage the library's full collection — add, edit, view, and remove records.
+          </p>
         </div>
-        <button className="lm-btn lm-btn--primary" onClick={() => { setModalBook(null); setShowModal(true); }}>
-          {Icon.plus(14)} Add Book
-        </button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={fetchBooks} title="Refresh" style={{
+            padding: '9px 11px', borderRadius: 8, fontSize: 12,
+            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
+            color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+            transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            {Ic.refresh}
+          </button>
+          <button onClick={openAdd} style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '9px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+            border: '1px solid rgba(201,168,76,0.40)',
+            background: 'linear-gradient(135deg,#8B0000,#5A0000)',
+            color: GP, fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            boxShadow: '0 3px 12px rgba(80,0,0,0.25)', transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 5px 18px rgba(80,0,0,0.38)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 3px 12px rgba(80,0,0,0.25)'; e.currentTarget.style.transform = 'none'; }}
+          >
+            {Ic.plus} Add Book
+          </button>
+        </div>
       </div>
 
-      <div className="lm-filters">
-        <div className="lm-search-wrap">
-          <span className="lm-search-icon">{Icon.search(14)}</span>
-          <input className="lm-search" type="text" placeholder="Search books, authors, ISBN…"
-            value={search} onChange={e => setSearch(e.target.value)} />
+      {/* ── Summary Chips ── */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Total Titles', value: totalBooks },
+          { label: 'Total Copies', value: totalCopies },
+          { label: 'Available', value: availableCount },
+          { label: 'Borrowed', value: totalBooks - availableCount },
+        ].map(({ label, value }) => (
+          <div key={label} style={{
+            padding: '8px 16px', borderRadius: 8,
+            background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
+            border: '1px solid rgba(139,0,0,0.12)',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-display)' }}>
+              {loading ? '—' : value}
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Filters ── */}
+      <div style={{
+        display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
+        padding: '14px 16px', borderRadius: 10,
+        background: 'linear-gradient(135deg,rgba(139,0,0,0.04),rgba(201,168,76,0.03))',
+        border: '1px solid rgba(139,0,0,0.10)',
+      }}>
+        {/* Search */}
+        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+          <span style={{
+            position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+            color: 'var(--text-dim)', pointerEvents: 'none',
+          }}>{Ic.search}</span>
+          <input
+            type="text" placeholder="Search title, author, ISBN…"
+            value={search} onChange={e => setSearch(e.target.value)}
+            style={{
+              ...selectStyle, width: '100%', paddingLeft: 32,
+            }}
+          />
         </div>
-        <select className="lm-select lm-select--sm" value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
-          {uniqueGenres.map(g => <option key={g} value={g}>{g === 'all' ? 'All Genres' : g}</option>)}
+        {/* Genre filter */}
+        <select style={selectStyle} value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
+          <option value="all">All Genres</option>
+          {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        <select className="lm-select lm-select--sm" value={availFilter} onChange={e => setAvailFilter(e.target.value)}>
+        {/* Status filter */}
+        <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All Status</option>
-          <option value="available">Available</option>
-          <option value="out">Checked Out</option>
+          <option value="Available">Available</option>
+          <option value="Borrowed">Borrowed</option>
         </select>
-        <span className="lm-count">{filtered.length} {filtered.length === 1 ? 'book' : 'books'}</span>
-        <div style={{ display:'flex', gap:4, marginLeft:'auto' }}>
-          {['grid','list'].map(mode => (
-            <button key={mode} onClick={() => setViewMode(mode)} style={{
-              padding:'7px 10px', borderRadius:8, border:'1px solid',
-              borderColor: viewMode === mode ? 'rgba(201,168,76,0.4)' : 'rgba(201,168,76,0.12)',
-              background: viewMode === mode ? 'rgba(201,168,76,0.12)' : 'transparent',
-              color: viewMode === mode ? G : 'var(--text-dim)',
-              cursor:'pointer', fontSize:11, fontFamily:'var(--font-sans)',
-            }}>
-              {mode === 'grid' ? '⊞' : '☰'}
-            </button>
-          ))}
-        </div>
+        {/* Shelf filter */}
+        <select style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
+          <option value="all">All Shelves</option>
+          {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <span style={{
+          marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',
+          fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+        }}>
+          {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
+        </span>
       </div>
 
+      {/* ── Table ── */}
       {loading ? (
-        <div className="lm-loading"><div className="lm-spinner"/><span style={{ color:'var(--text-muted)', fontSize:13 }}>Loading catalog…</span></div>
+        <div className="lm-loading">
+          <div className="lm-spinner" />
+          <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading catalog…</span>
+        </div>
       ) : filtered.length === 0 ? (
         <div className="lm-empty">
           <div className="lm-empty-icon">📚</div>
           <div className="lm-empty-text">No books found</div>
-          {search && <div className="lm-empty-sub">Try a different search term</div>}
-        </div>
-      ) : viewMode === 'grid' ? (
-        <div className="lm-book-grid">
-          {filtered.map(b => (
-            <div key={b.id} className="lm-book-card">
-              <div className="lm-book-cover" style={{ background:'linear-gradient(135deg,rgba(139,0,0,0.2),rgba(201,168,76,0.08))' }}>
-                {getEmoji(b.genre)}
-              </div>
-              <div className="lm-book-info">
-                <div className="lm-book-title">{b.title}</div>
-                <div className="lm-book-author">{b.author}</div>
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap', alignItems:'center', marginBottom:6 }}>
-                  {b.genre && <span className="lm-book-genre">{b.genre}</span>}
-                  <StatusBadge available={b.available} />
-                </div>
-                {b.copies && (
-                  <div style={{ fontSize:10.5, color:'var(--text-dim)', fontFamily:'var(--font-sans)', marginBottom:8 }}>
-                    {b.copies} cop{b.copies === 1 ? 'y' : 'ies'} · {b.year || '—'}
-                  </div>
-                )}
-                <div className="lm-book-actions">
-                  <button className="lm-table-btn lm-table-btn--edit" style={{ flex:1, justifyContent:'center' }}
-                    onClick={() => { setModalBook(b); setShowModal(true); }}>
-                    {Icon.edit(12)} Edit
-                  </button>
-                  <button className="lm-table-btn lm-table-btn--delete" style={{ flex:1, justifyContent:'center' }}
-                    onClick={() => setDeleteBook(b)}>
-                    {Icon.trash(12)} Remove
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+          <div className="lm-empty-sub">
+            {search ? 'Try a different search term or clear filters.' : 'Add your first book to get started.'}
+          </div>
         </div>
       ) : (
-        <div className="lm-table-wrap">
-          <table className="lm-table">
+        <div style={{
+          borderRadius: 10, border: '1px solid rgba(139,0,0,0.13)',
+          overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                <th>Title</th><th>Author</th><th>Genre</th><th>ISBN</th>
-                <th>Year</th><th>Copies</th><th>Status</th><th>Actions</th>
+              <tr style={{
+                background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+                borderBottom: '2px solid rgba(201,168,76,0.35)',
+              }}>
+                {['Book Title', 'Authors', 'ISBN', 'Copies', 'Status', 'Action'].map((h, i) => (
+                  <th key={h} style={{
+                    padding: '13px 16px', textAlign: i === 3 ? 'center' : 'left',
+                    fontFamily: 'var(--font-sans)', fontSize: 11,
+                    fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                    color: '#F5E4A8', whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map(b => (
-                <tr key={b.id}>
-                  <td style={{ maxWidth:200 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                      <span style={{ fontSize:20 }}>{getEmoji(b.genre)}</span>
-                      <span style={{ fontWeight:600, color:'var(--text-primary)', fontSize:13 }}>{b.title}</span>
-                    </div>
-                  </td>
-                  <td className="lm-cell-muted" style={{ fontSize:12 }}>{b.author}</td>
-                  <td>{b.genre && <span className="lm-book-genre">{b.genre}</span>}</td>
-                  <td className="lm-cell-muted" style={{ fontFamily:'var(--font-sans)', fontSize:11 }}>{b.isbn || '—'}</td>
-                  <td className="lm-cell-muted lm-cell-date">{b.year || '—'}</td>
-                  <td className="lm-cell-muted lm-cell-date">{b.copies || 1}</td>
-                  <td><StatusBadge available={b.available}/></td>
-                  <td>
-                    <div className="lm-table-actions">
-                      <button className="lm-table-btn lm-table-btn--edit" onClick={() => { setModalBook(b); setShowModal(true); }}>
-                        {Icon.edit(12)} Edit
-                      </button>
-                      <button className="lm-table-btn lm-table-btn--delete" onClick={() => setDeleteBook(b)}>
-                        {Icon.trash(12)} Remove
-                      </button>
-                    </div>
-                  </td>
-                </tr>
+              {filtered.map((book, idx) => (
+                <TableRow
+                  key={book.id}
+                  book={book}
+                  idx={idx}
+                  onView={() => setViewBook(book)}
+                  onEdit={() => openEdit(book)}
+                  onDelete={() => setDeleteBook(book)}
+                  ActionBtn={ActionBtn}
+                  Ic={Ic}
+                />
               ))}
             </tbody>
           </table>
         </div>
       )}
 
-      {showModal && <BookModal book={modalBook} onClose={() => setShowModal(false)} onSave={handleSave}/>}
-      {deleteBook && <ConfirmDeleteBookModal book={deleteBook} loading={deleting} onClose={() => setDeleteBook(null)} onConfirm={handleDelete}/>}
+      {/* ── Modals ── */}
+      {showForm && (
+        <BookFormModal
+          book={editBook}
+          onClose={() => { setShowForm(false); setEditBook(null); }}
+          onSaved={handleSaved}
+        />
+      )}
+      {viewBook && (
+        <ViewModal
+          book={viewBook}
+          onClose={() => setViewBook(null)}
+          onEdit={openEdit}
+        />
+      )}
+      {deleteBook && (
+        <DeleteModal
+          book={deleteBook}
+          loading={deleting}
+          onClose={() => setDeleteBook(null)}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Table Row (extracted to allow clean hover state) ─────────────────────────
+function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <tr
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={onView}
+      style={{
+        background: hov ? 'rgba(139,0,0,0.04)' : (idx % 2 === 0 ? 'transparent' : 'rgba(139,0,0,0.015)'),
+        borderBottom: '1px solid rgba(139,0,0,0.07)',
+        cursor: 'pointer', transition: 'background 0.14s',
+      }}
+    >
+      {/* Title */}
+      <td style={{ padding: '11px 16px', maxWidth: 240 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {book.cover_image_url ? (
+            <img src={book.cover_image_url} alt=""
+              style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
+          ) : (
+            <div style={{
+              width: 32, height: 40, borderRadius: 4, flexShrink: 0,
+              background: 'linear-gradient(135deg,rgba(139,0,0,0.14),rgba(201,168,76,0.08))',
+              border: '1px solid rgba(139,0,0,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--text-dim)',
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+          )}
+          <div>
+            <div style={{
+              fontWeight: 600, fontSize: 13, color: 'var(--text-primary)',
+              fontFamily: 'var(--font-sans)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170,
+            }}>{book.title}</div>
+            {book.edition && <div style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{book.edition} Ed.</div>}
+          </div>
+        </div>
+      </td>
+      {/* Authors */}
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{
+          fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          display: 'block', maxWidth: 160,
+        }}>{book.authors || '—'}</span>
+      </td>
+      {/* ISBN */}
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+          {book.isbn || '—'}
+        </span>
+      </td>
+      {/* Copies */}
+      <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)' }}>
+          {book.copies ?? '—'}
+        </span>
+      </td>
+      {/* Status */}
+      <td style={{ padding: '11px 16px' }}>
+        <StatusBadge status={book.status} />
+      </td>
+      {/* Action */}
+      <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
+          <ActionBtn variant="edit" onClick={onEdit}>{Ic.edit} Edit</ActionBtn>
+          <ActionBtn variant="delete" onClick={onDelete}>{Ic.trash}</ActionBtn>
+        </div>
+      </td>
+    </tr>
   );
 }
