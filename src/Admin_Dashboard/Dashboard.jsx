@@ -25,6 +25,12 @@ const NavIcons = {
   chevron:     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
   logout:      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
   dot:         <svg width="5" height="5" viewBox="0 0 10 10"><circle cx="5" cy="5" r="5" fill="currentColor"/></svg>,
+  // Collapse/expand arrows
+  collapseLeft: (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="15 18 9 12 15 6"/>
+    </svg>
+  ),
 };
 
 // ─── Nav Structure ────────────────────────────────────────────────────────────
@@ -59,10 +65,11 @@ const LABEL_MAP = {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 export default function Dashboard({ user, onSignOut }) {
   const { profile } = useAuth();
-  const [activeTab, setActiveTab]     = useState('overview');
-  const [subPage,   setSubPage]       = useState('borrowed');
+  const [activeTab, setActiveTab]       = useState('overview');
+  const [subPage,   setSubPage]         = useState('borrowed');
   const [bookMenuOpen, setBookMenuOpen] = useState(false);
-  const [notifOpen, setNotifOpen]     = useState(false);
+  const [notifOpen, setNotifOpen]       = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Derive display info
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name || '';
@@ -76,6 +83,12 @@ export default function Dashboard({ user, onSignOut }) {
 
   const navigate = (tab) => {
     if (tab === 'bookmanage') {
+      // When collapsed, clicking bookmanage just expands sidebar first
+      if (sidebarCollapsed) {
+        setSidebarCollapsed(false);
+        setTimeout(() => setBookMenuOpen(o => !o), 60);
+        return;
+      }
       setBookMenuOpen(o => !o);
       return;
     }
@@ -107,15 +120,11 @@ export default function Dashboard({ user, onSignOut }) {
     items: NAV.filter(n => n.section === s),
   }));
 
-  const topbarTitle = activeTab === 'bookmanage'
-    ? `Book Management — ${subPage === 'return' ? 'Return' : 'Borrowed'}`
-    : (LABEL_MAP[activeTab] || 'Dashboard');
-
   return (
     <div className="lm-shell">
 
       {/* ── Sidebar ── */}
-      <aside className="lm-sidebar">
+      <aside className={`lm-sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
 
         {/* Logo */}
         <div className="lm-sidebar-logo">
@@ -124,9 +133,27 @@ export default function Dashboard({ user, onSignOut }) {
           </div>
           <div>
             <div className="lm-logo-text">LIBRASCAN</div>
-            <div className="lm-logo-sub">QR Code Based Library Management System </div>
+            <div className="lm-logo-sub">QR Code Based Library Management System</div>
           </div>
         </div>
+
+        {/* Collapse toggle */}
+        <button
+          className="lm-collapse-btn"
+          onClick={() => {
+            setSidebarCollapsed(o => !o);
+            if (!sidebarCollapsed) setBookMenuOpen(false);
+          }}
+          aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+        >
+          <span style={{ flexShrink: 0, display: 'flex', transition: 'transform 0.32s cubic-bezier(0.4,0,0.2,1)', transform: sidebarCollapsed ? 'rotate(180deg)' : 'rotate(0deg)' }}>
+            {NavIcons.collapseLeft}
+          </span>
+          {!sidebarCollapsed && (
+            <span style={{ fontSize: 10, letterSpacing: '0.08em', opacity: 0.75 }}>Collapse</span>
+          )}
+        </button>
 
         {/* Nav sections */}
         <nav className="lm-nav">
@@ -140,22 +167,25 @@ export default function Dashboard({ user, onSignOut }) {
                   <button
                     className={`lm-nav-item ${activeTab === item.id ? 'active' : ''}`}
                     onClick={() => navigate(item.id)}
+                    data-tooltip={sidebarCollapsed ? item.label : undefined}
+                    title={sidebarCollapsed ? item.label : undefined}
                   >
                     <span className="lm-nav-item-icon">{NavIcons[item.icon]}</span>
-                    <span style={{ flex: 1 }}>{item.label}</span>
+                    <span className="lm-nav-item-label">{item.label}</span>
                     {item.sub && (
-                      <span style={{
-                        transition: 'transform 0.2s',
+                      <span className="lm-chevron" style={{
+                        transition: 'transform 0.2s ease',
                         transform: bookMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
                         color: 'var(--text-dim)',
+                        flexShrink: 0,
                       }}>
                         {NavIcons.chevron}
                       </span>
                     )}
                   </button>
 
-                  {/* Sub-menu */}
-                  {item.sub && (
+                  {/* Sub-menu — hidden when collapsed */}
+                  {item.sub && !sidebarCollapsed && (
                     <div className={`lm-nav-sub ${bookMenuOpen ? 'open' : ''}`}>
                       {item.sub.map(s => (
                         <button
@@ -180,15 +210,17 @@ export default function Dashboard({ user, onSignOut }) {
           <button
             className="lm-nav-item lm-nav-item--logout"
             onClick={onSignOut}
+            data-tooltip={sidebarCollapsed ? 'Sign Out' : undefined}
+            title={sidebarCollapsed ? 'Sign Out' : undefined}
           >
             <span className="lm-nav-item-icon">{NavIcons.logout}</span>
-            Sign Out
+            <span className="lm-nav-item-label lm-logout-label">Sign Out</span>
           </button>
         </div>
       </aside>
 
       {/* ── Main Area ── */}
-      <div className="lm-main">
+      <div className={`lm-main${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
 
         {/* Topbar */}
         <header className="lm-topbar">
@@ -217,6 +249,7 @@ export default function Dashboard({ user, onSignOut }) {
                   boxShadow: '0 8px 28px rgba(0,0,0,0.4)',
                   zIndex: 200,
                   overflow: 'hidden',
+                  animation: 'lm-fade-in 0.22s ease',
                 }}>
                   <div style={{
                     padding: '12px 16px',

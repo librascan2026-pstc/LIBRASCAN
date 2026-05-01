@@ -5,6 +5,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
+import { extractAbstractText } from '../ocrClient';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const G  = '#C9A84C';
@@ -47,6 +48,7 @@ const EMPTY_FORM = {
   copies: 1,
   color: '',
   abstract_image_url: '',
+  abstract_text: '',
   cover_image_url: '',
   qr_code_url: '',
 };
@@ -81,8 +83,17 @@ async function generateAndUploadQR(value) {
   const dataUrl = await QRCode.toDataURL(value, { width: 300, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
   const res     = await fetch(dataUrl);
   const blob    = await res.blob();
-  const file    = new File([blob], `qr_${value}.png`, { type: 'image/png' });
+  const safeVal = value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
+  const file    = new File([blob], `qr_${safeVal}.png`, { type: 'image/png' });
   return uploadImage(file, 'qrcodes');
+}
+
+// Generate a QR data URL for a specific copy (ISBN + copy number), returns { dataUrl, label }
+async function generateCopyQR(isbn, copyNum, title) {
+  const base  = isbn?.trim() || title?.trim() || 'BOOK';
+  const value = `${base}-COPY${String(copyNum).padStart(3, '0')}`;
+  const dataUrl = await QRCode.toDataURL(value, { width: 400, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
+  return { dataUrl, label: value };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -211,6 +222,16 @@ function BookFormModal({ book, onClose, onSaved }) {
   const [abstractFile, setAbstractFile] = useState(null);
   const [coverPreview, setCoverPreview]    = useState(book?.cover_image_url || '');
   const [abstractPreview, setAbstractPreview] = useState(book?.abstract_image_url || '');
+  // abstract_text is stored as JSON string: { heading, paragraphs, keywords }
+  const parseAbstractText = (v) => {
+    if (!v) return null;
+    if (typeof v === 'object') return v;
+    try { return JSON.parse(v); } catch { return { heading: '', paragraphs: [v], keywords: [] }; }
+  };
+  const [abstractData, setAbstractData]   = useState(() => parseAbstractText(book?.abstract_text));
+  const [abstractOcrLoading, setAbstractOcrLoading] = useState(false);
+  const [abstractOcrError,   setAbstractOcrError]   = useState('');
+  const [abstractOcrProgress, setAbstractOcrProgress] = useState('');
   const [qrProgress, setQrProgress] = useState('');
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
@@ -219,9 +240,25 @@ function BookFormModal({ book, onClose, onSaved }) {
     setCoverFile(f);
     setCoverPreview(URL.createObjectURL(f));
   };
-  const handleAbstractFile = (f) => {
+  const handleAbstractFile = async (f) => {
     setAbstractFile(f);
     setAbstractPreview(URL.createObjectURL(f));
+    setAbstractOcrLoading(true);
+    setAbstractOcrError('');
+    try {
+      const structured = await extractAbstractText(f, (pct, status) => {
+        // Live Tesseract progress fed into the loading label
+        const label = status?.replace(/_/g, ' ') || 'processing';
+        setAbstractOcrProgress(`${label} — ${pct}%`);
+      });
+      setAbstractData(structured);
+      setForm(prev => ({ ...prev, abstract_text: JSON.stringify(structured) }));
+    } catch (err) {
+      setAbstractOcrError('Could not read text from image: ' + (err.message || 'Unknown error'));
+    } finally {
+      setAbstractOcrLoading(false);
+      setAbstractOcrProgress('');
+    }
   };
 
   const validate = () => {
@@ -247,6 +284,10 @@ function BookFormModal({ book, onClose, onSaved }) {
       }
       if (abstractFile) {
         payload.abstract_image_url = await uploadImage(abstractFile, 'abstracts');
+      }
+      // Persist extracted abstract text (stored as JSON string)
+      if (abstractData) {
+        payload.abstract_text = JSON.stringify(abstractData);
       }
       // Generate + upload QR
       const qrValue = form.isbn?.trim() || form.title?.trim();
@@ -477,6 +518,62 @@ function BookFormModal({ book, onClose, onSaved }) {
               onFileChange={handleAbstractFile}
             />
           </div>
+          {/* OCR status */}
+          {abstractOcrLoading && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
+              padding: '10px 14px', borderRadius: 9,
+              background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.24)',
+              fontSize: 12.5, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)',
+            }}>
+              <span style={{ width: 14, height: 14, border: '2px solid rgba(139,0,0,0.18)', borderTopColor: 'var(--maroon-mid)', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block', flexShrink: 0 }} />
+              {abstractOcrProgress || 'Initializing OCR engine… please wait'}
+            </div>
+          )}
+          {abstractOcrError && !abstractOcrLoading && (
+            <div style={{
+              marginBottom: 10, padding: '9px 13px', borderRadius: 8,
+              background: 'rgba(192,86,78,0.08)', border: '1px solid rgba(192,86,78,0.25)',
+              fontSize: 12, color: '#c0564e', fontFamily: 'var(--font-sans)',
+            }}>
+              ⚠ {abstractOcrError}
+            </div>
+          )}
+          {abstractData && !abstractOcrLoading && (
+            <div style={{ marginBottom: 12 }}>
+              <FieldLabel>Extracted Abstract — Preview</FieldLabel>
+              <div style={{
+                border: '1px solid rgba(139,0,0,0.15)', borderRadius: 9,
+                background: 'rgba(253,248,240,0.8)', padding: '14px 16px',
+                maxHeight: 200, overflowY: 'auto',
+              }}>
+                {abstractData.heading && (
+                  <div style={{ fontWeight: 700, fontSize: 13, color: 'var(--maroon-deep)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.06em', fontFamily: 'var(--font-sans)', textAlign: 'center' }}>
+                    {abstractData.heading}
+                  </div>
+                )}
+                {(abstractData.paragraphs || []).map((p, i) => {
+                  const isSub = abstractData.subheadings?.includes(p);
+                  return isSub ? (
+                    <div key={i} style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', marginTop: 8, marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{p}</div>
+                  ) : (
+                    <p key={i} style={{ fontSize: 12.5, color: 'var(--text-primary)', lineHeight: 1.75, marginBottom: 8, fontFamily: 'Georgia,serif', textAlign: 'justify', textIndent: '1.5em' }}>{p}</p>
+                  );
+                })}
+                {abstractData.keywords?.length > 0 && (
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginRight: 2 }}>Keywords:</span>
+                    {abstractData.keywords.map((k, i) => (
+                      <span key={i} style={{ fontSize: 10.5, background: 'rgba(139,0,0,0.08)', color: 'var(--maroon-mid)', padding: '2px 8px', borderRadius: 12, fontFamily: 'var(--font-sans)' }}>{k}</span>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <span style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+                ✓ Text extracted successfully. This will be saved and shown in the book details view.
+              </span>
+            </div>
+          )}
           <p style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 4 }}>
             A QR code will be auto-generated from the ISBN (or title if no ISBN) and saved to storage.
           </p>
@@ -523,8 +620,106 @@ function BookFormModal({ book, onClose, onSaved }) {
 }
 
 // ─── View Details Modal ───────────────────────────────────────────────────────
+// ─── Parse abstract_text from DB (may be JSON string or plain text) ──────────
+function parseAbstractData(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try { return JSON.parse(raw); } catch { return { heading: '', paragraphs: [raw], keywords: [] }; }
+}
+
 function ViewModal({ book, onClose, onEdit }) {
-  const [qrModalOpen, setQrModalOpen] = useState(false);
+  const [qrModalOpen, setQrModalOpen]           = useState(false);
+  const [abstractModalOpen, setAbstractModalOpen] = useState(false);
+  const [copyQRs, setCopyQRs]                   = useState([]);
+  const [generatingCopyQRs, setGeneratingCopyQRs] = useState(false);
+  const [selectedCopyQR, setSelectedCopyQR]     = useState(null);
+  const [dlFormat, setDlFormat]                 = useState('png');
+
+  const copies      = parseInt(book.copies) || 1;
+  const abstractData = parseAbstractData(book.abstract_text);
+  const hasAbstract  = !!(book.abstract_image_url || abstractData);
+
+  const handleOpenQrModal = async () => {
+    setQrModalOpen(true);
+    if (copyQRs.length === 0) {
+      setGeneratingCopyQRs(true);
+      try {
+        const results = [];
+        for (let i = 1; i <= copies; i++) {
+          const { dataUrl, label } = await generateCopyQR(book.isbn, i, book.title);
+          results.push({ dataUrl, label, copyNum: i });
+        }
+        setCopyQRs(results);
+        setSelectedCopyQR(results[0]);
+      } catch {
+        // fallback to stored QR
+      } finally {
+        setGeneratingCopyQRs(false);
+      }
+    } else {
+      if (!selectedCopyQR) setSelectedCopyQR(copyQRs[0]);
+    }
+  };
+
+  // Download a single copy QR to the browser's file explorer (Downloads folder)
+  const downloadCopyQR = (qr, format = 'png') => {
+    if (!qr) return;
+    const canvas   = document.createElement('canvas');
+    const img      = new window.Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = () => {
+      // Render at 2× for crisp printing
+      const scale = 2;
+      canvas.width  = img.naturalWidth  * scale;
+      canvas.height = img.naturalHeight * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.imageSmoothingEnabled = false;
+
+      // White/cream background (required for JPG, looks good for PNG too)
+      ctx.fillStyle = '#FDF8F0';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+      // Label text at bottom
+      const labelH = Math.round(36 * scale);
+      ctx.fillStyle = '#FDF8F0';
+      ctx.fillRect(0, canvas.height - labelH, canvas.width, labelH);
+      ctx.fillStyle = '#5A0000';
+      ctx.font      = `${Math.round(11 * scale)}px monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(qr.label, canvas.width / 2, canvas.height - Math.round(10 * scale));
+
+      const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
+      const quality  = format === 'jpg' ? 0.96 : undefined;
+
+      // Trigger browser Save dialog → Downloads / file explorer
+      canvas.toBlob(blob => {
+        const url = URL.createObjectURL(blob);
+        const a   = document.createElement('a');
+        a.href    = url;
+        a.download = `LIBRASCAN_${qr.label}.${format}`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }, mimeType, quality);
+    };
+    img.onerror = () => {
+      // Fallback: direct dataUrl download if canvas fails (e.g. CORS)
+      const a   = document.createElement('a');
+      a.href    = qr.dataUrl;
+      a.download = `LIBRASCAN_${qr.label}.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    };
+    img.src = qr.dataUrl;
+  };
+
+  // Download all copy QRs one by one (staggered to avoid browser pop-up blocking)
+  const downloadAllCopyQRs = (format = 'png') => {
+    copyQRs.forEach((qr, i) => setTimeout(() => downloadCopyQR(qr, format), i * 350));
+  };
 
   const detail = (label, value) => value ? (
     <div style={{ marginBottom: 10 }}>
@@ -535,14 +730,6 @@ function ViewModal({ book, onClose, onEdit }) {
       <div style={{ fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)' }}>{value}</div>
     </div>
   ) : null;
-
-  const downloadQR = () => {
-    if (!book.qr_code_url) return;
-    const a = document.createElement('a');
-    a.href = book.qr_code_url;
-    a.download = `${book.isbn || book.title}_QR.png`;
-    a.click();
-  };
 
   return (
     <div style={{
@@ -631,53 +818,67 @@ function ViewModal({ book, onClose, onEdit }) {
                 }
               </div>
             </div>
-            {/* Abstract */}
-            {book.abstract_image_url && (
+            {/* Abstract thumbnail — shown if image OR extracted text exists */}
+            {hasAbstract && (
               <div>
-                <div style={{
-                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
-                  color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
-                }}>Abstract</div>
-                <div style={{
-                  width: '100%', height: 120, borderRadius: 8, overflow: 'hidden',
-                  border: '1px solid rgba(139,0,0,0.15)',
-                }}>
-                  <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)' }}>Abstract</div>
+                <div
+                  onClick={() => setAbstractModalOpen(true)}
+                  title="Click to read the full abstract"
+                  style={{
+                    width: '100%', height: 120, borderRadius: 8, overflow: 'hidden',
+                    border: '2px solid rgba(139,0,0,0.18)', cursor: 'pointer', position: 'relative',
+                    background: book.abstract_image_url ? 'transparent' : 'linear-gradient(135deg,rgba(139,0,0,0.08),rgba(201,168,76,0.06))',
+                    transition: 'border-color 0.18s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.45)'}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.18)'}
+                >
+                  {book.abstract_image_url ? (
+                    <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : (
+                    <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'Georgia,serif', lineHeight: 1.6, overflow: 'hidden' }}>
+                      {abstractData?.heading && <div style={{ fontWeight: 700, fontSize: 10, marginBottom: 4, color: 'var(--maroon-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{abstractData.heading}</div>}
+                      {abstractData?.paragraphs?.[0]?.slice(0, 140)}{abstractData?.paragraphs?.[0]?.length > 140 ? '…' : ''}
+                    </div>
+                  )}
+                  {/* hover overlay */}
+                  <div style={{
+                    position: 'absolute', inset: 0, background: 'rgba(80,0,0,0.62)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
+                    opacity: 0, transition: 'opacity 0.18s',
+                  }}
+                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
+                    onMouseLeave={e => e.currentTarget.style.opacity = 0}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F5E4A8" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                    <span style={{ fontSize: 11, color: '#F5E4A8', fontFamily: 'var(--font-sans)', fontWeight: 600 }}>Read Abstract</span>
+                  </div>
                 </div>
               </div>
             )}
             {/* QR */}
-            {book.qr_code_url && (
-              <div>
-                <div style={{
-                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
-                  color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
-                }}>QR Code</div>
-                <div
-                  onClick={() => setQrModalOpen(true)}
-                  style={{
-                    width: '100%', height: 100, borderRadius: 8, overflow: 'hidden',
-                    border: '1px solid rgba(139,0,0,0.15)', cursor: 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <img src={book.qr_code_url} alt="QR" style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }} />
-                </div>
-                <button onClick={downloadQR} style={{
-                  width: '100%', marginTop: 6, padding: '6px 0',
-                  borderRadius: 7, border: '1px solid rgba(139,0,0,0.18)',
-                  background: 'transparent', color: 'var(--maroon-mid)',
-                  fontSize: 11, fontFamily: 'var(--font-sans)', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
-                  transition: 'all 0.18s',
+            <div>
+              <div style={{
+                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
+                color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
+              }}>QR Codes ({copies} {copies === 1 ? 'Copy' : 'Copies'})</div>
+              <div
+                onClick={handleOpenQrModal}
+                style={{
+                  width: '100%', height: 100, borderRadius: 8, overflow: 'hidden',
+                  border: '1px solid rgba(139,0,0,0.15)', cursor: 'pointer',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
+                  flexDirection: 'column', gap: 4,
                 }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  {Ic.download} Download QR
-                </button>
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--maroon-mid)" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
+                <span style={{ fontSize: 10, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', fontWeight: 600 }}>
+                  View & Download QRs
+                </span>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Right: details */}
@@ -734,39 +935,328 @@ function ViewModal({ book, onClose, onEdit }) {
         </div>
       </div>
 
-      {/* QR Full Modal */}
-      {qrModalOpen && (
+      {/* Abstract Text Modal */}
+      {abstractModalOpen && (
         <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.75)',
+          position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.78)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1100, backdropFilter: 'blur(6px)',
+          zIndex: 1200, backdropFilter: 'blur(6px)', padding: 24,
         }}
-          onClick={() => setQrModalOpen(false)}
+          onClick={() => setAbstractModalOpen(false)}
         >
           <div style={{
-            background: 'var(--cream)', borderRadius: 14, padding: 28,
-            border: '1px solid rgba(139,0,0,0.20)',
-            boxShadow: '0 20px 60px rgba(30,0,0,0.50)',
-            textAlign: 'center',
+            background: 'var(--cream)', borderRadius: 14, padding: 0,
+            border: '1px solid rgba(139,0,0,0.22)',
+            boxShadow: '0 20px 60px rgba(30,0,0,0.55)',
+            maxWidth: 680, width: '100%', maxHeight: '85vh',
+            display: 'flex', flexDirection: 'column',
             animation: 'lm-fade-in 0.2s ease',
           }}
             onClick={e => e.stopPropagation()}
           >
-            <h3 style={{
-              fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--maroon-deep)',
-              marginBottom: 16, letterSpacing: '0.04em',
-            }}>QR Code — {book.isbn || book.title}</h3>
-            <img src={book.qr_code_url} alt="QR"
-              style={{ width: 240, height: 240, objectFit: 'contain', display: 'block', margin: '0 auto', borderRadius: 8 }} />
-            <button onClick={downloadQR} style={{
-              marginTop: 18, padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 500,
-              border: '1px solid rgba(201,168,76,0.40)',
-              background: 'linear-gradient(135deg,#8B0000,#5A0000)',
-              color: GP, fontFamily: 'var(--font-sans)', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 7,
+            {/* Header */}
+            <div style={{
+              padding: '16px 22px', borderRadius: '14px 14px 0 0',
+              background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
+              borderBottom: '1px solid rgba(201,168,76,0.20)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0, position: 'relative',
             }}>
-              {Ic.download} Download
-            </button>
+              <h3 style={{
+                fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8',
+                letterSpacing: '0.10em', textTransform: 'uppercase',
+                textAlign: 'center', margin: 0,
+              }}>
+                {abstractData?.heading ? abstractData.heading.toUpperCase() : 'ABSTRACT'}
+              </h3>
+              <button onClick={() => setAbstractModalOpen(false)} style={{
+                position: 'absolute', right: 16,
+                width: 28, height: 28, borderRadius: '50%',
+                background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
+                color: 'rgba(245,228,168,0.80)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{Ic.close}</button>
+            </div>
+            {/* Body — two-panel: image left + formatted text right */}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+              {/* ── Left: Original Image ── */}
+              {book.abstract_image_url && (
+                <div style={{
+                  width: 210, flexShrink: 0, padding: '16px 14px',
+                  borderRight: '1px solid rgba(139,0,0,0.10)',
+                  display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(253,248,240,0.5)',
+                }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+                    Original Scan
+                  </div>
+                  <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(139,0,0,0.12)', minHeight: 200, background: '#fff' }}>
+                    <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Right: Formatted Abstract Text ── */}
+              <div style={{ flex: 1, padding: '28px 32px', overflowY: 'auto', background: '#FFFDF8' }}>
+                {abstractData ? (
+                  <>
+                    {/* ── Heading block ── */}
+                    <div style={{ marginBottom: 22, textAlign: 'center' }}>
+                      {abstractData.heading ? (
+                        <div style={{
+                          fontFamily: '"Georgia", "Times New Roman", serif',
+                          fontSize: 22, fontWeight: 700,
+                          color: '#5A0000',
+                          letterSpacing: '0.12em',
+                          textTransform: 'uppercase',
+                          marginBottom: 10,
+                          lineHeight: 1.2,
+                        }}>
+                          {abstractData.heading}
+                        </div>
+                      ) : (
+                        /* Fallback: use the book section type from header */
+                        <div style={{
+                          fontFamily: '"Georgia", "Times New Roman", serif',
+                          fontSize: 20, fontWeight: 700,
+                          color: '#5A0000', letterSpacing: '0.10em',
+                          textTransform: 'uppercase', marginBottom: 10,
+                        }}>
+                          {book.title}
+                        </div>
+                      )}
+
+                      {/* Gold rule */}
+                      <div style={{
+                        width: 56, height: 2, margin: '0 auto 12px',
+                        background: 'linear-gradient(90deg, transparent, #C9A84C, transparent)',
+                        borderRadius: 2,
+                      }} />
+
+                      {/* Book byline */}
+                      <div style={{
+                        fontSize: 12.5, color: '#7a5c3a',
+                        fontFamily: '"Georgia", serif', fontStyle: 'italic',
+                        letterSpacing: '0.02em',
+                      }}>
+                        {book.title}{book.authors ? ` — ${book.authors}` : ''}
+                      </div>
+                    </div>
+
+                    {/* ── Divider ── */}
+                    <div style={{
+                      borderTop: '1px solid rgba(139,0,0,0.12)',
+                      marginBottom: 20,
+                    }} />
+
+                    {/* ── Body paragraphs ── */}
+                    <div>
+                      {(abstractData.paragraphs || []).map((para, i) => {
+                        const isSubhead = abstractData.subheadings?.includes(para);
+                        if (isSubhead) {
+                          return (
+                            <div key={i} style={{
+                              fontSize: 13.5, fontWeight: 700,
+                              color: '#6B0000',
+                              fontFamily: '"Georgia", serif',
+                              letterSpacing: '0.06em',
+                              marginTop: 22, marginBottom: 10,
+                              textTransform: 'uppercase',
+                              borderBottom: '1px solid rgba(139,0,0,0.10)',
+                              paddingBottom: 6,
+                            }}>
+                              {para}
+                            </div>
+                          );
+                        }
+                        return (
+                          <p key={i} style={{
+                            fontSize: 14.5,
+                            color: '#2c1a0e',
+                            fontFamily: '"Georgia", "Times New Roman", serif',
+                            lineHeight: 2.0,
+                            textAlign: 'justify',
+                            textIndent: '2.2em',
+                            margin: '0 0 14px 0',
+                            wordSpacing: '0.02em',
+                          }}>
+                            {para}
+                          </p>
+                        );
+                      })}
+                    </div>
+
+                    {/* ── Keywords ── */}
+                    {abstractData.keywords?.length > 0 && (
+                      <div style={{
+                        marginTop: 22, paddingTop: 16,
+                        borderTop: '1px solid rgba(139,0,0,0.10)',
+                      }}>
+                        <div style={{
+                          fontSize: 10, fontWeight: 700, letterSpacing: '0.10em',
+                          textTransform: 'uppercase', color: '#7a5c3a',
+                          fontFamily: 'var(--font-sans)', marginBottom: 10,
+                        }}>
+                          Keywords
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                          {abstractData.keywords.map((kw, i) => (
+                            <span key={i} style={{
+                              fontSize: 11.5, padding: '4px 13px', borderRadius: 14,
+                              background: 'rgba(139,0,0,0.06)',
+                              border: '1px solid rgba(139,0,0,0.16)',
+                              color: '#6B0000',
+                              fontFamily: 'var(--font-sans)', fontWeight: 500,
+                              fontStyle: 'italic',
+                            }}>
+                              {kw}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 12, color: 'var(--text-dim)' }}>
+                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', marginBottom: 6 }}>No abstract text extracted yet</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', lineHeight: 1.6 }}>
+                        To extract text: click <strong>Edit</strong> on this book, then<br/>
+                        re-upload the abstract image — OCR will read it automatically.
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Per-Copy QR Modal */}
+      {qrModalOpen && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.78)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1200, backdropFilter: 'blur(6px)', padding: 24,
+        }}
+          onClick={() => setQrModalOpen(false)}
+        >
+          <div style={{
+            background: 'var(--cream)', borderRadius: 14, padding: 0,
+            border: '1px solid rgba(139,0,0,0.20)',
+            boxShadow: '0 20px 60px rgba(30,0,0,0.55)',
+            maxWidth: 620, width: '100%', maxHeight: '88vh',
+            display: 'flex', flexDirection: 'column',
+            animation: 'lm-fade-in 0.2s ease',
+          }}
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div style={{
+              padding: '16px 22px', borderRadius: '14px 14px 0 0',
+              background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
+              borderBottom: '1px solid rgba(201,168,76,0.20)',
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+            }}>
+              <div>
+                <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', letterSpacing: '0.04em', marginBottom: 2 }}>
+                  QR Codes — {copies} {copies === 1 ? 'Copy' : 'Copies'}
+                </h3>
+                <p style={{ fontSize: 11, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)' }}>
+                  Each copy has a unique QR: ISBN + Copy Number
+                </p>
+              </div>
+              <button onClick={() => setQrModalOpen(false)} style={{
+                width: 28, height: 28, borderRadius: '50%',
+                background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
+                color: 'rgba(245,228,168,0.80)', cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>{Ic.close}</button>
+            </div>
+
+            {/* Body */}
+            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+              {/* Copy list */}
+              <div style={{
+                width: 140, flexShrink: 0, overflowY: 'auto', padding: '12px 8px',
+                borderRight: '1px solid rgba(139,0,0,0.10)',
+              }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', padding: '0 6px 8px' }}>
+                  Select Copy
+                </div>
+                {generatingCopyQRs ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 16 }}>
+                    <span style={{ width: 18, height: 18, border: '2px solid rgba(139,0,0,0.2)', borderTopColor: 'var(--maroon-mid)', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }} />
+                    <span style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center' }}>Generating…</span>
+                  </div>
+                ) : copyQRs.map(qr => (
+                  <button key={qr.copyNum} onClick={() => setSelectedCopyQR(qr)} style={{
+                    width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 12,
+                    fontFamily: 'var(--font-sans)', cursor: 'pointer', textAlign: 'left',
+                    border: selectedCopyQR?.copyNum === qr.copyNum ? '1px solid rgba(139,0,0,0.30)' : '1px solid transparent',
+                    background: selectedCopyQR?.copyNum === qr.copyNum ? 'rgba(139,0,0,0.08)' : 'transparent',
+                    color: selectedCopyQR?.copyNum === qr.copyNum ? 'var(--maroon-mid)' : 'var(--text-muted)',
+                    fontWeight: selectedCopyQR?.copyNum === qr.copyNum ? 600 : 400,
+                    marginBottom: 2, transition: 'all 0.15s',
+                  }}>
+                    Copy #{qr.copyNum}
+                  </button>
+                ))}
+              </div>
+
+              {/* QR Preview */}
+              <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, overflowY: 'auto' }}>
+                {generatingCopyQRs ? (
+                  <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', fontSize: 13 }}>Generating unique QR codes…</div>
+                ) : selectedCopyQR ? (
+                  <>
+                    <img src={selectedCopyQR.dataUrl} alt={selectedCopyQR.label}
+                      style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 10, border: '1px solid rgba(139,0,0,0.12)' }} />
+                    <div style={{
+                      fontFamily: 'monospace', fontSize: 11.5, color: 'var(--text-muted)',
+                      background: 'rgba(139,0,0,0.05)', padding: '5px 14px', borderRadius: 6,
+                      border: '1px solid rgba(139,0,0,0.10)',
+                    }}>
+                      {selectedCopyQR.label}
+                    </div>
+                    {/* Download buttons */}
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+                      {[['PNG', 'png'], ['JPG', 'jpg']].map(([label, fmt]) => (
+                        <button key={fmt} onClick={() => downloadCopyQR(selectedCopyQR, fmt)} style={{
+                          padding: '8px 18px', borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+                          border: '1px solid rgba(201,168,76,0.40)',
+                          background: 'linear-gradient(135deg,#8B0000,#5A0000)',
+                          color: GP, fontFamily: 'var(--font-sans)', cursor: 'pointer',
+                          display: 'inline-flex', alignItems: 'center', gap: 6,
+                        }}>
+                          {Ic.download} Save as {label}
+                        </button>
+                      ))}
+                    </div>
+                    {copies > 1 && (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        {[['PNG', 'png'], ['JPG', 'jpg']].map(([label, fmt]) => (
+                          <button key={fmt} onClick={() => downloadAllCopyQRs(fmt)} style={{
+                            padding: '7px 16px', borderRadius: 8, fontSize: 11.5,
+                            border: '1px solid rgba(139,0,0,0.25)', background: 'transparent',
+                            color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+                            display: 'inline-flex', alignItems: 'center', gap: 5,
+                            transition: 'background 0.15s',
+                          }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                          >
+                            {Ic.download} All Copies ({label})
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
       )}
