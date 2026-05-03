@@ -545,7 +545,7 @@ function DetailModal({ tx, onClose }) {
         }}>
           <div>
             <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:GP, fontWeight:700 }}>Transaction Details</div>
-            <div style={{ fontSize:11.5, color:'rgba(245,228,168,0.55)', fontFamily:'var(--font-sans)', marginTop:2 }}>Full record information</div>
+            <div style={{ fontSize:11.5, color:'hsla(47, 79.40%, 81.00%, 0.55)', fontFamily:'var(--font-sans)', marginTop:2 }}>Full record information</div>
           </div>
           <button onClick={onClose} style={{
             background:'rgba(255,255,255,0.1)', border:'1px solid rgba(245,228,168,0.2)',
@@ -1623,7 +1623,7 @@ export default function BookManagement() {
           background:`linear-gradient(135deg, rgba(139,0,0,0.04), rgba(201,168,76,0.02))`,
           borderBottom:'1.5px solid rgba(139,0,0,0.1)',
         }}>
-          <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:'var(--text-primary)', fontWeight:700 }}>
+          <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:'var(--text-cream)', fontWeight:700 }}>
             Transaction History
           </div>
           <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
