@@ -526,13 +526,8 @@ export default function AttendanceMonitoring() {
 
   return (
     <div className="lm-module">
-      {/* ── Header ── */}
-      <div className="lm-module-header">
-        <div>
-          <h2 className="lm-module-title">Attendance Monitoring</h2>
-          <p className="lm-module-subtitle">QR-based library entry logging via Teklead T-D4 scanner</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      {/* ── Header Actions ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginBottom: 20 }}>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--maroon-deep)', letterSpacing: '0.04em', lineHeight: 1 }}>
               {fmt(clock, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
@@ -546,7 +541,6 @@ export default function AttendanceMonitoring() {
             {Ic.refresh} Refresh
           </button>
         </div>
-      </div>
 
       {/* ── Stat Cards ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 20 }}>

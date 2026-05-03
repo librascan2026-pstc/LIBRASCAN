@@ -37,13 +37,7 @@ const NavIcons = {
 const NAV = [
   { id: 'overview',    label: 'Overview',             icon: 'overview',   section: 'MAIN' },
   { id: 'attendance',  label: 'Attendance Monitoring', icon: 'attendance', section: 'MAIN' },
-  {
-    id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: 'LIBRARY',
-    sub: [
-      { id: 'borrowed', label: 'Borrowed' },
-      { id: 'return',   label: 'Return'   },
-    ],
-  },
+  { id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: 'LIBRARY' },
   { id: 'catalog',  label: 'Book Catalog',      icon: 'catalog',  section: 'LIBRARY' },
   { id: 'users',    label: 'User Management',   icon: 'users',    section: 'ADMIN' },
   { id: 'reports',  label: 'Reports & Analytics', icon: 'reports', section: 'ADMIN' },
@@ -66,8 +60,6 @@ const LABEL_MAP = {
 export default function Dashboard({ user, onSignOut }) {
   const { profile } = useAuth();
   const [activeTab, setActiveTab]       = useState('overview');
-  const [subPage,   setSubPage]         = useState('borrowed');
-  const [bookMenuOpen, setBookMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen]       = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
@@ -82,30 +74,18 @@ export default function Dashboard({ user, onSignOut }) {
   const avatarUrl   = profile?.avatar_url || null;
 
   const navigate = (tab) => {
-    if (tab === 'bookmanage') {
-      // When collapsed, clicking bookmanage just expands sidebar first
-      if (sidebarCollapsed) {
-        setSidebarCollapsed(false);
-        setTimeout(() => setBookMenuOpen(o => !o), 60);
-        return;
-      }
-      setBookMenuOpen(o => !o);
-      return;
-    }
     setActiveTab(tab);
-    if (tab !== 'bookmanage') setBookMenuOpen(false);
   };
 
   const navigateFromOverview = (tab) => {
     setActiveTab(tab);
-    setBookMenuOpen(false);
   };
 
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':   return <Overview onNavigate={navigateFromOverview} />;
       case 'attendance': return <AttendanceMonitoring />;
-      case 'bookmanage': return <BookManagement subPage={subPage} />;
+      case 'bookmanage': return <BookManagement />;
       case 'catalog':    return <OnlineCatalog />;
       case 'users':      return <UserManagement />;
       case 'reports':    return <ReportsAnalytics />;
@@ -142,7 +122,6 @@ export default function Dashboard({ user, onSignOut }) {
           className="lm-collapse-btn"
           onClick={() => {
             setSidebarCollapsed(o => !o);
-            if (!sidebarCollapsed) setBookMenuOpen(false);
           }}
           aria-label={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
@@ -172,33 +151,7 @@ export default function Dashboard({ user, onSignOut }) {
                   >
                     <span className="lm-nav-item-icon">{NavIcons[item.icon]}</span>
                     <span className="lm-nav-item-label">{item.label}</span>
-                    {item.sub && (
-                      <span className="lm-chevron" style={{
-                        transition: 'transform 0.2s ease',
-                        transform: bookMenuOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                        color: 'var(--text-dim)',
-                        flexShrink: 0,
-                      }}>
-                        {NavIcons.chevron}
-                      </span>
-                    )}
                   </button>
-
-                  {/* Sub-menu — hidden when collapsed */}
-                  {item.sub && !sidebarCollapsed && (
-                    <div className={`lm-nav-sub ${bookMenuOpen ? 'open' : ''}`}>
-                      {item.sub.map(s => (
-                        <button
-                          key={s.id}
-                          className={`lm-nav-sub-item ${activeTab === 'bookmanage' && subPage === s.id ? 'active' : ''}`}
-                          onClick={() => { setActiveTab('bookmanage'); setSubPage(s.id); }}
-                        >
-                          <span style={{ color: 'var(--text-dim)', fontSize: 10 }}>{NavIcons.dot}</span>
-                          {s.label}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -225,6 +178,16 @@ export default function Dashboard({ user, onSignOut }) {
         {/* Topbar */}
         <header className="lm-topbar">
           <div className="lm-topbar-left">
+            <div className="lm-topbar-title">{LABEL_MAP[activeTab] || 'Dashboard'}</div>
+            <div className="lm-breadcrumb">
+              {activeTab === 'overview'    && "Welcome back. Here's what's happening at the library today."}
+              {activeTab === 'attendance'  && 'Track and manage student library attendance records.'}
+              {activeTab === 'bookmanage'  && 'Manage book borrowing and returns via QR scanning.'}
+              {activeTab === 'catalog'     && "Manage the library's full collection."}
+              {activeTab === 'users'       && 'View and manage all registered library accounts.'}
+              {activeTab === 'reports'     && 'View detailed reports on loans, activity, and usage.'}
+              {activeTab === 'settings'    && 'Configure your account and system preferences.'}
+            </div>
           </div>
 
           <div className="lm-topbar-right">

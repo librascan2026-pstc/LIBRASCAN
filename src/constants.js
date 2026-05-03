@@ -85,11 +85,11 @@ export const STEPS = [
 
 // ─── Team ──────────────────────────────────────────────────────────────────────
 export const TEAM = [
-  { name: "Xandru C. Bondoc",          contact: "09610974315" },
-  { name: "Rusty A. Pineda",           contact: "09917101289" },
-  { name: "Edzel John R. Lacap",       contact: "09318431295" },
-  { name: "Prince Christian S. Mata",  contact: "09971544550" },
-  { name: "Jerry Yan A. Balagtas",     contact: "09924066896" },
+  { name: "Xandru C. Bondoc"          },
+  { name: "Rusty A. Pineda"            },
+  { name: "Edzel John R. Lacap"       },
+  { name: "Prince Christian S. Mata"  },
+  { name: "Jerry Yan A. Balagtas"     },
 ];
 
 // ─── Scope Tags ────────────────────────────────────────────────────────────────

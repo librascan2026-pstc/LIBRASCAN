@@ -1238,13 +1238,7 @@ export default function Settings({ user, onSignOut }) {
       <style>{CSS}</style>
       <Toast msg={tMsg} ok={tOk} />
 
-      {/* Page header */}
-      <div className="lm-module-header" style={{ marginBottom: 22 }}>
-        <div>
-          <h2 className="lm-module-title">Settings</h2>
-          <p className="lm-module-subtitle">Manage your account, security, and active sessions.</p>
-        </div>
-      </div>
+
 
       {/* Tabs */}
       <div className="s-tabs">

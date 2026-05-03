@@ -57,18 +57,7 @@ export default function Overview({ onNavigate }) {
 
   return (
     <div className="lm-module">
-      <div className="lm-module-header">
-        <div>
-          <h2 className="lm-module-title">Overview Dashboard</h2>
-          <p className="lm-module-subtitle">Welcome back. Here's what's happening at the library today.</p>
-        </div>
-        <div style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'right' }}>
-          <div style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-            {new Date().toLocaleDateString('en-PH', { weekday:'long', year:'numeric', month:'long', day:'numeric' })}
-          </div>
-          <div style={{ marginTop: 2 }}>Library Management System</div>
-        </div>
-      </div>
+
 
       {/* Stat Cards */}
       <div className="lm-stats-grid">

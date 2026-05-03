@@ -88,12 +88,20 @@ async function generateAndUploadQR(value) {
   return uploadImage(file, 'qrcodes');
 }
 
-// Generate a QR data URL for a specific copy (ISBN + copy number), returns { dataUrl, label }
-async function generateCopyQR(isbn, copyNum, title) {
-  const base  = isbn?.trim() || title?.trim() || 'BOOK';
-  const value = `${base}-COPY${String(copyNum).padStart(3, '0')}`;
-  const dataUrl = await QRCode.toDataURL(value, { width: 400, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
-  return { dataUrl, label: value };
+// Generate a UUID v4 (no external dep needed)
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+// Generate a QR data URL for a specific copy using its unique copy_id
+// QR value = copy_id (UUID) — globally unique per physical copy
+// Returns { dataUrl, label, copy_id }
+async function generateCopyQR(copyId, copyNum) {
+  const dataUrl = await QRCode.toDataURL(copyId, { width: 400, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
+  return { dataUrl, label: copyId, copyNum, copy_id: copyId };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -274,9 +282,10 @@ function BookFormModal({ book, onClose, onSaved }) {
     setSaving(true); setApiErr('');
     try {
       const payload = { ...form };
+      const newCopiesCount = parseInt(payload.copies) || 0;
 
       // Auto-compute status from copies
-      payload.status = parseInt(payload.copies) > 0 ? 'Available' : 'Borrowed';
+      payload.status = newCopiesCount > 0 ? 'Available' : 'Borrowed';
 
       // Upload images via supabaseAdmin (bypasses storage RLS)
       if (coverFile) {
@@ -289,23 +298,70 @@ function BookFormModal({ book, onClose, onSaved }) {
       if (abstractData) {
         payload.abstract_text = JSON.stringify(abstractData);
       }
-      // Generate + upload QR
+      // Generate + upload one representative QR (for the book record itself, Copy 1)
       const qrValue = form.isbn?.trim() || form.title?.trim();
       if (qrValue) {
-        setQrProgress('Generating QR…');
+        setQrProgress('Generating book QR…');
         payload.qr_code_url = await generateAndUploadQR(qrValue);
         setQrProgress('');
       }
 
       const { id, ...rest } = payload;
+      let bookId = id;
 
-      // supabaseAdmin uses the service-role key — fully bypasses RLS on the books table
+      // ── Upsert book record ────────────────────────────────────────────────────
       if (isEdit) {
         const { error } = await supabaseAdmin.from('books').update(rest).eq('id', id);
         if (error) throw error;
       } else {
-        const { error } = await supabaseAdmin.from('books').insert(rest);
+        const { data: inserted, error } = await supabaseAdmin
+          .from('books').insert(rest).select('id').single();
         if (error) throw error;
+        bookId = inserted.id;
+      }
+
+      // ── Manage book_copies ────────────────────────────────────────────────────
+      // Fetch existing copies for this book (if editing) so we don't overwrite them
+      let existingCopyNumbers = [];
+      if (isEdit && bookId) {
+        const { data: existingCopies } = await supabaseAdmin
+          .from('book_copies')
+          .select('copy_number')
+          .eq('book_id', bookId)
+          .order('copy_number', { ascending: true });
+        existingCopyNumbers = (existingCopies || []).map(c => c.copy_number);
+      }
+
+      // Determine how many new copies to create (only add; never delete existing)
+      const nextCopyNumber = existingCopyNumbers.length > 0
+        ? Math.max(...existingCopyNumbers) + 1
+        : 1;
+      const copiesToCreate = Math.max(0, newCopiesCount - existingCopyNumbers.length);
+
+      if (copiesToCreate > 0) {
+        setQrProgress(`Generating ${copiesToCreate} copy QR code${copiesToCreate > 1 ? 's' : ''}…`);
+        const copyRows = [];
+        for (let i = 0; i < copiesToCreate; i++) {
+          const copyNum  = nextCopyNumber + i;
+          const copyId   = generateUUID();                          // globally unique copy ID
+          const { dataUrl } = await generateCopyQR(copyId, copyNum);
+
+          // Upload QR image to storage
+          const qrBlob  = await (await fetch(dataUrl)).blob();
+          const qrFile  = new File([qrBlob], `qr_${copyId}.png`, { type: 'image/png' });
+          const qrUrl   = await uploadImage(qrFile, 'qrcodes');
+
+          copyRows.push({
+            book_id:      bookId,
+            copy_id:      copyId,          // UUID — globally unique
+            copy_number:  copyNum,         // sequential within this book
+            qr_code_url:  qrUrl,
+            status:       'Available',
+          });
+        }
+        const { error: copyErr } = await supabaseAdmin.from('book_copies').insert(copyRows);
+        if (copyErr) throw copyErr;
+        setQrProgress('');
       }
 
       onSaved();
@@ -575,7 +631,7 @@ function BookFormModal({ book, onClose, onSaved }) {
             </div>
           )}
           <p style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 4 }}>
-            A QR code will be auto-generated from the ISBN (or title if no ISBN) and saved to storage.
+            A unique QR code will be auto-generated for <strong>each copy</strong> using a globally unique Copy ID (UUID). Copies are tracked individually in the <code>book_copies</code> table.
           </p>
         </div>
 
@@ -644,15 +700,61 @@ function ViewModal({ book, onClose, onEdit }) {
     if (copyQRs.length === 0) {
       setGeneratingCopyQRs(true);
       try {
-        const results = [];
-        for (let i = 1; i <= copies; i++) {
-          const { dataUrl, label } = await generateCopyQR(book.isbn, i, book.title);
-          results.push({ dataUrl, label, copyNum: i });
+        // Step 1: Load existing book_copies rows via admin client (bypasses RLS)
+        const { data: dbCopies, error } = await supabaseAdmin
+          .from('book_copies')
+          .select('copy_id, copy_number, qr_code_url, status')
+          .eq('book_id', book.id)
+          .order('copy_number', { ascending: true });
+
+        if (error) throw error;
+
+        let allCopies = dbCopies || [];
+
+        // Step 2: If book_copies rows are missing (book added before this feature),
+        // auto-create them now so QR codes are stable from this point on.
+        if (allCopies.length < copies) {
+          const existingNums = allCopies.map(c => c.copy_number);
+          const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+          const toCreate = copies - allCopies.length;
+          const newRows = [];
+
+          for (let i = 0; i < toCreate; i++) {
+            const copyNum = nextNum + i;
+            const copyId  = generateUUID();
+            // Generate QR and upload it
+            const { dataUrl } = await generateCopyQR(copyId, copyNum);
+            const qrBlob  = await (await fetch(dataUrl)).blob();
+            const qrFile  = new File([qrBlob], `qr_${copyId}.png`, { type: 'image/png' });
+            const qrUrl   = await uploadImage(qrFile, 'qrcodes');
+            newRows.push({ book_id: book.id, copy_id: copyId, copy_number: copyNum,
+                           qr_code_url: qrUrl, status: 'Available' });
+          }
+
+          const { data: inserted, error: insErr } = await supabaseAdmin
+            .from('book_copies').insert(newRows).select('copy_id, copy_number, qr_code_url, status');
+          if (insErr) throw insErr;
+          allCopies = [...allCopies, ...(inserted || [])];
         }
+
+        // Step 3: Always regenerate QR locally from copy_id — avoids CORS/broken URL issues.
+        // The copy_id is the stable, unique value that the scanner reads.
+        const results = await Promise.all(allCopies.map(async (c) => {
+          const { dataUrl } = await generateCopyQR(c.copy_id, c.copy_number);
+          return {
+            dataUrl,                  // freshly generated from copy_id — always works
+            label:       c.copy_id,
+            copyNum:     c.copy_number,
+            copy_id:     c.copy_id,
+            status:      c.status,
+            qr_code_url: c.qr_code_url,
+          };
+        }));
+
         setCopyQRs(results);
-        setSelectedCopyQR(results[0]);
-      } catch {
-        // fallback to stored QR
+        if (results.length > 0) setSelectedCopyQR(results[0]);
+      } catch (err) {
+        console.error('[Book_Catalog] QR modal error:', err);
       } finally {
         setGeneratingCopyQRs(false);
       }
@@ -687,7 +789,7 @@ function ViewModal({ book, onClose, onEdit }) {
       ctx.fillStyle = '#5A0000';
       ctx.font      = `${Math.round(11 * scale)}px monospace`;
       ctx.textAlign = 'center';
-      ctx.fillText(qr.label, canvas.width / 2, canvas.height - Math.round(10 * scale));
+      ctx.fillText(`Copy #${qr.copyNum} | ${(qr.copy_id || qr.label).slice(0, 8)}…`, canvas.width / 2, canvas.height - Math.round(10 * scale));
 
       const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
       const quality  = format === 'jpg' ? 0.96 : undefined;
@@ -697,7 +799,7 @@ function ViewModal({ book, onClose, onEdit }) {
         const url = URL.createObjectURL(blob);
         const a   = document.createElement('a');
         a.href    = url;
-        a.download = `LIBRASCAN_${qr.label}.${format}`;
+        a.download = `LIBRASCAN_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -708,7 +810,7 @@ function ViewModal({ book, onClose, onEdit }) {
       // Fallback: direct dataUrl download if canvas fails (e.g. CORS)
       const a   = document.createElement('a');
       a.href    = qr.dataUrl;
-      a.download = `LIBRASCAN_${qr.label}.${format}`;
+      a.download = `LIBRASCAN_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1165,7 +1267,7 @@ function ViewModal({ book, onClose, onEdit }) {
                   QR Codes — {copies} {copies === 1 ? 'Copy' : 'Copies'}
                 </h3>
                 <p style={{ fontSize: 11, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)' }}>
-                  Each copy has a unique QR: ISBN + Copy Number
+                  Each copy has a unique QR: encodes its Copy ID (UUID)
                 </p>
               </div>
               <button onClick={() => setQrModalOpen(false)} style={{
@@ -1192,7 +1294,7 @@ function ViewModal({ book, onClose, onEdit }) {
                     <span style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center' }}>Generating…</span>
                   </div>
                 ) : copyQRs.map(qr => (
-                  <button key={qr.copyNum} onClick={() => setSelectedCopyQR(qr)} style={{
+                  <button key={qr.copy_id || qr.copyNum} onClick={() => setSelectedCopyQR(qr)} style={{
                     width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 12,
                     fontFamily: 'var(--font-sans)', cursor: 'pointer', textAlign: 'left',
                     border: selectedCopyQR?.copyNum === qr.copyNum ? '1px solid rgba(139,0,0,0.30)' : '1px solid transparent',
@@ -1202,6 +1304,13 @@ function ViewModal({ book, onClose, onEdit }) {
                     marginBottom: 2, transition: 'all 0.15s',
                   }}>
                     Copy #{qr.copyNum}
+                    {qr.status && (
+                      <span style={{
+                        display: 'block', fontSize: 9.5, marginTop: 1,
+                        color: qr.status === 'Available' ? '#5a9e5c' : '#c0564e',
+                        fontWeight: 400,
+                      }}>{qr.status}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -1214,12 +1323,21 @@ function ViewModal({ book, onClose, onEdit }) {
                   <>
                     <img src={selectedCopyQR.dataUrl} alt={selectedCopyQR.label}
                       style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 10, border: '1px solid rgba(139,0,0,0.12)' }} />
-                    <div style={{
-                      fontFamily: 'monospace', fontSize: 11.5, color: 'var(--text-muted)',
-                      background: 'rgba(139,0,0,0.05)', padding: '5px 14px', borderRadius: 6,
-                      border: '1px solid rgba(139,0,0,0.10)',
-                    }}>
-                      {selectedCopyQR.label}
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{
+                        fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                        color: 'var(--maroon-mid)', marginBottom: 4,
+                      }}>
+                        Copy #{selectedCopyQR.copyNum}
+                      </div>
+                      <div style={{
+                        fontFamily: 'monospace', fontSize: 10, color: 'var(--text-dim)',
+                        background: 'rgba(139,0,0,0.05)', padding: '4px 12px', borderRadius: 6,
+                        border: '1px solid rgba(139,0,0,0.10)', wordBreak: 'break-all',
+                        maxWidth: 260,
+                      }}>
+                        ID: {selectedCopyQR.copy_id || selectedCopyQR.label}
+                      </div>
                     </div>
                     {/* Download buttons */}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -1467,15 +1585,8 @@ export default function Book_Catalog() {
     <div className="lm-module">
       <Toast message={toast.msg} type={toast.type} />
 
-      {/* ── Header ── */}
-      <div className="lm-module-header">
-        <div>
-          <h2 className="lm-module-title">Book Catalog</h2>
-          <p className="lm-module-subtitle">
-            Manage the library's full collection — add, edit, view, and remove records.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+      {/* ── Header Actions ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 20 }}>
           <button onClick={fetchBooks} title="Refresh" style={{
             padding: '9px 11px', borderRadius: 8, fontSize: 12,
             border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
@@ -1500,7 +1611,6 @@ export default function Book_Catalog() {
           >
             {Ic.plus} Add Book
           </button>
-        </div>
       </div>
 
       {/* ── Summary Chips ── */}

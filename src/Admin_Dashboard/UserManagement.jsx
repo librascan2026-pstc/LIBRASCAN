@@ -481,14 +481,8 @@ export default function UserManagement({ onStatsRefresh }) {
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
 
-      {/* ── Header ── */}
-      <div className="lm-module-header">
-        <div>
-          <h2 className="lm-module-title">User Management</h2>
-          <p className="lm-module-subtitle">
-            Manage all accounts. Students may self-register; only Library Managers can create manager accounts.
-          </p>
-        </div>
+      {/* ── Header Actions ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
         <button
           className="lm-btn lm-btn--primary"
           style={{ gap: 7 }}
