@@ -9,6 +9,16 @@ const PSU_DOMAIN   = '@pampangastateu.edu.ph';
 const FONT_BODY    = "'Crimson Pro', Georgia, serif";
 const FONT_SANS    = "'Josefin Sans', sans-serif";
 
+// ── PSU Programs List ─────────────────────────────────────────────────────────
+const PSU_PROGRAMS = [
+
+  'BS Information Technology',
+  'BS Education',
+  'BS Business Administration',
+  'BS Entrepreneurship',
+  
+];
+
 // ── Shared UI ─────────────────────────────────────────────────────────────────
 function PrimaryButton({ loading, children, style = {} }) {
   return (
@@ -64,6 +74,7 @@ function ErrorBox({ message }) {
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
 const USERNAME_REGEX    = /^[A-Za-z0-9_\-]+$/;
+const STUDENT_NO_REGEX  = /^\d{4}-\d{5,7}$/; // e.g. 2023-12345 or 2023-9293210
 
 // ── Per-field validators ──────────────────────────────────────────────────────
 const validators = {
@@ -92,6 +103,15 @@ const validators = {
     if (v.trim().length < 3)        return 'At least 3 characters required.';
     if (v.trim().length > 30)       return 'Max 30 characters.';
     if (!USERNAME_REGEX.test(v.trim())) return 'Letters, numbers, _ or - only.';
+    return '';
+  },
+  studentNumber: (v) => {
+    if (!v.trim())                       return 'Student number is required.';
+    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYY-NNNNNNN (e.g. 2023-9293210).';
+    return '';
+  },
+  program: (v) => {
+    if (!v || v === '')  return 'Please select your program.';
     return '';
   },
   email: (v) => {
@@ -149,7 +169,7 @@ function StrengthBar({ password }) {
   );
 }
 
-// ── Compact field component with inline label error ───────────────────────────
+// ── Compact field component ───────────────────────────────────────────────────
 function Field({ label, type = 'text', value, onChange, onBlur, placeholder, error, disabled, autoComplete }) {
   const [show,    setShow]    = useState(false);
   const [focused, setFocused] = useState(false);
@@ -175,10 +195,10 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
           {hasError && (
             <motion.span
               key="err"
-              initial={{ opacity: 0, x: 6 }}
+              initial={{ opacity: 0, x: 4 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0 }}
-              style={{ fontSize: 9, fontFamily: FONT_BODY, color: '#b03020', fontStyle: 'italic' }}
+              style={{ fontSize: 8.5, color: '#b03020', fontFamily: FONT_BODY, fontStyle: 'italic' }}
             >
               {error}
             </motion.span>
@@ -190,31 +210,28 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
           type={inputType}
           value={value}
           onChange={onChange}
-          onBlur={(e) => { setFocused(false); onBlur && onBlur(e); }}
+          onBlur={onBlur}
           onFocus={() => setFocused(true)}
           placeholder={placeholder}
           disabled={disabled}
           autoComplete={autoComplete}
           style={{
-            width: '100%', boxSizing: 'border-box',
-            padding: isPassword ? '6px 32px 6px 11px' : '6px 11px',
-            borderRadius: 18,
-            border: `1.5px solid ${borderColor}`,
-            background: hasError
-              ? 'rgba(176,48,32,0.04)'
-              : disabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
-            color: '#2d1000', fontSize: 11.5,
+            width: '100%',
+            padding: isPassword ? '7px 32px 7px 12px' : '7px 12px',
+            borderRadius: 18, border: `1.5px solid ${borderColor}`,
+            background: disabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+            color: '#2d1000', fontSize: 12,
             fontFamily: FONT_BODY, outline: 'none',
-            transition: 'border-color 0.16s, background 0.16s',
+            boxSizing: 'border-box',
             cursor: disabled ? 'not-allowed' : 'text',
+            transition: 'border-color 0.16s',
           }}
         />
         {isPassword && (
           <button type="button" onClick={() => setShow(s => !s)} tabIndex={-1} style={{
-            position: 'absolute', right: 9, top: '50%', transform: 'translateY(-50%)',
+            position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
             background: 'none', border: 'none', cursor: 'pointer',
-            color: hasError ? '#b03020' : '#8B4513', padding: 0, opacity: 0.7,
-            display: 'flex', alignItems: 'center',
+            color: '#8B4513', display: 'flex', alignItems: 'center', padding: 0, opacity: 0.72,
           }}>
             {show
               ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -227,8 +244,88 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
   );
 }
 
+// ── Select field component ────────────────────────────────────────────────────
+function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder }) {
+  const [focused, setFocused] = useState(false);
+  const hasError = Boolean(error);
+  const borderColor = hasError ? 'rgba(176,48,32,0.8)' : focused ? '#8B0000' : 'rgba(139,70,20,0.28)';
+
+  return (
+    <div style={{ marginBottom: 7 }}>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+        marginBottom: 3,
+      }}>
+        <span style={{
+          fontSize: 8.5, fontWeight: 700, fontFamily: FONT_SANS,
+          letterSpacing: '0.1em', textTransform: 'uppercase',
+          color: hasError ? '#b03020' : '#5a2800',
+        }}>
+          {label}
+        </span>
+        <AnimatePresence>
+          {hasError && (
+            <motion.span
+              key="err"
+              initial={{ opacity: 0, x: 4 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0 }}
+              style={{ fontSize: 8.5, color: '#b03020', fontFamily: FONT_BODY, fontStyle: 'italic' }}
+            >
+              {error}
+            </motion.span>
+          )}
+        </AnimatePresence>
+      </div>
+      <div style={{ position: 'relative' }}>
+        <select
+          value={value}
+          onChange={onChange}
+          onBlur={onBlur}
+          onFocus={() => setFocused(true)}
+          disabled={disabled}
+          style={{
+            width: '100%',
+            padding: '7px 32px 7px 12px',
+            borderRadius: 18,
+            border: `1.5px solid ${borderColor}`,
+            background: disabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+            color: value ? '#2d1000' : '#9a7040',
+            fontSize: 12,
+            fontFamily: FONT_BODY,
+            outline: 'none',
+            boxSizing: 'border-box',
+            cursor: disabled ? 'not-allowed' : 'pointer',
+            transition: 'border-color 0.16s',
+            appearance: 'none',
+            WebkitAppearance: 'none',
+          }}
+        >
+          <option value="" disabled>{placeholder || 'Select…'}</option>
+          {options.map(opt => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+        {/* Dropdown arrow */}
+        <div style={{
+          position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)',
+          pointerEvents: 'none', color: '#8B4513', opacity: 0.65,
+        }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Component ────────────────────────────────────────────────────────────
-const EMPTY = { firstName: '', lastName: '', middleName: '', username: '', email: '', password: '', confirm: '' };
+const EMPTY = {
+  firstName: '', lastName: '', middleName: '', username: '',
+  studentNumber: '', program: '',
+  email: '', password: '', confirm: '',
+};
 
 export default function SignupPage({ onGoLogin, onGoLanding }) {
   const [form,        setForm]    = useState(EMPTY);
@@ -250,7 +347,6 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         : validators[field]?.(val) ?? '';
       setFE(fe => ({ ...fe, [field]: err }));
     }
-    // Keep confirm in sync when password changes
     if (field === 'password' && touched.confirm) {
       const err = validators.confirm(form.confirm, { ...form, password: val });
       setFE(fe => ({ ...fe, confirm: err }));
@@ -281,13 +377,19 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     if (Object.keys(errs).length) return;
     setLoad(true);
 
+    // ── Step 1: Create auth user ──────────────────────────────────────────────
     const { data: sd, error: authErr } = await supabase.auth.signUp({
       email: form.email.trim().toLowerCase(),
       password: form.password,
       options: {
         data: {
-          first_name: form.firstName.trim(), last_name: form.lastName.trim(),
-          middle_name: form.middleName.trim(), username: form.username.trim(), role: 'student',
+          first_name:     form.firstName.trim(),
+          last_name:      form.lastName.trim(),
+          middle_name:    form.middleName.trim(),
+          username:       form.username.trim(),
+          student_number: form.studentNumber.trim(),
+          program:        form.program,
+          role:           'student',
         },
         emailRedirectTo: `${window.location.origin}/`,
       },
@@ -300,15 +402,28 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         : authErr.message);
       return;
     }
+
+    // ── Step 2: Upsert profiles row (includes student_number & program) ────────
     if (sd?.user) {
-      await supabase.from('profiles').upsert({
-        id: sd.user.id,
-        first_name: form.firstName.trim(), last_name: form.lastName.trim(),
-        middle_name: form.middleName.trim(), username: form.username.trim(),
-        email: form.email.trim().toLowerCase(), role: 'student',
-        updated_at: new Date().toISOString(),
+      const { error: profileErr } = await supabase.from('profiles').upsert({
+        id:             sd.user.id,
+        first_name:     form.firstName.trim(),
+        last_name:      form.lastName.trim(),
+        middle_name:    form.middleName.trim(),
+        username:       form.username.trim(),
+        email:          form.email.trim().toLowerCase(),
+        student_number: form.studentNumber.trim(),
+        program:        form.program,
+        role:           'student',
+        updated_at:     new Date().toISOString(),
       }, { onConflict: 'id' });
+
+      if (profileErr) {
+        // Non-fatal: auth succeeded, profile write failed (RLS or missing column)
+        console.error('[SignupPage] profiles upsert error:', profileErr.message);
+      }
     }
+
     setLoad(false);
     setOk(true);
   };
@@ -364,6 +479,29 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         {/* Username */}
         <Field label="Username" value={form.username} onChange={handleChange('username')} onBlur={handleBlur('username')} placeholder="Enter your username" error={fieldErrors.username} autoComplete="username" disabled={loading} />
 
+        {/* Student Number — NEW */}
+        <Field
+          label="Student Number"
+          value={form.studentNumber}
+          onChange={handleChange('studentNumber')}
+          onBlur={handleBlur('studentNumber')}
+          placeholder="e.g. 2023-9293210"
+          error={fieldErrors.studentNumber}
+          disabled={loading}
+        />
+
+        {/* Program — NEW */}
+        <SelectField
+          label="Program / Course"
+          value={form.program}
+          onChange={handleChange('program')}
+          onBlur={handleBlur('program')}
+          placeholder="Select your program"
+          error={fieldErrors.program}
+          disabled={loading}
+          options={PSU_PROGRAMS}
+        />
+
         {/* Email */}
         <Field label="Email Address" type="email" value={form.email} onChange={handleChange('email')} onBlur={handleBlur('email')} placeholder={`e.g 2023929321${PSU_DOMAIN}`} error={fieldErrors.email} autoComplete="email" disabled={loading} />
 
@@ -372,7 +510,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         <StrengthBar password={form.password} />
 
         {/* Confirm Password */}
-        <Field label="Confirm Password" type="password" value={form.confirm} onChange={handleChange('confirm')} onBlur={handleBlur('confirm')} placeholder="Enter your password" error={fieldErrors.confirm} autoComplete="new-password" disabled={loading} />
+        <Field label="Confirm Password" type="password" value={form.confirm} onChange={handleChange('confirm')} onBlur={handleBlur('confirm')} placeholder="Re-enter your password" error={fieldErrors.confirm} autoComplete="new-password" disabled={loading} />
 
         {/* Password hint */}
         <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 7, padding: '5px 10px', fontSize: 9.5, fontFamily: FONT_BODY, color: '#5a3010', marginBottom: 4, lineHeight: 1.55 }}>

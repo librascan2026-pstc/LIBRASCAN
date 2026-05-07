@@ -1,22 +1,3 @@
-// src/Admin_Dashboard/BookManagement.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// BOOK MANAGEMENT — Borrow & Return via QR Scanning
-//
-// ✅ Fixed borrow/return logic — copies count adjusts in books table
-// ✅ Correct status: borrowed_at ≠ returned_at, returned_at only set on return
-// ✅ Mobile confirmation popup before saving + success/error sounds
-// ✅ Borrow limit (configurable) enforced on both desktop & mobile
-// ✅ Student account credentials saved in transaction
-// ✅ Maroon + Cream table, Maroon + Gold cards design
-//
-// Supabase tables:
-//   • books       — id, title, isbn, authors, cover_image_url, copies, status
-//   • book_copies — copy_id (uuid), book_id (uuid), copy_number, qr_code_url, status
-//   • borrowings  — id, student_id, student_name, student_program,
-//                   book_id, book_title, copy_label (stores copy_id UUID),
-//                   status, borrowed_at, returned_at, date
-//   • profiles    — id, first_name, last_name, middle_name, username, email, role, program
-// ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
@@ -224,7 +205,7 @@ function ConfirmPopup({ data, onConfirm, onCancel }) {
           <div style={{ marginBottom:14 }}>
             <div style={{ fontSize:10.5, fontWeight:700, color:MAR, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Student</div>
             <div style={{ fontSize:14.5, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>{data.student_name}</div>
-            <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{data.student_id} {data.student_program ? `· ${data.student_program}` : ''}</div>
+            <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{data.student_program || ''}</div>
           </div>
 
           {/* Book */}
@@ -572,8 +553,12 @@ function DetailModal({ tx, onClose }) {
               <span style={{ color:MAR }}>{Ic.user}</span>
               <span style={{ fontFamily:"'Cinzel', serif", fontSize:12, color:MAR, letterSpacing:'0.08em', textTransform:'uppercase', fontWeight:700 }}>Student Information</span>
             </div>
-            <DRow label="ID No."   value={tx.student_id}      mono />
-            <DRow label="Name"     value={tx.student_name} />
+            <DRow label="Student No."   value={(() => {
+              const embedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
+              const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim()) ? String(tx.student_id).trim() : null;
+              return embedded || fromId || '—';
+            })()} mono />
+            <DRow label="Name"     value={(tx.student_name || '').replace(/\s*\[.*?\]\s*$/, '') || '—'} />
             <DRow label="Program"  value={tx.student_program} />
             {tx.student_email && <DRow label="Email" value={tx.student_email} mono />}
           </div>
@@ -620,10 +605,21 @@ function TxRow({ tx, onClick, onDelete }) {
       }}
     >
       <td style={{ padding:'11px 14px' }}>
-        <span style={{ fontSize:12, fontFamily:'monospace', color:'#7a4040', letterSpacing:'0.04em', fontWeight:600 }}>{tx.student_id || '—'}</span>
+        {(() => {
+          // student_number is embedded in student_name as "NAME [2023-12345]"
+          // Also check student_id in case it's a readable number (not UUID)
+          const nameField = String(tx.student_name || '');
+          const embedded = nameField.match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
+          const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim())
+            ? String(tx.student_id).trim() : null;
+          const displayId = embedded || fromId || null;
+          return displayId
+            ? <span style={{ fontSize:12, fontFamily:'monospace', color:'#7a4040', letterSpacing:'0.04em', fontWeight:600 }}>{displayId}</span>
+            : <span style={{ fontSize:11.5, color:'#b08080', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>no ID recorded</span>;
+        })()}
       </td>
       <td style={{ padding:'11px 14px' }}>
-        <span style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>{tx.student_name || '—'}</span>
+        <span style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>{(tx.student_name || '—').replace(/\s*\[.*?\]\s*$/, '')}</span>
         {tx.student_program && <div style={{ fontSize:10.5, color:'#9a7070', fontFamily:'var(--font-sans)', marginTop:1 }}>{tx.student_program}</div>}
       </td>
       <td style={{ padding:'11px 14px', maxWidth:190 }}>
@@ -698,7 +694,7 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
       setStudentData(data);
       showToast(`Found: ${data.full_name}`, 'success');
     } else {
-      showToast('Student ID not found in system', 'error');
+      showToast('Student Number not found in system', 'error');
       setStudentData(null);
     }
   };
@@ -848,7 +844,7 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
 
         {/* Student lookup */}
         <div style={{ marginBottom:14 }}>
-          <div style={{ fontSize:10.5, fontWeight:700, color:G, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Student ID Number</div>
+          <div style={{ fontSize:10.5, fontWeight:700, color:G, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Student Number</div>
           <div style={{ display:'flex', gap:8 }}>
             <input
               style={fieldStyle}
@@ -973,7 +969,49 @@ export default function BookManagement() {
     setLoadingTx(false);
   }, []);
 
-  useEffect(() => { loadTransactions(); }, [loadTransactions]);
+  // ── Sync copy statuses from active borrowings (repair stale data) ──────────
+  // Runs once on mount. Fixes copies that show "Borrowed" in book_copies but
+  // have no active borrowing row — e.g. after a failed scan or manual DB edit.
+  const syncCopyStatuses = useCallback(async () => {
+    try {
+      // Get all book_copies rows
+      const { data: allCopies } = await supabaseAdmin
+        .from('book_copies').select('copy_id, book_id, status');
+      if (!allCopies?.length) return;
+
+      // Get all currently active borrowings (status = 'Borrowed')
+      const { data: activeBorrowings } = await supabaseAdmin
+        .from('borrowings').select('copy_label').eq('status', 'Borrowed');
+      const activeCopyIds = new Set((activeBorrowings || []).map(b => b.copy_label).filter(Boolean));
+
+      // Find copies marked Borrowed but with no active borrowing — reset them
+      const stale = allCopies.filter(c => c.status === 'Borrowed' && !activeCopyIds.has(c.copy_id));
+      for (const copy of stale) {
+        await supabaseAdmin.from('book_copies')
+          .update({ status: 'Available' }).eq('copy_id', copy.copy_id);
+        console.log('[sync] Reset stale copy to Available:', copy.copy_id);
+      }
+
+      // Also resync books.copies (total) and books.status for all affected books
+      const affectedBookIds = [...new Set([...allCopies.map(c => c.book_id)])];
+      for (const bookId of affectedBookIds) {
+        const bookCopies = allCopies.map(c =>
+          stale.find(s => s.copy_id === c.copy_id) ? { ...c, status: 'Available' } : c
+        ).filter(c => c.book_id === bookId);
+        const total     = bookCopies.length;
+        const available = bookCopies.filter(c => c.status === 'Available').length;
+        await supabaseAdmin.from('books').update({
+          copies:           total,
+          available_copies: available,
+          status:           available === 0 ? 'Borrowed' : 'Available',
+        }).eq('id', bookId);
+      }
+    } catch (e) {
+      console.warn('[syncCopyStatuses] error:', e.message);
+    }
+  }, []);
+
+  useEffect(() => { loadTransactions(); syncCopyStatuses(); }, [loadTransactions, syncCopyStatuses]);
 
   useEffect(() => {
     const ch = supabase.channel('borrowings-rt')
@@ -1009,20 +1047,29 @@ export default function BookManagement() {
       return;
     }
 
-    // profiles schema: first_name, last_name, username (no id_no column)
-    // Try to match by username = id_no, or by first+last name as fallback
+    // profiles schema: first_name, last_name, middle_name, username, student_number, program
+    // Try to match by student_number first, then username, then name fallback
     let profile = null;
     if (parsed.id_no) {
-      const { data: byUsername } = await supabase
+      // 1. Try student_number column (the dedicated human-readable ID field)
+      const { data: byStudentNo } = await supabaseAdmin
         .from('profiles').select('*')
-        .eq('username', parsed.id_no).maybeSingle();
-      profile = byUsername;
+        .eq('student_number', parsed.id_no).maybeSingle();
+      profile = byStudentNo;
+
+      // 2. Fallback: try username column (some setups store student ID there)
+      if (!profile) {
+        const { data: byUsername } = await supabaseAdmin
+          .from('profiles').select('*')
+          .eq('username', parsed.id_no).maybeSingle();
+        profile = byUsername;
+      }
     }
     if (!profile && parsed.full_name) {
       const parts = parsed.full_name.trim().split(/\s+/);
       const firstName = parts[0] || '';
       const lastName  = parts[parts.length - 1] || '';
-      const { data: byName } = await supabase
+      const { data: byName } = await supabaseAdmin
         .from('profiles').select('*')
         .ilike('first_name', firstName + '%')
         .ilike('last_name',  lastName  + '%')
@@ -1031,15 +1078,22 @@ export default function BookManagement() {
     }
 
     // Normalise: always expose id_no and full_name regardless of source
+    // id_no must be the human-readable student number (never a UUID)
     const studentData = profile
       ? {
           ...profile,
-          id_no:     profile.username || parsed.id_no || profile.id,
+          // Priority: student_number column → username (if not UUID) → QR-parsed id_no
+          id_no: (() => {
+            if (profile.student_number && !UUID_RE.test(String(profile.student_number))) return String(profile.student_number).trim();
+            if (profile.username && !UUID_RE.test(String(profile.username))) return String(profile.username).trim();
+            if (parsed.id_no && !UUID_RE.test(String(parsed.id_no))) return String(parsed.id_no).trim();
+            return ''; // no readable number available
+          })(),
           full_name: [profile.first_name, profile.middle_name, profile.last_name]
                        .filter(Boolean).join(' ').trim() || parsed.full_name,
           program:   profile.program || parsed.program || '',
         }
-      : parsed; // fallback: use QR-parsed values directly
+      : { ...parsed, id_no: parsed.id_no || '' }; // fallback: use QR-parsed values directly
 
     setStudent(studentData);
     setStep(1);
@@ -1047,6 +1101,7 @@ export default function BookManagement() {
   }, [showToast]);
 
   // ── Process book scan ────────────────────────────────────────────────────
+  // FIX: Complete rewrite of borrow/return detection and student_number saving
   const processBookScan = useCallback(async (raw) => {
     if (!student) { setStep(0); return; }
     const parsed = parseBookQR(raw);
@@ -1065,18 +1120,15 @@ export default function BookManagement() {
     try {
       // ── Book lookup cascade ──────────────────────────────────────────────
       let bookRecord = null;
-      let resolvedCopyId   = null;   // UUID from book_copies (if found)
-      let resolvedCopyNum  = null;   // copy_number from book_copies
+      let resolvedCopyId  = null;
+      let resolvedCopyNum = null;
 
       if (parsed.isCopyId) {
-        // ── NEW: QR encodes a copy_id UUID → look up book_copies first ────
-        // Always use supabaseAdmin to bypass RLS on book_copies table
         const { data: copyRow } = await supabaseAdmin
           .from('book_copies')
           .select('copy_id, copy_number, book_id, status')
           .eq('copy_id', parsed.copy_id)
           .maybeSingle();
-
         if (copyRow) {
           resolvedCopyId  = copyRow.copy_id;
           resolvedCopyNum = copyRow.copy_number;
@@ -1087,20 +1139,14 @@ export default function BookManagement() {
       }
 
       if (!bookRecord && !parsed.isCopyId) {
-        // ── LEGACY: try ISBN match ──────────────────────────────────────
         const { data: byIsbn } = await supabaseAdmin.from('books').select('*').eq('isbn', parsed.base).maybeSingle();
         bookRecord = byIsbn;
       }
       if (!bookRecord && !parsed.isCopyId) {
-        // ── LEGACY: try books.id UUID match ────────────────────────────
         if (UUID_RE.test(parsed.base)) {
           const { data: byId } = await supabaseAdmin.from('books').select('*').eq('id', parsed.base).maybeSingle();
           bookRecord = byId;
         }
-      }
-      if (!bookRecord && !parsed.isCopyId) {
-        const { data: rows } = await supabaseAdmin.from('books').select('*').ilike('title', parsed.base);
-        bookRecord = rows?.[0] || null;
       }
       if (!bookRecord && !parsed.isCopyId) {
         const { data: rows } = await supabaseAdmin.from('books').select('*').ilike('title', `%${parsed.base}%`);
@@ -1115,144 +1161,248 @@ export default function BookManagement() {
 
       const bookId    = String(bookRecord.id);
       const bookTitle = bookRecord.title;
-      // copy_label: store the copy_id UUID directly for new-format QRs (clean, unambiguous)
-      // For legacy QRs, fall back to the old label or base string
-      const copyLabel = resolvedCopyId
-        ? resolvedCopyId
-        : (parsed.copyLabel || parsed.base);
+      const copyLabel = resolvedCopyId ? resolvedCopyId : (parsed.copyLabel || parsed.base);
 
-      // ── Find any open borrow for this exact physical copy ─────────────────
-      // CRITICAL: use supabaseAdmin to bypass RLS — without this, the query
-      // always returns empty and every scan is treated as a new borrow.
-      // We query by copy_label (copy_id UUID) only, then match the student
-      // client-side to handle all possible student_id formats.
-      const { data: openBorrowRows } = await supabaseAdmin
+      // ── FIX #1: Resolve the readable student number ─────────────────────
+      // Priority: profiles.student_number → QR-parsed id_no → profiles.username
+      // NEVER store a UUID as student_number.
+      const readableStudentNo = (() => {
+        const candidates = [
+          student.student_number,
+          student.id_no,
+          student.username,
+        ];
+        for (const c of candidates) {
+          const s = String(c || '').trim();
+          if (s && !UUID_RE.test(s)) return s;
+        }
+        return '';
+      })();
+
+      // The profile UUID — used as the foreign key in borrowings.student_id_no
+      const studentUUID = (student.id && UUID_RE.test(String(student.id)))
+        ? String(student.id).trim()
+        : null;
+
+      console.log('[BookScan] copy_label:', copyLabel);
+      console.log('[BookScan] studentUUID:', studentUUID, '| studentNumber:', readableStudentNo, '| name:', student.full_name);
+
+      // ── FIX #2: Find open borrows for this EXACT copy ──────────────────
+      // DB column is student_id (uuid FK to profiles.id), NOT student_id_no.
+      // student_number is stored inside student_name as a prefix — see insert payload.
+      const { data: openBorrowRows, error: openBorrowErr } = await supabaseAdmin
         .from('borrowings')
-        .select('id, borrowed_at, book_id, copy_label, student_id, student_name')
+        .select('id, borrowed_at, book_id, copy_label, student_id, student_name, student_program')
         .eq('copy_label', copyLabel)
         .eq('status', 'Borrowed')
         .order('borrowed_at', { ascending: true })
         .limit(10);
 
-      // Match student by any identifier stored in profiles
-      const studentIdentifiers = [student.id_no, student.id, student.username]
-        .filter(Boolean).map(String);
+      if (openBorrowErr) {
+        console.warn('[BookScan] openBorrowRows error:', openBorrowErr.message);
+      }
 
-      const openBorrow = (openBorrowRows || []).find(row =>
-        studentIdentifiers.includes(String(row.student_id))
-      ) ?? null;
+      const allOpenRows = openBorrowRows || [];
+      console.log('[BookScan] open borrows for this copy:', allOpenRows.length, allOpenRows);
 
-      // Guard: copy is already borrowed by a DIFFERENT student
-      const borrowedByOther = !openBorrow && (openBorrowRows || []).length > 0
-        ? openBorrowRows[0] : null;
-      if (borrowedByOther) {
+      // ── FIX #3: Multi-strategy student matching ─────────────────────────
+      // Tries every possible identifier so return always triggers correctly.
+      const studentNameNorm = (student.full_name || '').trim().toLowerCase();
+
+      const existingBorrow = allOpenRows.find(row => {
+        // Strategy 1: Match by profile UUID in student_id column (most reliable)
+        if (studentUUID && UUID_RE.test(studentUUID)) {
+          const rowId = String(row.student_id || '').trim();
+          if (rowId === studentUUID) return true;
+        }
+        // Strategy 2: Match by readable student number embedded in student_name
+        // Format saved: "JUAN DELA CRUZ [2023-12345]"
+        if (readableStudentNo && row.student_name) {
+          if (row.student_name.includes(`[${readableStudentNo}]`)) return true;
+        }
+        // Strategy 3: Match by full name (unregistered students / QR-only)
+        if (studentNameNorm && row.student_name) {
+          const rowNameBase = row.student_name.replace(/\s*\[.*?\]\s*$/, '').trim().toLowerCase();
+          if (rowNameBase === studentNameNorm) return true;
+        }
+        return false;
+      }) ?? null;
+
+      console.log('[BookScan] existingBorrow:', existingBorrow);
+
+      // Guard: copy borrowed by a DIFFERENT student
+      if (!existingBorrow && allOpenRows.length > 0) {
+        const other = allOpenRows[0];
         playErrorSound();
-        showToast(`Copy already borrowed by ${borrowedByOther.student_name || 'another student'}.`, 'error');
-        setLastResult({ type:'error', message:`Copy already out — borrowed by ${borrowedByOther.student_name}`, time: new Date() });
+        showToast(`Copy already borrowed by ${other.student_name || 'another student'}.`, 'error');
+        setLastResult({ type:'error', message:`Copy already out — borrowed by ${other.student_name}`, time: new Date() });
         setStep(0); setStudent(null); processingRef.current = false; return;
       }
 
-      const existingBorrow = openBorrow;
-      const isBorrow = !existingBorrow; // no open record → borrow; has open record → return
-      const action   = isBorrow ? 'borrowed' : 'returned';
+      // Decision: no open record → Borrow; has open record → Return
+      const isBorrow = !existingBorrow;
+      console.log('[BookScan] action:', isBorrow ? 'BORROW' : 'RETURN');
 
-      // Inform admin what action is about to happen
       if (!isBorrow) {
-        showToast(`Returning: "${bookTitle}" — open borrow found, processing return…`, 'success');
-      }
-
-      // ── Hard guard: same QR already borrowed → must return first ─────────
-      // This is the single-scan-per-state rule:
-      //   Scan 1 (no open record) → Borrow
-      //   Scan 2 (open record exists) → Return
-      //   Scan 3 after return → new Borrow again (clean state)
-      if (!isBorrow && !existingBorrow) {
-        // Should never reach here, but safety net
-        playErrorSound();
-        showToast('No open borrow found for this copy.', 'error');
-        setStep(0); setStudent(null); processingRef.current = false; return;
+        showToast(`Returning: "${bookTitle}" — processing…`, 'success');
       }
 
       // ── Borrow limit check ───────────────────────────────────────────────
       if (isBorrow) {
-        // Use supabaseAdmin + in() to match any possible student identifier format
-        const { data: borrowedRows } = await supabaseAdmin
-          .from('borrowings')
-          .select('id', { count:'exact' })
-          .in('student_id', studentIdentifiers)
-          .eq('status', 'Borrowed');
-        const borrowCount = (borrowedRows || []).length;
-        if (borrowCount >= BORROW_LIMIT) {
+        let borrowedRows = [];
+        // Check by UUID using correct column name: student_id
+        if (studentUUID) {
+          const { data: byId } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .eq('student_id', studentUUID).eq('status', 'Borrowed');
+          borrowedRows = byId || [];
+        }
+        // Also check by name match (catches unregistered students or UUID mismatch)
+        if (student.full_name) {
+          const { data: byName } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .ilike('student_name', `${student.full_name.trim()}%`).eq('status', 'Borrowed');
+          const byNameRows = byName || [];
+          const seen = new Set(borrowedRows.map(r => r.id));
+          byNameRows.forEach(r => { if (!seen.has(r.id)) borrowedRows.push(r); });
+        }
+
+        if (borrowedRows.length >= BORROW_LIMIT) {
           playErrorSound();
           showToast(`Borrow limit reached — max ${BORROW_LIMIT} books allowed.`, 'error');
           setLastResult({ type:'error', message:`Borrow limit of ${BORROW_LIMIT} books reached.`, time: new Date() });
           setStep(0); setStudent(null); processingRef.current = false; return;
         }
-        // Also check copies available — re-fetch fresh count to avoid stale data
-        const { data: freshBook } = await supabaseAdmin
-          .from('books').select('copies').eq('id', bookRecord.id).maybeSingle();
-        const freshCopies = freshBook?.copies ?? bookRecord.copies ?? 0;
-        if (freshCopies <= 0) {
-          playErrorSound();
-          showToast('No copies available for this book.', 'error');
-          setLastResult({ type:'error', message:'No copies available.', time: new Date() });
-          setStep(0); setStudent(null); processingRef.current = false; return;
+
+        // Check this specific copy is actually Available (skip check if returning)
+        if (resolvedCopyId) {
+          const { data: thisCopy } = await supabaseAdmin
+            .from('book_copies').select('status').eq('copy_id', resolvedCopyId).maybeSingle();
+          if (thisCopy?.status === 'Borrowed') {
+            playErrorSound();
+            showToast('This copy is already borrowed. Scan a different copy.', 'error');
+            setLastResult({ type:'error', message:'Copy is already borrowed.', time: new Date() });
+            setStep(0); setStudent(null); processingRef.current = false; return;
+          }
         }
-        // Update bookRecord with fresh copy count
-        bookRecord = { ...bookRecord, copies: freshCopies };
       }
 
-      // ── Update book copies count ─────────────────────────────────────────
-      // Uses `copies` column (matches your schema)
-      const currentCopies = bookRecord.copies ?? 0;
-      const newCopies = isBorrow
-        ? Math.max(0, currentCopies - 1)
-        : currentCopies + 1;
-
-      const { error: bookUpdateErr } = await supabaseAdmin
-        .from('books')
-        .update({
-          copies: newCopies,
-          status: newCopies <= 0 ? 'Borrowed' : 'Available',
-        })
-        .eq('id', bookRecord.id);
-
-      if (bookUpdateErr) {
-        playErrorSound();
-        showToast(`Failed to update book copies: ${bookUpdateErr.message}`, 'error');
-        setStep(0); setStudent(null); processingRef.current = false; return;
-      }
-
-      // ── Also update the individual book_copies row status ────────────────
+      // ── FIX #4: Update the specific book_copies row status ──────────────
       if (resolvedCopyId) {
-        await supabaseAdmin
+        const { error: copyUpdateErr } = await supabaseAdmin
           .from('book_copies')
           .update({ status: isBorrow ? 'Borrowed' : 'Available' })
           .eq('copy_id', resolvedCopyId);
+        if (copyUpdateErr) {
+          playErrorSound();
+          showToast(`Failed to update copy status: ${copyUpdateErr.message}`, 'error');
+          setStep(0); setStudent(null); processingRef.current = false; return;
+        }
+        console.log('[BookScan] Updated book_copies status to:', isBorrow ? 'Borrowed' : 'Available');
+      }
+
+      // ── FIX #5: Recompute books table from book_copies (keeps catalog in sync) ──
+      // books.copies = total physical copies (never changes unless admin edits it)
+      // books.available_copies = how many are currently free
+      {
+        const { data: allCopies } = await supabaseAdmin
+          .from('book_copies').select('status').eq('book_id', bookRecord.id);
+        const totalCopies    = (allCopies || []).length;
+        const availableCount = (allCopies || []).filter(c => c.status === 'Available').length;
+        await supabaseAdmin.from('books').update({
+          copies:           totalCopies,    // total physical copies (unchanged by borrows)
+          available_copies: availableCount, // currently free copies
+          status:           availableCount === 0 ? 'Borrowed' : 'Available',
+        }).eq('id', bookRecord.id);
+        console.log('[BookScan] books table updated — total:', totalCopies, '| available:', availableCount);
       }
 
       if (isBorrow) {
         // ── INSERT new borrowing record ──────────────────────────────────
         const borrowedAt = nowISO();
+
+        // FIX: Use ACTUAL column names from borrowings schema.
+        // student_id = UUID FK (profiles.id)
+        // student_name stores "FULL NAME [student_number]" so we can display both
+        const studentNameWithNo = readableStudentNo
+          ? `${student.full_name} [${readableStudentNo}]`
+          : student.full_name;
+
         const txPayload = {
-          student_id:      student.id_no,
-          student_name:    student.full_name,
+          ...(studentUUID ? { student_id: studentUUID } : {}),
+          student_name:    studentNameWithNo,
           student_program: student.program || '',
           book_id:         bookId,
           book_title:      bookTitle,
           copy_label:      copyLabel,
           status:          'Borrowed',
           borrowed_at:     borrowedAt,
-          returned_at:     null,          // ← NOT set on borrow
+          returned_at:     null,
           date:            today(),
         };
+
+        console.log('[BookScan] Inserting borrowing:', txPayload);
 
         const { data: newTx, error: txErr } = await supabaseAdmin
           .from('borrowings').insert([txPayload]).select().single();
 
         if (txErr) {
-          // Rollback copies change
-          await supabaseAdmin.from('books').update({ copies: currentCopies }).eq('id', bookRecord.id);
+          console.error('[BookScan] Insert error:', txErr);
+
+          // Rollback book_copies
+          if (resolvedCopyId) {
+            await supabaseAdmin.from('book_copies')
+              .update({ status: 'Available' }).eq('copy_id', resolvedCopyId);
+          }
+          const { data: rollbackCopies } = await supabaseAdmin
+            .from('book_copies').select('status').eq('book_id', bookRecord.id);
+          const rbTotal = (rollbackCopies || []).length;
+          const rbAvail = (rollbackCopies || []).filter(c => c.status === 'Available').length;
+          await supabaseAdmin.from('books').update({
+            copies:           rbTotal,
+            available_copies: rbAvail,
+            status:           rbAvail === 0 ? 'Borrowed' : 'Available',
+          }).eq('id', bookRecord.id);
+
+          // FIX: If column doesn't exist yet, retry without unknown columns
+          // This lets the system work even before you run the SQL migration
+          const isColError = txErr.code === '42703' ||
+            txErr.message?.includes('column') ||
+            txErr.message?.includes('student_number') ||
+            txErr.message?.includes('student_id_no') ||
+            txErr.message?.includes('student_program');
+
+          if (isColError) {
+            console.warn('[BookScan] Column error — retrying with minimal payload');
+            // Retry with only columns guaranteed to exist in your schema
+            const minimalPayload = {
+              student_id:      studentUUID || undefined,
+              student_name:    studentNameWithNo,
+              student_program: student.program || '',
+              book_id:         bookId,
+              book_title:      bookTitle,
+              copy_label:      copyLabel,
+              status:          'Borrowed',
+              borrowed_at:     borrowedAt,
+              returned_at:     null,
+              date:            today(),
+            };
+            // Remove undefined keys
+            Object.keys(minimalPayload).forEach(k => minimalPayload[k] === undefined && delete minimalPayload[k]);
+            const { data: retryTx, error: retryErr } = await supabaseAdmin
+              .from('borrowings').insert([minimalPayload]).select().single();
+            if (!retryErr) {
+              playSuccessSound();
+              const result = { ...minimalPayload, id: retryTx?.id };
+              setLastResult({ type:'success', action:'borrowed', data: result, time: new Date() });
+              showToast(`Borrowed: "${bookTitle}" — ${student.full_name}`, 'success');
+              setTransactions(prev => [result, ...prev]);
+              setStep(0); setStudent(null); processingRef.current = false;
+              loadTransactions(); return;
+            }
+            console.error('[BookScan] Retry also failed:', retryErr);
+          }
+
           playErrorSound();
           showToast(`DB error: ${txErr.message}`, 'error');
           setLastResult({ type:'error', message: txErr.message, time: new Date() });
@@ -1267,20 +1417,29 @@ export default function BookManagement() {
 
       } else {
         // ── UPDATE existing borrowing record to returned ─────────────────
-        const returnedAt = nowISO(); // ← separate timestamp from borrowed_at
+        const returnedAt = nowISO();
 
-        // Update ONLY the specific borrowing row by its primary key — most precise possible
         const { error: retErr } = await supabaseAdmin
           .from('borrowings')
-          .update({
-            status:      'Returned',
-            returned_at: returnedAt,
-          })
-          .eq('id', existingBorrow.id);  // ← target exact row by PK
+          .update({ status: 'Returned', returned_at: returnedAt })
+          .eq('id', existingBorrow.id);  // ← exact row by primary key
 
         if (retErr) {
-          // Rollback copies change
-          await supabaseAdmin.from('books').update({ copies: currentCopies }).eq('id', bookRecord.id);
+          console.error('[BookScan] Return update error:', retErr);
+          // Rollback book_copies
+          if (resolvedCopyId) {
+            await supabaseAdmin.from('book_copies')
+              .update({ status: 'Borrowed' }).eq('copy_id', resolvedCopyId);
+          }
+          const { data: rollbackCopies } = await supabaseAdmin
+            .from('book_copies').select('status').eq('book_id', bookRecord.id);
+          const rbTotal2 = (rollbackCopies || []).length;
+          const rbAvail2 = (rollbackCopies || []).filter(c => c.status === 'Available').length;
+          await supabaseAdmin.from('books').update({
+            copies:           rbTotal2,
+            available_copies: rbAvail2,
+            status:           rbAvail2 === 0 ? 'Borrowed' : 'Available',
+          }).eq('id', bookRecord.id);
           playErrorSound();
           showToast(`DB error: ${retErr.message}`, 'error');
           setLastResult({ type:'error', message: retErr.message, time: new Date() });
@@ -1290,24 +1449,26 @@ export default function BookManagement() {
         playSuccessSound();
         const result = {
           id:              existingBorrow.id,
-          student_id:      student.id_no,
-          student_name:    student.full_name,
-          student_program: student.program || '',
+          student_id:      existingBorrow.student_id,
+          student_name:    existingBorrow.student_name, // keep original with [number] intact
+          student_program: student.program || existingBorrow.student_program || '',
           book_id:         bookId,
           book_title:      bookTitle,
           copy_label:      copyLabel,
           status:          'Returned',
-          borrowed_at:     existingBorrow.borrowed_at,  // ← original borrow time preserved
+          borrowed_at:     existingBorrow.borrowed_at,
           returned_at:     returnedAt,
           date:            today(),
         };
         setLastResult({ type:'success', action:'returned', data: result, time: new Date() });
         showToast(`Returned: "${bookTitle}" — ${student.full_name}`, 'success');
+        setTransactions(prev => prev.map(t => t.id === existingBorrow.id ? { ...t, ...result } : t));
       }
 
       loadTransactions();
 
     } catch (err) {
+      console.error('[BookScan] Unexpected error:', err);
       playErrorSound();
       showToast(`Error: ${err.message}`, 'error');
       setLastResult({ type:'error', message: err.message, time: new Date() });
@@ -1361,7 +1522,8 @@ export default function BookManagement() {
   // ── Filtered transactions ────────────────────────────────────────────────
   const filtered = transactions.filter(tx => {
     const q = search.toLowerCase();
-    const matchQ = !q || [tx.student_name, tx.student_id, tx.book_title, tx.copy_label].some(v => v?.toLowerCase().includes(q));
+    const studentNoEmbedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
+    const matchQ = !q || [tx.student_name, studentNoEmbedded, tx.book_title, tx.copy_label].some(v => v?.toLowerCase().includes(q));
     const matchS = statusFilter === 'all' || tx.status?.toLowerCase() === statusFilter.toLowerCase();
     return matchQ && matchS;
   });
@@ -1385,10 +1547,10 @@ export default function BookManagement() {
       {/* ── Summary stat cards ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:14, marginBottom:24 }}>
         {[
-          { label:'Total Transactions', value: transactions.length, color: MAR, icon:'📋' },
-          { label:'Currently Borrowed', value: borrowedCount, color:'#c0564e', icon:'📤' },
-          { label:'Returned Today',     value: returnedToday, color:'#4a8e4c', icon:'📥' },
-          { label:'Borrow Limit',       value: `${BORROW_LIMIT} books`, color: G, icon:'⚠' },
+          { label:'Total Transactions', value: transactions.length, color: MAR },
+          { label:'Currently Borrowed', value: borrowedCount, color: '#c0564e' },
+          { label:'Returned Today',     value: returnedToday, color: '#4a8e4c' },
+          { label:'Borrow Limit',       value: `${BORROW_LIMIT} books`, color: G },
         ].map(({ label, value, color, icon }) => (
           <div key={label} style={{
             background:`linear-gradient(135deg, ${MAR}, ${MAR2})`,
@@ -1508,7 +1670,7 @@ export default function BookManagement() {
             stepNum={1}
             active={step === 0} scanning={step === 0 && scanning} focused={step === 0 && focused}
             onFocus={() => inputRef.current?.focus({ preventScroll:true })}
-            title="Scan Student ID" hint="Point the scanner at your school ID QR code"
+            title="Scan Student Number" hint="Point the scanner at your school ID QR code"
             icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}
           />
           <ScanZone
@@ -1620,7 +1782,7 @@ export default function BookManagement() {
         <div style={{
           display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12,
           padding:'16px 20px',
-          background:`linear-gradient(135deg, rgba(139,0,0,0.04), rgba(201,168,76,0.02))`,
+          background:`linear-gradient(135deg, rgba(232, 222, 222, 0.04), rgba(201,168,76,0.02))`,
           borderBottom:'1.5px solid rgba(139,0,0,0.1)',
         }}>
           <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:'var(--text-cream)', fontWeight:700 }}>
@@ -1679,7 +1841,7 @@ export default function BookManagement() {
             <table style={{ width:'100%', borderCollapse:'collapse', minWidth:680 }}>
               <thead>
                 <tr style={{ background:`linear-gradient(135deg, ${MAR}, ${MAR2})` }}>
-                  {['Student ID','Student Name','Book Title','Status','Borrowed At','Returned At','Actions'].map(h => (
+                  {['Student Number','Student Name','Book Title','Status','Borrowed At','Returned At','Actions'].map(h => (
                     <th key={h} style={{
                       padding:'13px 16px', textAlign:'left',
                       fontFamily:'var(--font-sans)', fontSize:10.5,
@@ -1735,7 +1897,7 @@ export default function BookManagement() {
                 background:'rgba(139,0,0,0.06)', border:'1px solid rgba(139,0,0,0.15)',
               }}>
                 <div style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)', marginBottom:3 }}>{deleteConfirm.book_title}</div>
-                <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{deleteConfirm.student_name} · {deleteConfirm.student_id}</div>
+                <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{(deleteConfirm.student_name || '').replace(/\s*\[.*?\]\s*$/, '') || deleteConfirm.student_name}</div>
               </div>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 <button onClick={() => setDeleteConfirm(null)} style={{

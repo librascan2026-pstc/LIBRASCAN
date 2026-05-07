@@ -321,40 +321,39 @@ function BookFormModal({ book, onClose, onSaved }) {
       }
 
       // ── Manage book_copies ────────────────────────────────────────────────────
-      // Fetch existing copies for this book (if editing) so we don't overwrite them
-      let existingCopyNumbers = [];
-      if (isEdit && bookId) {
-        const { data: existingCopies } = await supabaseAdmin
+      // Fetch existing copies for this book (sorted so we delete from the end)
+      let existingCopies = [];
+      if (bookId) {
+        const { data: fetchedCopies } = await supabaseAdmin
           .from('book_copies')
-          .select('copy_number')
+          .select('copy_id, copy_number, status')
           .eq('book_id', bookId)
           .order('copy_number', { ascending: true });
-        existingCopyNumbers = (existingCopies || []).map(c => c.copy_number);
+        existingCopies = fetchedCopies || [];
       }
 
-      // Determine how many new copies to create (only add; never delete existing)
-      const nextCopyNumber = existingCopyNumbers.length > 0
-        ? Math.max(...existingCopyNumbers) + 1
-        : 1;
-      const copiesToCreate = Math.max(0, newCopiesCount - existingCopyNumbers.length);
+      const existingCount = existingCopies.length;
 
-      if (copiesToCreate > 0) {
+      if (newCopiesCount > existingCount) {
+        // ── Add new copies ────────────────────────────────────────────────────
+        const copiesToCreate = newCopiesCount - existingCount;
+        const nextCopyNumber = existingCount > 0
+          ? Math.max(...existingCopies.map(c => c.copy_number)) + 1
+          : 1;
+
         setQrProgress(`Generating ${copiesToCreate} copy QR code${copiesToCreate > 1 ? 's' : ''}…`);
         const copyRows = [];
         for (let i = 0; i < copiesToCreate; i++) {
           const copyNum  = nextCopyNumber + i;
-          const copyId   = generateUUID();                          // globally unique copy ID
+          const copyId   = generateUUID();
           const { dataUrl } = await generateCopyQR(copyId, copyNum);
-
-          // Upload QR image to storage
           const qrBlob  = await (await fetch(dataUrl)).blob();
           const qrFile  = new File([qrBlob], `qr_${copyId}.png`, { type: 'image/png' });
           const qrUrl   = await uploadImage(qrFile, 'qrcodes');
-
           copyRows.push({
             book_id:      bookId,
-            copy_id:      copyId,          // UUID — globally unique
-            copy_number:  copyNum,         // sequential within this book
+            copy_id:      copyId,
+            copy_number:  copyNum,
             qr_code_url:  qrUrl,
             status:       'Available',
           });
@@ -362,6 +361,37 @@ function BookFormModal({ book, onClose, onSaved }) {
         const { error: copyErr } = await supabaseAdmin.from('book_copies').insert(copyRows);
         if (copyErr) throw copyErr;
         setQrProgress('');
+
+      } else if (newCopiesCount < existingCount) {
+        // ── Remove surplus copies from the end (highest copy_number first) ───
+        // Only delete copies that are Available — never delete a Borrowed copy.
+        const surplus = existingCount - newCopiesCount;
+        const deletable = [...existingCopies]
+          .reverse()                          // highest copy_number first
+          .filter(c => c.status === 'Available')
+          .slice(0, surplus);
+
+        if (deletable.length > 0) {
+          const { error: delErr } = await supabaseAdmin
+            .from('book_copies')
+            .delete()
+            .in('copy_id', deletable.map(c => c.copy_id));
+          if (delErr) throw delErr;
+        }
+      }
+
+      // ── Re-sync books.available_copies & books.copies from book_copies ─────
+      // This keeps the catalog status accurate after any add/remove operation.
+      if (bookId) {
+        const { data: freshCopies } = await supabaseAdmin
+          .from('book_copies').select('status').eq('book_id', bookId);
+        const totalAfter     = (freshCopies || []).length;
+        const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
+        await supabaseAdmin.from('books').update({
+          copies:           totalAfter,
+          available_copies: availableAfter,
+          status:           availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
+        }).eq('id', bookId);
       }
 
       onSaved();
@@ -1518,11 +1548,18 @@ export default function Book_Catalog() {
     setShowForm(true);
   };
 
-  // Derive auto-status from copies so the filter always works correctly
-  const booksWithStatus = books.map(b => ({
-    ...b,
-    status: parseInt(b.copies) > 0 ? 'Available' : 'Borrowed',
-  }));
+  // Derive status from available_copies (set by BookManagement on borrow/return).
+  // Falls back to total copies if available_copies hasn't been set yet (legacy rows).
+  const booksWithStatus = books.map(b => {
+    const available = b.available_copies !== null && b.available_copies !== undefined
+      ? parseInt(b.available_copies)
+      : parseInt(b.copies) || 0;
+    return {
+      ...b,
+      _availableCopies: available,
+      status: available > 0 ? 'Available' : (parseInt(b.copies) > 0 ? 'Borrowed' : 'Borrowed'),
+    };
+  });
 
   // Filtering
   const filtered = booksWithStatus.filter(b => {
@@ -1569,8 +1606,8 @@ export default function Book_Catalog() {
   };
 
   // Stats for header
-  const totalBooks    = booksWithStatus.length;
-  const totalCopies   = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
+  const totalBooks     = booksWithStatus.length;
+  const totalCopies    = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
   const availableCount = booksWithStatus.filter(b => b.status === 'Available').length;
 
   const selectStyle = {
