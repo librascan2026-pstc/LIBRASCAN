@@ -8,14 +8,14 @@ import { supabase } from '../supabaseClient';
 const fmt      = (d, opts) => new Intl.DateTimeFormat('en-PH', opts).format(d);
 const fmtTime  = (d) => fmt(new Date(d), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 const fmtDate  = (d) => fmt(new Date(d), { month: 'short', day: 'numeric', year: 'numeric' });
+const fmtFull  = (d) => `${fmtDate(d)} · ${fmtTime(d)}`;
 const today    = () => new Date().toISOString().split('T')[0];
 
 // Parse QR payload from Teklead T-D4 (flat single-line string, no real newlines).
-// Example: "IDNo: 2023313830Full Name: XANDRU C. BONDOCProgram: BSIT"
 function parseQR(raw) {
   if (!raw?.trim()) return null;
   const flat = raw.trim().replace(/\r?\n/g, '');
-  const idNoMatch    = flat.match(/IDNo\s*:\s*(.+?)(?=Full Name\s*:|Program\s*:|$)/i);
+  const idNoMatch     = flat.match(/IDNo\s*:\s*(.+?)(?=Full Name\s*:|Program\s*:|$)/i);
   const fullNameMatch = flat.match(/Full Name\s*:\s*(.+?)(?=IDNo\s*:|Program\s*:|$)/i);
   const programMatch  = flat.match(/Program\s*:\s*(.+?)(?=IDNo\s*:|Full Name\s*:|$)/i);
   const id_no    = idNoMatch?.[1]?.trim()    || '';
@@ -25,6 +25,13 @@ function parseQR(raw) {
   return { id_no, full_name, program };
 }
 
+// ─── Design tokens ────────────────────────────────────────────────────────────
+const MAR  = '#8B0000';
+const MAR2 = '#6B0000';
+const G    = '#C9A84C';
+const GP   = '#F5E4A8';
+const CREAM = '#FAF6EE';
+
 // ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
   users:   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
@@ -33,44 +40,105 @@ const Ic = {
   check:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="20 6 9 17 4 12"/></svg>,
   warn:    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   search:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
-  refresh: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.08-3.26"/></svg>,
-  trash:   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
+  trash:   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
+  // QR icon matching BookManagement style
+  qr: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/>
+      </svg>,
+  history: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+             <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+             <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+             <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+           </svg>,
 };
 
-// ─── Stat Card — matches lm-stat-card style ───────────────────────────────────
+// ─── Tab CSS (scoped with "am-" prefix to avoid collision) ────────────────────
+const TAB_CSS = `
+  .am-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(139,0,0,0.18);
+    margin-bottom: 24px;
+    gap: 0;
+  }
+  .am-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 24px;
+    border: none;
+    border-bottom: 2.5px solid transparent;
+    margin-bottom: -1px;
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted, #7A3030);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .am-tab:hover { color: var(--text-secondary, #5A1010); }
+  .am-tab.am-on {
+    font-weight: 700;
+    color: #8B0000;
+    border-bottom-color: #8B0000;
+  }
+  .am-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 800;
+    font-family: var(--font-sans);
+    line-height: 1;
+    background: rgba(139,0,0,0.10);
+    color: #8B0000;
+    border: 1px solid rgba(139,0,0,0.18);
+    transition: background 0.15s, color 0.15s;
+  }
+  .am-tab.am-on .am-tab-badge {
+    background: rgba(139,0,0,0.15);
+    color: #8B0000;
+  }
+  @keyframes am-slideUp {
+    from { opacity:0; transform:translateY(10px) scale(0.99); }
+    to   { opacity:1; transform:translateY(0) scale(1); }
+  }
+  @keyframes am-fadeIn {
+    from { opacity:0; }
+    to   { opacity:1; }
+  }
+  @keyframes am-pulse-dot {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.85); }
+  }
+  @keyframes am-shimmer-bar {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  @keyframes am-blink {
+    0%, 100% { opacity:1; }
+    50%       { opacity:0.35; }
+  }
+`;
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, sub, accentColor = '#C9A84C' }) {
   return (
     <div style={{
-      background: 'linear-gradient(145deg, #8B0000 0%, #680000 100%)',
-      border: '1px solid rgba(201,168,76,0.42)',
-      borderRadius: 14,
-      padding: '20px 22px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-      position: 'relative', overflow: 'hidden',
-      boxShadow: '0 4px 18px rgba(40,0,0,0.30)',
-      transition: 'transform 0.2s, box-shadow 0.2s, border-color 0.2s',
-      cursor: 'default',
-    }}
-      onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-4px)'; e.currentTarget.style.boxShadow = '0 10px 32px rgba(40,0,0,0.45)'; e.currentTarget.style.borderColor = 'rgba(201,168,76,0.60)'; }}
-      onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = '0 4px 18px rgba(40,0,0,0.30)'; e.currentTarget.style.borderColor = 'rgba(201,168,76,0.42)'; }}
-    >
-      {/* Top gold stripe */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-        background: 'linear-gradient(90deg,#9E7D35,#E0BE72,#C9A84C)' }} />
-      {/* Corner glow */}
-      <div style={{ position: 'absolute', bottom: -20, right: -20, width: 80, height: 80,
-        borderRadius: '50%', background: 'radial-gradient(circle,rgba(201,168,76,0.08) 0%,transparent 70%)', pointerEvents: 'none' }} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 11, flexShrink: 0,
-          background: 'rgba(201,168,76,0.14)', border: '1px solid rgba(201,168,76,0.25)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: accentColor,
-        }}>{icon}</div>
-        <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'rgba(255,230,150,0.72)', fontFamily: 'var(--font-sans)' }}>{label}</span>
-      </div>
-      <div style={{ fontFamily: 'var(--font-display)', fontSize: 32, color: '#FFE97A', lineHeight: 1, letterSpacing: '0.02em', textShadow: '0 2px 10px rgba(0,0,0,0.35)' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: 'rgba(255,225,140,0.55)', fontFamily: 'var(--font-sans)' }}>{sub}</div>}
+      background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+      border: '1px solid rgba(201,168,76,0.3)',
+      borderRadius: 14, padding: '16px 18px',
+      boxShadow: '0 4px 16px rgba(139,0,0,0.2)',
+    }}>
+      <div style={{ fontFamily: "var(--font-display)", fontSize: 22, color: GP, fontWeight: 700 }}>{value}</div>
+      <div style={{ fontSize: 11, color: 'rgba(245,228,168,0.55)', fontFamily: 'var(--font-sans)', marginTop: 3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>{label}</div>
     </div>
   );
 }
@@ -127,76 +195,102 @@ function useScannerCapture(onScan) {
   return { inputEl, receiving, pulse, focused };
 }
 
-// ─── Scanner Panel ────────────────────────────────────────────────────────────
+// ─── Scanner Panel — styled to match BookManagement QR Scanner panel ──────────
 function ScannerPanel({ onScan, scannerReady }) {
   const { inputEl, receiving, pulse, focused } = useScannerCapture(onScan);
-  const borderColor = pulse   ? 'rgba(201,168,76,0.65)'
-                    : focused ? 'rgba(39,122,73,0.40)'
-                    :           'rgba(201,168,76,0.22)';
+
   return (
     <>
       {inputEl}
       <div style={{
-        background: 'linear-gradient(145deg,#8B0000 0%,#680000 100%)',
-        border: `1px solid ${borderColor}`,
-        borderRadius: 14, padding: '20px 26px',
-        display: 'flex', alignItems: 'center', gap: 20,
-        transition: 'border-color 0.3s, box-shadow 0.3s',
-        boxShadow: pulse ? '0 0 24px rgba(201,168,76,0.14)' : '0 4px 18px rgba(40,0,0,0.28)',
+        borderRadius: 20,
+        border: '1.5px solid rgba(139,0,0,0.14)',
+        background: 'linear-gradient(160deg, rgba(253,248,240,0.9) 0%, rgba(250,244,232,0.95) 100%)',
+        boxShadow: '0 8px 40px rgba(80,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.7)',
+        marginBottom: 0, overflow: 'hidden', position: 'relative',
       }}>
-        {/* QR Icon */}
+        {/* Animated top bar */}
         <div style={{
-          width: 58, height: 58, borderRadius: 14, flexShrink: 0,
-          background: focused ? 'rgba(39,122,73,0.16)' : 'rgba(201,168,76,0.10)',
-          border: `1px solid ${focused ? 'rgba(39,122,73,0.35)' : 'rgba(201,168,76,0.22)'}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: focused ? '#4caf87' : '#C9A84C',
-          transition: 'all 0.3s',
-        }}>
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.4">
-            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-            <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-            <rect x="5" y="5" width="3" height="3" fill="currentColor"/>
-            <rect x="16" y="5" width="3" height="3" fill="currentColor"/>
-            <rect x="16" y="16" width="3" height="3" fill="currentColor"/>
-            <rect x="5" y="16" width="3" height="3" fill="currentColor"/>
-          </svg>
+          height: 4,
+          background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
+          backgroundSize: '200% 100%',
+          animation: 'am-shimmer-bar 3s ease-in-out infinite',
+        }} />
+
+        {/* Header row */}
+        <div style={{ padding: '20px 28px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <div style={{
+              fontFamily: "var(--font-display)", fontSize: 15, fontWeight: 700,
+              color: 'var(--maroon-deep)', letterSpacing: '0.06em',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              {/* QR icon orb — matches BookManagement exactly */}
+              <div style={{
+                width: 32, height: 32, borderRadius: 9,
+                background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', color: G,
+                boxShadow: '0 3px 12px rgba(139,0,0,0.3)', flexShrink: 0,
+              }}>
+                {Ic.qr}
+              </div>
+              QR Scanner
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 3, letterSpacing: '0.04em' }}>
+              {receiving
+                ? 'Reading QR code data…'
+                : !scannerReady
+                ? 'Scanner not detected — connect the Teklead T-D4 via USB'
+                : 'Ready — student can scan ID at any time, even while librarian is working'}
+            </div>
+          </div>
+
+          {/* Focus / status indicator */}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            padding: '6px 14px', borderRadius: 20,
+            background: focused ? 'rgba(46,125,50,0.10)' : 'rgba(201,168,76,0.09)',
+            border: `1.5px solid ${focused ? 'rgba(90,158,92,0.35)' : 'rgba(201,168,76,0.25)'}`,
+            fontSize: 11, fontFamily: 'var(--font-sans)', fontWeight: 700,
+            color: focused ? '#3d8c40' : '#b08000',
+            letterSpacing: '0.07em', textTransform: 'uppercase',
+            transition: 'all 0.3s',
+          }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+              background: focused ? '#4caf50' : G,
+              boxShadow: focused ? '0 0 0 3px rgba(76,175,80,0.25)' : 'none',
+              animation: focused ? 'am-blink 2s ease-in-out infinite' : 'none',
+              transition: 'all 0.3s',
+            }} />
+            {receiving ? 'Reading…' : focused ? 'Input Ready' : 'Click to Activate'}
+          </div>
         </div>
 
-        {/* Text */}
-        <div style={{ flex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', marginBottom: 5, letterSpacing: '0.04em' }}>
-            QR Code Scanner
-          </div>
-          <div style={{ fontSize: 12.5, color: 'rgba(255,225,140,0.70)', lineHeight: 1.6 }}>
-            {receiving
-              ? 'Reading QR code data…'
-              : !scannerReady
-              ? 'Scanner not detected — connect the Teklead T-D4 via USB and refresh'
-              : 'Ready — student can scan ID at any time, even while librarian is working'}
-          </div>
-          {!focused && (
+        {/* Paused warning */}
+        {!focused && (
+          <div style={{ padding: '12px 28px 0' }}>
             <div style={{
-              marginTop: 8, display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '3px 10px', borderRadius: 20, fontSize: 11,
-              background: 'rgba(201,168,76,0.10)', border: '1px solid rgba(201,168,76,0.25)',
-              color: '#C9A84C',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 12px', borderRadius: 8, fontSize: 11.5,
+              background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.22)',
+              color: G, fontFamily: 'var(--font-sans)',
             }}>
               {Ic.warn} Scanner capture paused — click anywhere to restore
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
-        {/* Status dot */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
-          <div style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: focused ? '#4caf87' : '#E8C97A',
-            boxShadow: focused ? '0 0 8px #4caf8788' : 'none',
-            animation: focused && scannerReady ? 'lm-pulse-dot 2s ease infinite' : 'none',
-          }} />
-          <div style={{ fontSize: 9, color: 'rgba(255,225,140,0.55)', letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center', maxWidth: 60 }}>
-            {focused ? 'Capturing' : 'Paused'}
+        {/* Footer bar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          padding: '14px 28px',
+          background: 'rgba(139,0,0,0.03)',
+          borderTop: '1px solid rgba(139,0,0,0.08)',
+          marginTop: 20,
+        }}>
+          <div style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', letterSpacing: '0.04em' }}>
+            Scan student ID to log attendance
           </div>
         </div>
       </div>
@@ -209,7 +303,6 @@ function ScanResult({ result, onDismiss }) {
   if (!result) return null;
   const isSuccess = result.type === 'success';
   const isWarn    = result.type === 'warn';
-
   const colors = {
     bg:     isSuccess ? 'rgba(39,122,73,0.12)' : isWarn ? 'rgba(201,168,76,0.08)' : 'rgba(139,0,0,0.15)',
     border: isSuccess ? 'rgba(39,122,73,0.38)'  : isWarn ? 'rgba(201,168,76,0.28)' : 'rgba(239,154,154,0.30)',
@@ -217,18 +310,16 @@ function ScanResult({ result, onDismiss }) {
     iconBg: isSuccess ? 'rgba(39,122,73,0.22)' : isWarn ? 'rgba(201,168,76,0.14)' : 'rgba(139,0,0,0.22)',
     title:  isSuccess ? '#4caf87' : isWarn ? '#F5E4A8' : '#ef9a9a',
   };
-
   return (
     <div style={{
       background: colors.bg, border: `1px solid ${colors.border}`,
       borderRadius: 12, padding: '16px 20px',
       display: 'flex', alignItems: 'flex-start', gap: 14,
-      animation: 'lm-fade-in 0.3s ease',
+      animation: 'am-slideUp 0.3s ease',
     }}>
       <div style={{
         width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-        background: colors.iconBg,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: colors.iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
         color: colors.icon,
       }}>
         {isSuccess ? Ic.check : Ic.warn}
@@ -238,33 +329,53 @@ function ScanResult({ result, onDismiss }) {
           {result.title}
         </div>
         {result.student && (
-          <div style={{ fontSize: 12.5, color: 'rgba(255,225,140,0.80)', lineHeight: 1.6 }}>
-            <strong style={{ color: '#F5E4A8' }}>{result.student.full_name}</strong>
+          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+            <strong style={{ color: 'var(--text-primary)' }}>{result.student.full_name}</strong>
             {result.student.id_no ? ` · ID ${result.student.id_no}` : ''}
             {result.student.program ? ` · ${result.student.program}` : ''}
           </div>
         )}
         {result.message && (
-          <div style={{ fontSize: 12, color: 'rgba(255,225,140,0.55)', marginTop: 3 }}>{result.message}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>{result.message}</div>
         )}
       </div>
       <button onClick={onDismiss} style={{
         background: 'none', border: 'none', cursor: 'pointer',
-        color: 'rgba(255,225,140,0.45)', fontSize: 18,
+        color: 'var(--text-dim)', fontSize: 18,
         width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
         borderRadius: '50%', padding: 0, transition: 'color 0.15s',
       }}
-        onMouseEnter={e => e.currentTarget.style.color = '#F5E4A8'}
-        onMouseLeave={e => e.currentTarget.style.color = 'rgba(255,225,140,0.45)'}
+        onMouseEnter={e => e.currentTarget.style.color = 'var(--text-primary)'}
+        onMouseLeave={e => e.currentTarget.style.color = 'var(--text-dim)'}
       >×</button>
     </div>
   );
 }
 
-// ─── Attendance Table ─────────────────────────────────────────────────────────
-function AttendanceTable({ records, loading, onDelete }) {
+// ─── Status Badge — matches BookManagement Badge style ────────────────────────
+function StatusBadge({ status }) {
+  const cfg = status === 'time-in'
+    ? { bg: 'rgba(46,125,50,0.10)', color: '#4a8e4c', border: 'rgba(90,158,92,0.25)', dot: '#5a9e5c', label: 'Time In' }
+    : { bg: 'rgba(139,0,0,0.13)',   color: '#c0564e', border: 'rgba(139,0,0,0.25)',   dot: '#c0564e', label: 'Time Out' };
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+      fontFamily: 'var(--font-sans)', letterSpacing: '0.04em',
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+    }}>
+      <span style={{ width: 6, height: 6, borderRadius: '50%', background: cfg.dot, flexShrink: 0 }} />
+      {cfg.label}
+    </span>
+  );
+}
+
+// ─── Today Attendance Table (Scanner tab) — matches Transaction History style ──
+function TodayTable({ records, loading, onDelete, onFocusChange }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
+  const [hovRow, setHovRow] = useState(null);
+  const [delHov, setDelHov] = useState(null);
 
   const filtered = records.filter(r => {
     const q = search.toLowerCase();
@@ -273,184 +384,417 @@ function AttendanceTable({ records, loading, onDelete }) {
     return matchQ && matchF;
   });
 
-  const STATUS_STYLE = {
-    'time-in':  { bg: 'rgba(39,122,73,0.18)',  border: 'rgba(39,122,73,0.40)',  text: '#4caf87' },
-    'time-out': { bg: 'rgba(239,154,154,0.12)', border: 'rgba(239,154,154,0.28)', text: '#ef9a9a' },
-  };
-
   return (
-    <div style={{
-      background: 'linear-gradient(145deg,#880000 0%,#6A0000 100%)',
-      border: '1px solid rgba(201,168,76,0.38)',
-      borderRadius: 14, overflow: 'hidden',
-      boxShadow: '0 4px 18px rgba(40,0,0,0.30)',
-    }}>
-      {/* Table header bar */}
+    <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'hidden', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
+
+      {/* Header bar */}
       <div style={{
-        padding: '14px 20px', borderBottom: '1px solid rgba(201,168,76,0.15)',
-        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-        background: 'rgba(0,0,0,0.15)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+        padding: '16px 20px',
+        background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
+        borderBottom: '1.5px solid rgba(139,0,0,0.1)',
       }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 13.5, color: '#F5E4A8', flex: 1, letterSpacing: '0.04em' }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
           Attendance Log — {fmtDate(new Date())}
         </div>
-        {/* Search */}
-        <div style={{ position: 'relative' }}>
-          <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'rgba(255,225,140,0.45)', pointerEvents: 'none' }}>
-            {Ic.search}
-          </span>
-          <input
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative' }}>
+            <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }}>{Ic.search}</span>
+            <input
+              type="text" placeholder="Search student…"
+              value={search} onChange={e => setSearch(e.target.value)}
+              onFocus={() => onFocusChange?.(false)}
+              onBlur={() => onFocusChange?.(true)}
+              style={{
+                paddingLeft: 32, paddingRight: 10, height: 35,
+                background: 'var(--cream-light)', border: '1.5px solid rgba(139,0,0,0.15)',
+                borderRadius: 9, fontSize: 12.5, color: 'var(--text-primary)',
+                fontFamily: 'var(--font-sans)', outline: 'none', width: 210,
+              }}
+            />
+          </div>
+          <select
+            value={filter} onChange={e => setFilter(e.target.value)}
+            onFocus={() => onFocusChange?.(false)}
+            onBlur={() => onFocusChange?.(true)}
             style={{
-              paddingLeft: 30, width: 200, height: 34, fontSize: 12,
-              background: 'rgba(0,0,0,0.20)', border: '1px solid rgba(201,168,76,0.20)',
-              borderRadius: 8, color: '#F5E4A8', fontFamily: 'var(--font-sans)',
-              outline: 'none', boxSizing: 'border-box',
+              height: 35, padding: '0 10px', background: 'var(--cream-light)',
+              border: '1.5px solid rgba(139,0,0,0.15)', borderRadius: 9,
+              fontSize: 12.5, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)',
+              outline: 'none', cursor: 'pointer',
             }}
-            placeholder="Search student…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
+          >
+            <option value="all">All Status</option>
+            <option value="time-in">Time In</option>
+            <option value="time-out">Time Out</option>
+          </select>
+          <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+            {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+          </span>
         </div>
-        {/* Filter */}
-        <select
-          value={filter} onChange={e => setFilter(e.target.value)}
-          style={{
-            padding: '7px 12px', height: 34, borderRadius: 8, fontSize: 12,
-            background: 'rgba(0,0,0,0.20)', border: '1px solid rgba(201,168,76,0.20)',
-            color: '#F5E4A8', fontFamily: 'var(--font-sans)', outline: 'none', cursor: 'pointer',
-          }}
-        >
-          <option value="all">All Status</option>
-          <option value="time-in">Time In</option>
-          <option value="time-out">Time Out</option>
-        </select>
       </div>
 
       {/* Table */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(201,168,76,0.12)', background: 'rgba(0,0,0,0.12)' }}>
-              {['#', 'Student ID', 'Full Name', 'Program', 'Time In', 'Status', ''].map((h, i) => (
-                <th key={i} style={{
-                  padding: '10px 16px', textAlign: 'left',
-                  fontSize: 10, fontWeight: 700, letterSpacing: '0.12em',
-                  textTransform: 'uppercase', color: 'rgba(201,168,76,0.75)',
-                  fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
-                }}>{h}</th>
+      {loading ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '48px 0', background: CREAM }}>
+          <div className="lm-spinner" />
+          <span style={{ color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-sans)' }}>Loading records…</span>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '48px 24px', background: CREAM }}>
+          <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 14, color: 'var(--text-primary)', marginBottom: 6 }}>No attendance records found</div>
+          <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+            {search ? 'Try a different search term.' : 'Scan a student ID to log attendance.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
+            <thead>
+              <tr style={{ background: `linear-gradient(135deg, ${MAR}, ${MAR2})` }}>
+                {['Student ID', 'Full Name', 'Program', 'Time In', 'Status', 'Actions'].map(h => (
+                  <th key={h} style={{
+                    padding: '13px 16px', textAlign: 'left',
+                    fontFamily: 'var(--font-sans)', fontSize: 10.5,
+                    fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase',
+                    color: GP, whiteSpace: 'nowrap',
+                    borderBottom: `2.5px solid rgba(201,168,76,0.4)`,
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r) => (
+                <tr key={r.id}
+                  onMouseEnter={() => setHovRow(r.id)}
+                  onMouseLeave={() => setHovRow(null)}
+                  style={{
+                    background: hovRow === r.id ? '#FFFFFF' : CREAM,
+                    borderBottom: '1px solid rgba(139,0,0,0.07)',
+                    transition: 'background 0.18s, box-shadow 0.18s',
+                    boxShadow: hovRow === r.id ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
+                  }}
+                >
+                  <td style={{ padding: '11px 16px' }}>
+                    <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#7a4040', letterSpacing: '0.04em', fontWeight: 600 }}>
+                      {r.id_no || <span style={{ fontSize: 11.5, color: '#b08080', fontStyle: 'italic' }}>no ID</span>}
+                    </span>
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{r.full_name || '—'}</span>
+                  </td>
+                  <td style={{ padding: '11px 16px', maxWidth: 200 }}>
+                    <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {r.program || '—'}
+                    </span>
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <div style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>{fmtDate(r.time_in)}</div>
+                    <div style={{ fontSize: 11, color: '#9a7070', fontFamily: 'var(--font-sans)' }}>{fmtTime(r.time_in)}</div>
+                  </td>
+                  <td style={{ padding: '11px 16px' }}>
+                    <StatusBadge status={r.status} />
+                  </td>
+                  <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                    <button
+                      onMouseEnter={() => setDelHov(r.id)}
+                      onMouseLeave={() => setDelHov(null)}
+                      onClick={() => onDelete(r.id)}
+                      title="Delete record"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', gap: 5,
+                        padding: '5px 11px', borderRadius: 8, cursor: 'pointer',
+                        border: `1.5px solid ${delHov === r.id ? 'rgba(139,0,0,0.4)' : 'rgba(139,0,0,0.18)'}`,
+                        background: delHov === r.id ? 'rgba(139,0,0,0.08)' : 'transparent',
+                        transition: 'all 0.18s',
+                        fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 700,
+                        color: delHov === r.id ? MAR : '#9a7070', letterSpacing: '0.04em',
+                      }}
+                    >
+                      {Ic.trash} Delete
+                    </button>
+                  </td>
+                </tr>
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={7} style={{ padding: '50px', textAlign: 'center' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
-                  <div className="lm-spinner" style={{ borderColor: 'rgba(201,168,76,0.20)', borderTopColor: '#C9A84C' }} />
-                  <span style={{ color: 'rgba(255,225,140,0.55)', fontSize: 13, fontFamily: 'var(--font-sans)' }}>Loading records…</span>
-                </div>
-              </td></tr>
-            ) : filtered.length === 0 ? (
-              <tr><td colSpan={7} style={{ padding: '60px', textAlign: 'center' }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'rgba(255,225,140,0.45)', marginBottom: 6 }}>
-                  No attendance records found
-                </div>
-                <div style={{ fontSize: 12, color: 'rgba(255,225,140,0.30)', fontFamily: 'var(--font-sans)' }}>
-                  {search ? 'Try a different search term' : 'Scan a student ID to log attendance'}
-                </div>
-              </td></tr>
-            ) : (
-              filtered.map((r, i) => {
-                const sc = STATUS_STYLE[r.status] || STATUS_STYLE['time-in'];
-                return (
-                  <AttendanceRow key={r.id} record={r} idx={i} statusStyle={sc} onDelete={onDelete} />
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Footer */}
-      {!loading && filtered.length > 0 && (
-        <div style={{
-          padding: '10px 20px', borderTop: '1px solid rgba(201,168,76,0.10)',
-          fontSize: 11, color: 'rgba(255,225,140,0.45)', fontFamily: 'var(--font-sans)',
-          display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.10)',
-        }}>
-          <span>{filtered.length} record{filtered.length !== 1 ? 's' : ''} shown</span>
-          <span>{records.length} total today</span>
+            </tbody>
+          </table>
         </div>
       )}
     </div>
   );
 }
 
-function AttendanceRow({ record: r, idx, statusStyle: sc, onDelete }) {
-  const [hov, setHov] = useState(false);
+// ─── Visitor History Table (History tab) — all-time records ──────────────────
+function VisitorHistoryTable({ onFocusChange }) {
+  const [records,  setRecords]  = useState([]);
+  const [loading,  setLoading]  = useState(true);
+  const [search,   setSearch]   = useState('');
+  const [filter,   setFilter]   = useState('all');
+  const [hovRow,   setHovRow]   = useState(null);
+  const [delHov,   setDelHov]   = useState(null);
+  const [delConfirm, setDelConfirm] = useState(null);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('attendance_logs').select('*')
+        .order('time_in', { ascending: false }).limit(500);
+      if (error) throw error;
+      setRecords(data || []);
+    } catch (err) {
+      console.error('[VisitorHistory] Load error:', err);
+      setRecords([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  // Realtime sync
+  useEffect(() => {
+    const ch = supabase.channel('visitor-history-rt')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
+        setRecords(prev => prev.some(r => r.id === payload.new.id) ? prev : [payload.new, ...prev]);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'attendance_logs' }, (payload) => {
+        setRecords(prev => prev.filter(r => r.id !== payload.old.id));
+      })
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, []);
+
+  const handleDelete = useCallback(async () => {
+    const rec = delConfirm;
+    if (!rec) return;
+    setDelConfirm(null);
+    const { error } = await supabase.from('attendance_logs').delete().eq('id', rec.id);
+    if (!error) setRecords(prev => prev.filter(r => r.id !== rec.id));
+  }, [delConfirm]);
+
+  const filtered = records.filter(r => {
+    const q = search.toLowerCase();
+    const matchQ = !q || r.full_name?.toLowerCase().includes(q) || r.id_no?.toLowerCase().includes(q) || r.program?.toLowerCase().includes(q);
+    const matchF = filter === 'all' || r.status === filter;
+    return matchQ && matchF;
+  });
+
   return (
-    <tr
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        borderBottom: '1px solid rgba(201,168,76,0.06)',
-        background: hov ? 'rgba(245,228,168,0.05)' : 'transparent',
-        transition: 'background 0.15s',
-      }}
-    >
-      <td style={{ padding: '12px 16px', fontSize: 11, color: 'rgba(255,225,140,0.40)' }}>{idx + 1}</td>
-      <td style={{ padding: '12px 16px', fontSize: 12, color: '#C9A84C', fontFamily: 'var(--font-sans)', letterSpacing: '0.03em' }}>{r.id_no || '—'}</td>
-      <td style={{ padding: '12px 16px', fontSize: 13, color: '#F5E4A8', fontWeight: 500 }}>{r.full_name || '—'}</td>
-      <td style={{ padding: '12px 16px', fontSize: 12, color: 'rgba(255,225,140,0.60)', maxWidth: 220 }}>
-        <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.program || '—'}</div>
-      </td>
-      <td style={{ padding: '12px 16px', fontSize: 12, color: 'rgba(255,225,140,0.60)', whiteSpace: 'nowrap' }}>
-        {fmtTime(r.time_in)}
-      </td>
-      <td style={{ padding: '12px 16px' }}>
-        <span style={{
-          display: 'inline-flex', alignItems: 'center', gap: 5,
-          padding: '3px 10px', borderRadius: 20,
-          fontSize: 10.5, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-          background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text,
+    <>
+      <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'hidden', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
+
+        {/* Header bar */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+          padding: '16px 20px',
+          background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
+          borderBottom: '1.5px solid rgba(139,0,0,0.1)',
         }}>
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'currentColor' }} />
-          {r.status === 'time-in' ? 'Time In' : 'Time Out'}
-        </span>
-      </td>
-      <td style={{ padding: '12px 16px' }}>
-        <button onClick={() => onDelete(r.id)} style={{
-          background: 'none', border: 'none', cursor: 'pointer',
-          color: 'rgba(255,225,140,0.30)', padding: '4px 6px', borderRadius: 6,
-          display: 'flex', alignItems: 'center', transition: 'color 0.15s, background 0.15s',
-        }}
-          onMouseEnter={e => { e.currentTarget.style.color = '#ef9a9a'; e.currentTarget.style.background = 'rgba(239,154,154,0.10)'; }}
-          onMouseLeave={e => { e.currentTarget.style.color = 'rgba(255,225,140,0.30)'; e.currentTarget.style.background = 'none'; }}
-          title="Remove record"
-        >
-          {Ic.trash}
-        </button>
-      </td>
-    </tr>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
+            Visitor History
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative' }}>
+              <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }}>{Ic.search}</span>
+              <input
+                type="text" placeholder="Search student or book…"
+                value={search} onChange={e => setSearch(e.target.value)}
+                onFocus={() => onFocusChange?.(false)}
+                onBlur={() => onFocusChange?.(true)}
+                style={{
+                  paddingLeft: 32, paddingRight: 10, height: 35,
+                  background: 'var(--cream-light)', border: '1.5px solid rgba(139,0,0,0.15)',
+                  borderRadius: 9, fontSize: 12.5, color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-sans)', outline: 'none', width: 210,
+                }}
+              />
+            </div>
+            <select
+              value={filter} onChange={e => setFilter(e.target.value)}
+              onFocus={() => onFocusChange?.(false)}
+              onBlur={() => onFocusChange?.(true)}
+              style={{
+                height: 35, padding: '0 10px', background: 'var(--cream-light)',
+                border: '1.5px solid rgba(139,0,0,0.15)', borderRadius: 9,
+                fontSize: 12.5, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)',
+                outline: 'none', cursor: 'pointer',
+              }}
+            >
+              <option value="all">All Status</option>
+              <option value="time-in">Time In</option>
+              <option value="time-out">Time Out</option>
+            </select>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+              {filtered.length} record{filtered.length !== 1 ? 's' : ''}
+            </span>
+          </div>
+        </div>
+
+        {/* Table */}
+        {loading ? (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '48px 0', background: CREAM }}>
+            <div className="lm-spinner" />
+            <span style={{ color: 'var(--text-muted)', fontSize: 13, fontFamily: 'var(--font-sans)' }}>Loading visitor history…</span>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '48px 24px', background: CREAM }}>
+            <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: 14, color: 'var(--text-primary)', marginBottom: 6 }}>No visitor records found</div>
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+              {search ? 'Try a different search term.' : 'Attendance logs will appear here.'}
+            </div>
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 680 }}>
+              <thead>
+                <tr style={{ background: `linear-gradient(135deg, ${MAR}, ${MAR2})` }}>
+                  {['Student ID', 'Full Name', 'Program', 'Date', 'Time In', 'Status', 'Actions'].map(h => (
+                    <th key={h} style={{
+                      padding: '13px 16px', textAlign: 'left',
+                      fontFamily: 'var(--font-sans)', fontSize: 10.5,
+                      fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase',
+                      color: GP, whiteSpace: 'nowrap',
+                      borderBottom: `2.5px solid rgba(201,168,76,0.4)`,
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((r) => (
+                  <tr key={r.id}
+                    onMouseEnter={() => setHovRow(r.id)}
+                    onMouseLeave={() => setHovRow(null)}
+                    style={{
+                      background: hovRow === r.id ? '#FFFFFF' : CREAM,
+                      borderBottom: '1px solid rgba(139,0,0,0.07)',
+                      transition: 'background 0.18s, box-shadow 0.18s',
+                      boxShadow: hovRow === r.id ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
+                    }}
+                  >
+                    <td style={{ padding: '11px 16px' }}>
+                      <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#7a4040', letterSpacing: '0.04em', fontWeight: 600 }}>
+                        {r.id_no || <span style={{ fontSize: 11.5, color: '#b08080', fontStyle: 'italic' }}>no ID</span>}
+                      </span>
+                    </td>
+                    <td style={{ padding: '11px 16px' }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{r.full_name || '—'}</span>
+                    </td>
+                    <td style={{ padding: '11px 16px', maxWidth: 200 }}>
+                      <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {r.program || '—'}
+                      </span>
+                    </td>
+                    <td style={{ padding: '11px 16px' }}>
+                      <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+                        {fmtDate(r.time_in)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '11px 16px' }}>
+                      <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
+                        {fmtTime(r.time_in)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '11px 16px' }}>
+                      <StatusBadge status={r.status} />
+                    </td>
+                    <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                      <button
+                        onMouseEnter={() => setDelHov(r.id)}
+                        onMouseLeave={() => setDelHov(null)}
+                        onClick={() => setDelConfirm(r)}
+                        title="Delete record"
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: 5,
+                          padding: '5px 11px', borderRadius: 8, cursor: 'pointer',
+                          border: `1.5px solid ${delHov === r.id ? 'rgba(139,0,0,0.4)' : 'rgba(139,0,0,0.18)'}`,
+                          background: delHov === r.id ? 'rgba(139,0,0,0.08)' : 'transparent',
+                          transition: 'all 0.18s',
+                          fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 700,
+                          color: delHov === r.id ? MAR : '#9a7070', letterSpacing: '0.04em',
+                        }}
+                      >
+                        {Ic.trash} Delete
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {delConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 3000,
+          background: 'rgba(10,0,0,0.78)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          animation: 'am-fadeIn 0.2s ease',
+        }}>
+          <div style={{
+            background: CREAM, borderRadius: 20, width: '100%', maxWidth: 380,
+            border: '2px solid rgba(201,168,76,0.35)',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+            animation: 'am-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+              padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <span style={{ fontSize: 20 }}>🗑</span>
+              <div>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: GP, fontWeight: 700 }}>Delete Record</div>
+                <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
+              </div>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{
+                padding: '12px 14px', borderRadius: 10, marginBottom: 18,
+                background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)', marginBottom: 3 }}>{delConfirm.full_name || '—'}</div>
+                <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)' }}>{delConfirm.id_no} · {fmtDate(delConfirm.time_in)}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button onClick={() => setDelConfirm(null)} style={{
+                  padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+                  background: 'transparent', cursor: 'pointer',
+                  fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: MAR,
+                }}>Cancel</button>
+                <button onClick={handleDelete} style={{
+                  padding: '12px', borderRadius: 10, border: 'none',
+                  background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: GP,
+                  boxShadow: '0 4px 14px rgba(139,0,0,0.3)',
+                }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function AttendanceMonitoring() {
-  const [records, setRecords]       = useState([]);
-  const [loading, setLoading]       = useState(true);
-  const [scanResult, setScanResult] = useState(null);
-  const [scannerReady]              = useState(true);
-  const [clock, setClock]           = useState(new Date());
-  const [stats, setStats]           = useState({ today: 0, unique: 0, lastHour: 0 });
-  const resultTimer                 = useRef(null);
+  const [activeTab,   setActiveTab]   = useState('scanner');
+  const [records,     setRecords]     = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [scanResult,  setScanResult]  = useState(null);
+  const [scannerReady]                = useState(true);
+  const [stats,       setStats]       = useState({ today: 0, unique: 0, lastHour: 0 });
+  const [scannerFocused, setScannerFocused] = useState(true);
+  const resultTimer                   = useRef(null);
 
-  // Live clock
-  useEffect(() => {
-    const t = setInterval(() => setClock(new Date()), 1000);
-    return () => clearInterval(t);
-  }, []);
-
-  // Load records
+  // Load today's records
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
@@ -474,7 +818,7 @@ export default function AttendanceMonitoring() {
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
-  // Realtime
+  // Realtime for today's records
   useEffect(() => {
     const channel = supabase.channel('attendance-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
@@ -514,7 +858,7 @@ export default function AttendanceMonitoring() {
     resultTimer.current = setTimeout(() => setScanResult(null), 6000);
   }, []);
 
-  // Delete
+  // Delete from today's list
   const handleDelete = useCallback(async (id) => {
     if (!window.confirm('Remove this attendance record?')) return;
     const { error } = await supabase.from('attendance_logs').delete().eq('id', id);
@@ -526,50 +870,72 @@ export default function AttendanceMonitoring() {
 
   return (
     <div className="lm-module">
-      {/* ── Header Actions ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 14, marginBottom: 20 }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--maroon-deep)', letterSpacing: '0.04em', lineHeight: 1 }}>
-              {fmt(clock, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })}
-            </div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-muted)', fontWeight: 500, marginTop: 3 }}>
-              {fmt(clock, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            </div>
-            <div style={{ fontSize: 10.5, color: 'var(--text-dim)', marginTop: 1 }}>Philippine Standard Time</div>
-          </div>
-          <button className="lm-btn lm-btn--ghost" style={{ gap: 6, fontSize: 12, padding: '8px 14px' }} onClick={loadRecords}>
-            {Ic.refresh} Refresh
-          </button>
-        </div>
+      <style>{TAB_CSS}</style>
 
-      {/* ── Stat Cards ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 16, marginBottom: 20 }}>
-        <StatCard icon={Ic.users} label="Today's Visitors" value={stats.today}    sub="Total scans today"        accentColor="#C9A84C" />
-        <StatCard icon={Ic.id}    label="Unique Students"  value={stats.unique}   sub="Distinct IDs scanned"     accentColor="#4caf87" />
-        <StatCard icon={Ic.clock} label="Last Hour"        value={stats.lastHour} sub="Entries in past 60 min"   accentColor="#64b5f6" />
+      {/* ── Stat Cards — always visible above tabs ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 24 }}>
+        <StatCard label="Today's Visitors" value={stats.today}    sub="Total scans today" />
+        <StatCard label="Unique Students"  value={stats.unique}   sub="Distinct IDs scanned" />
+        <StatCard label="Last Hour"        value={stats.lastHour} sub="Entries in past 60 min" />
       </div>
 
-      {/* ── Scanner Panel ── */}
-      <div style={{ marginBottom: 16 }}>
-        <ScannerPanel onScan={handleScan} scannerReady={scannerReady} />
+      {/* ── Tab bar ── */}
+      <div className="am-tabs">
+        <button
+          className={`am-tab${activeTab === 'scanner' ? ' am-on' : ''}`}
+          onClick={() => setActiveTab('scanner')}
+        >
+          {Ic.qr}
+          QR Scanner
+        </button>
+        <button
+          className={`am-tab${activeTab === 'history' ? ' am-on' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          {Ic.history}
+          Visitor History
+          {records.length > 0 && (
+            <span className="am-tab-badge">{records.length}</span>
+          )}
+        </button>
       </div>
 
-      {/* ── Scan Result ── */}
-      {scanResult && (
+      {/* ══════════════════════════════════════════════════════════
+          SCANNER TAB
+      ══════════════════════════════════════════════════════════ */}
+      {activeTab === 'scanner' && <>
+
+        {/* Scanner Panel */}
         <div style={{ marginBottom: 16 }}>
-          <ScanResult result={scanResult} onDismiss={() => setScanResult(null)} />
+          <ScannerPanel onScan={handleScan} scannerReady={scannerReady} />
         </div>
-      )}
 
-      {/* ── Table ── */}
-      <AttendanceTable records={records} loading={loading} onDelete={handleDelete} />
+        {/* Scan Result */}
+        {scanResult && (
+          <div style={{ marginBottom: 16 }}>
+            <ScanResult result={scanResult} onDismiss={() => setScanResult(null)} />
+          </div>
+        )}
 
-      <style>{`
-        @keyframes lm-pulse-dot {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.5; transform: scale(0.85); }
-        }
-      `}</style>
+        {/* Today's Attendance Table */}
+        <TodayTable
+          records={records}
+          loading={loading}
+          onDelete={handleDelete}
+          onFocusChange={setScannerFocused}
+        />
+
+      </>}{/* end scanner tab */}
+
+      {/* ══════════════════════════════════════════════════════════
+          VISITOR HISTORY TAB
+      ══════════════════════════════════════════════════════════ */}
+      {activeTab === 'history' && <>
+
+        <VisitorHistoryTable onFocusChange={setScannerFocused} />
+
+      </>}{/* end history tab */}
+
     </div>
   );
 }

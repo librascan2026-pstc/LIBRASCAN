@@ -1,4 +1,3 @@
-
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -53,6 +52,37 @@ function playErrorSound() {
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.35);
   } catch { /* silent fail */ }
+}
+
+// ─── Safe books sync helper ───────────────────────────────────────────────────
+// Updates books.copies, books.status (and books.available_copies if the column exists).
+// Always uses book_copies rows as the source of truth so the catalog stays in sync.
+async function syncBooksFromCopies(bookId) {
+  const { data: allCopies } = await supabaseAdmin
+    .from('book_copies').select('status').eq('book_id', bookId);
+  const total     = (allCopies || []).length;
+  const available = (allCopies || []).filter(c => c.status === 'Available').length;
+  const newStatus = available === 0 ? 'Borrowed' : 'Available';
+
+  // Try full update (with available_copies column)
+  const { error: fullErr } = await supabaseAdmin.from('books').update({
+    copies:           total,
+    available_copies: available,
+    status:           newStatus,
+  }).eq('id', bookId);
+
+  // If available_copies column doesn't exist, retry without it
+  if (fullErr && (fullErr.code === '42703' || fullErr.message?.includes('available_copies') || fullErr.message?.includes('column'))) {
+    console.warn('[syncBooksFromCopies] available_copies column missing — syncing without it');
+    await supabaseAdmin.from('books').update({
+      copies: total,
+      status: newStatus,
+    }).eq('id', bookId);
+  } else if (fullErr) {
+    console.warn('[syncBooksFromCopies] update error:', fullErr.message);
+  }
+
+  return { total, available };
 }
 
 // ─── QR Parsers ───────────────────────────────────────────────────────────────
@@ -148,100 +178,6 @@ function Toast({ msg, type }) {
 }
 
 // ─── Confirmation Popup (Mobile) ──────────────────────────────────────────────
-function ConfirmPopup({ data, onConfirm, onCancel }) {
-  if (!data) return null;
-  const isBorrow = data.action === 'Borrowed';
-  return (
-    <div style={{
-      position:'fixed', inset:0, zIndex:2000,
-      background:'rgba(10,0,0,0.78)', backdropFilter:'blur(8px)',
-      display:'flex', alignItems:'center', justifyContent:'center', padding:20,
-      animation:'bm-fadeIn 0.2s ease',
-    }}>
-      <div style={{
-        background: CREAM,
-        borderRadius:20, width:'100%', maxWidth:400,
-        border:`2px solid rgba(201,168,76,0.35)`,
-        boxShadow:'0 24px 64px rgba(0,0,0,0.55)',
-        animation:'bm-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
-        overflow:'hidden',
-      }}>
-        {/* Header */}
-        <div style={{
-          background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
-          padding:'18px 24px',
-          borderBottom:`2px solid rgba(201,168,76,0.3)`,
-        }}>
-          <div style={{
-            display:'flex', alignItems:'center', gap:10,
-            fontFamily:"'Cinzel', serif", fontSize:15, color:GP, fontWeight:700,
-          }}>
-            <span style={{ fontSize:20 }}>{isBorrow ? '📚' : '↩'}</span>
-            Confirm {isBorrow ? 'Borrow' : 'Return'}
-          </div>
-          <div style={{ fontSize:12, color:'rgba(245,228,168,0.6)', marginTop:4, fontFamily:'var(--font-sans)' }}>
-            Please verify the details before proceeding
-          </div>
-        </div>
-
-        {/* Details */}
-        <div style={{ padding:'20px 24px' }}>
-          {/* Action banner */}
-          <div style={{
-            display:'flex', alignItems:'center', gap:10,
-            padding:'10px 14px', borderRadius:10, marginBottom:16,
-            background: isBorrow ? 'rgba(139,0,0,0.07)' : 'rgba(46,125,50,0.07)',
-            border: `1px solid ${isBorrow ? 'rgba(139,0,0,0.18)' : 'rgba(46,125,50,0.2)'}`,
-          }}>
-            <span style={{
-              fontSize:11, fontWeight:700, letterSpacing:'0.08em', textTransform:'uppercase',
-              color: isBorrow ? MAR : '#3a7c3c', fontFamily:'var(--font-sans)',
-            }}>
-              Action: {data.action}
-            </span>
-          </div>
-
-          {/* Student */}
-          <div style={{ marginBottom:14 }}>
-            <div style={{ fontSize:10.5, fontWeight:700, color:MAR, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Student</div>
-            <div style={{ fontSize:14.5, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>{data.student_name}</div>
-            <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{data.student_program || ''}</div>
-          </div>
-
-          {/* Book */}
-          <div style={{ marginBottom:20 }}>
-            <div style={{ fontSize:10.5, fontWeight:700, color:MAR, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Book</div>
-            <div style={{ fontSize:14.5, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)', lineHeight:1.4 }}>{data.book_title}</div>
-            {data.copy_label && <div style={{ fontSize:11.5, fontFamily:'monospace', color:'#7a5050', marginTop:3 }}>Copy: {data.copy_label}</div>}
-          </div>
-
-          {/* Buttons */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-            <button onClick={onCancel} style={{
-              padding:'12px', borderRadius:10, border:`1.5px solid rgba(139,0,0,0.2)`,
-              background:'transparent', cursor:'pointer',
-              fontFamily:'var(--font-sans)', fontSize:13.5, fontWeight:600,
-              color:MAR, transition:'all 0.18s',
-            }}>
-              Cancel
-            </button>
-            <button onClick={onConfirm} style={{
-              padding:'12px', borderRadius:10, border:'none',
-              background:`linear-gradient(135deg, ${MAR}, ${MAR2})`,
-              cursor:'pointer',
-              fontFamily:'var(--font-sans)', fontSize:13.5, fontWeight:700,
-              color:GP, boxShadow:'0 4px 14px rgba(139,0,0,0.3)',
-              transition:'all 0.18s',
-            }}>
-              {isBorrow ? '✓ Confirm Borrow' : '↩ Confirm Return'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Step Dot ─────────────────────────────────────────────────────────────────
 function StepDot({ n, active, done, label }) {
   return (
@@ -291,94 +227,107 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
   return (
     <div onClick={onFocus} style={{
       background: active
-        ? `linear-gradient(145deg, rgba(139,0,0,0.10) 0%, rgba(90,0,0,0.06) 50%, rgba(201,168,76,0.05) 100%)`
-        : 'rgba(139,0,0,0.02)',
-      border: `1.5px solid ${active ? 'rgba(201,168,76,0.45)' : 'rgba(139,0,0,0.09)'}`,
+        ? `linear-gradient(150deg, #5A0000 0%, #8B0000 45%, #6B0000 100%)`
+        : 'rgba(139,0,0,0.04)',
+      border: active
+        ? `2px solid rgba(201,168,76,0.55)`
+        : '1.5px solid rgba(139,0,0,0.12)',
       borderRadius:18, padding:'28px 22px', textAlign:'center',
       transition:'all 0.3s ease', cursor:'pointer',
-      opacity: active ? 1 : 0.5,
+      opacity: active ? 1 : 0.55,
       position:'relative', overflow:'hidden',
-      boxShadow: active ? '0 8px 32px rgba(139,0,0,0.12), inset 0 1px 0 rgba(245,228,168,0.08)' : 'none',
+      boxShadow: active
+        ? '0 12px 40px rgba(80,0,0,0.30), inset 0 1px 0 rgba(245,228,168,0.12)'
+        : 'none',
     }}>
+      {/* Decorative shimmer stripe at top when active */}
+      {active && (
+        <div style={{
+          position:'absolute', top:0, left:0, right:0, height:3,
+          background:`linear-gradient(90deg, transparent, ${G}, rgba(201,168,76,0.4), transparent)`,
+          animation:'bm-shimmer 2.5s ease-in-out infinite',
+          borderRadius:'18px 18px 0 0',
+        }}/>
+      )}
+
       {/* Corner accent */}
       {active && <>
-        <div style={{ position:'absolute', top:0, left:0, width:40, height:40,
-          background:'linear-gradient(135deg, rgba(201,168,76,0.18), transparent)',
-          borderRadius:'18px 0 40px 0', pointerEvents:'none' }} />
-        <div style={{ position:'absolute', bottom:0, right:0, width:60, height:60,
-          background:'linear-gradient(315deg, rgba(139,0,0,0.10), transparent)',
-          borderRadius:'40px 0 18px 0', pointerEvents:'none' }} />
+        <div style={{ position:'absolute', top:0, left:0, width:50, height:50,
+          background:'linear-gradient(135deg, rgba(201,168,76,0.15), transparent)',
+          borderRadius:'18px 0 50px 0', pointerEvents:'none' }} />
+        <div style={{ position:'absolute', bottom:0, right:0, width:70, height:70,
+          background:'linear-gradient(315deg, rgba(0,0,0,0.15), transparent)',
+          borderRadius:'50px 0 18px 0', pointerEvents:'none' }} />
       </>}
 
       {/* Step badge */}
       <div style={{
         position:'absolute', top:12, right:14,
-        fontSize:9, fontWeight:800, letterSpacing:'0.1em',
-        color: active ? 'rgba(201,168,76,0.5)' : 'rgba(139,0,0,0.2)',
+        fontSize:9, fontWeight:800, letterSpacing:'0.12em',
+        color: active ? 'rgba(245,228,168,0.55)' : 'rgba(139,0,0,0.25)',
         fontFamily:'var(--font-sans)', textTransform:'uppercase',
       }}>STEP {stepNum}</div>
 
       {/* Icon orb */}
       <div style={{
-        width:68, height:68, borderRadius:'50%', margin:'0 auto 16px',
+        width:72, height:72, borderRadius:'50%', margin:'0 auto 18px',
         background: active
-          ? `radial-gradient(circle at 35% 35%, rgba(201,168,76,0.15), rgba(139,0,0,0.18))`
-          : 'rgba(139,0,0,0.04)',
-        border: `1.5px solid ${active ? 'rgba(201,168,76,0.35)' : 'rgba(139,0,0,0.08)'}`,
+          ? `radial-gradient(circle at 35% 35%, rgba(245,228,168,0.22), rgba(0,0,0,0.25))`
+          : 'rgba(139,0,0,0.06)',
+        border: active
+          ? `2px solid rgba(201,168,76,0.50)`
+          : '1.5px solid rgba(139,0,0,0.10)',
         display:'flex', alignItems:'center', justifyContent:'center',
-        color: active ? G : 'var(--text-dim)',
+        color: active ? '#F5E4A8' : 'rgba(139,0,0,0.35)',
         boxShadow: active && focused
-          ? `0 0 0 8px rgba(201,168,76,0.06), 0 0 24px rgba(201,168,76,0.18)`
-          : active ? '0 4px 18px rgba(139,0,0,0.15)' : 'none',
+          ? `0 0 0 8px rgba(201,168,76,0.10), 0 0 28px rgba(201,168,76,0.22)`
+          : active ? '0 6px 22px rgba(0,0,0,0.25)' : 'none',
         transition:'all 0.35s ease',
         position:'relative',
       }}>
         {icon}
         {scanning && (
           <div style={{
-            position:'absolute', inset:-4, borderRadius:'50%',
-            border:`2px solid rgba(201,168,76,0.5)`,
-            animation:'bm-spin-ring 1s linear infinite',
+            position:'absolute', inset:-5, borderRadius:'50%',
+            border:`2.5px solid rgba(201,168,76,0.65)`,
+            animation:'bm-spin-ring 0.9s linear infinite',
           }}/>
         )}
       </div>
 
-      {/* Status line */}
-      <div style={{
-        display:'inline-flex', alignItems:'center', gap:6,
-        marginBottom:8,
-      }}>
+      {/* Status row */}
+      <div style={{ display:'inline-flex', alignItems:'center', gap:7, marginBottom:8 }}>
         {scanning && (
           <span style={{
-            width:7, height:7, borderRadius:'50%',
-            background:'#C9A84C',
-            display:'inline-block',
-            animation:'bm-blink 0.8s ease-in-out infinite',
+            width:8, height:8, borderRadius:'50%', background:'#C9A84C',
+            display:'inline-block', animation:'bm-blink 0.7s ease-in-out infinite', flexShrink:0,
           }}/>
         )}
         <div style={{
-          fontFamily:"'Cinzel', serif", fontSize:13.5,
-          color: active ? GP : 'var(--text-dim)',
-          fontWeight: active ? 700 : 400,
-          letterSpacing:'0.04em',
+          fontFamily:"'Cinzel', serif", fontSize:14,
+          color: active ? '#F5E4A8' : 'rgba(80,0,0,0.50)',
+          fontWeight: active ? 700 : 500,
+          letterSpacing:'0.05em',
+          textShadow: active ? '0 1px 4px rgba(0,0,0,0.35)' : 'none',
         }}>
           {scanning ? 'Reading…' : title}
         </div>
       </div>
 
       <div style={{
-        fontSize:11, color: active ? 'rgba(245,228,168,0.45)' : 'rgba(139,0,0,0.25)',
+        fontSize:11.5,
+        color: active ? 'rgba(245,228,168,0.70)' : 'rgba(80,0,0,0.35)',
         lineHeight:1.7, fontFamily:'var(--font-sans)',
-        maxWidth:180, margin:'0 auto',
+        maxWidth:190, margin:'0 auto',
+        fontWeight: active ? 500 : 400,
       }}>{hint}</div>
 
-      {/* Active bottom bar */}
+      {/* Active bottom glow bar */}
       {active && (
         <div style={{
-          position:'absolute', bottom:0, left:'20%', right:'20%', height:2,
+          position:'absolute', bottom:0, left:'15%', right:'15%', height:2,
           background:`linear-gradient(90deg, transparent, ${G}, transparent)`,
-          borderRadius:2,
-          animation:'bm-shimmer 2s ease-in-out infinite',
+          borderRadius:2, animation:'bm-shimmer 2s ease-in-out infinite',
         }}/>
       )}
     </div>
@@ -390,98 +339,111 @@ function ScanResultCard({ result }) {
   if (!result) return null;
   const ok = result.type === 'success';
   const isBorrow = result.action === 'borrowed';
-  const isReturn = result.action === 'returned';
 
   const cfg = ok
     ? isBorrow
-      ? { bg:'rgba(139,0,0,0.10)', border:'rgba(201,168,76,0.35)', accent:G, label:'BORROWED', emoji:'📤', timeLabel:'Borrowed at' }
-      : { bg:'rgba(30,80,30,0.12)', border:'rgba(90,158,92,0.38)', accent:'#5a9e5c', label:'RETURNED', emoji:'📥', timeLabel:'Returned at' }
-    : { bg:'rgba(120,0,0,0.14)', border:'rgba(239,154,154,0.32)', accent:'#ef9a9a', label:'FAILED', emoji:'⚠', timeLabel:null };
+      ? {
+          bg:'linear-gradient(135deg, #5A0000, #8B0000)',
+          border:'rgba(201,168,76,0.55)',
+          accent:'#F5E4A8',
+          accentDim:'rgba(245,228,168,0.70)',
+          label:'BORROWED',
+          labelColor:'#F5E4A8',
+          dot:'#C9A84C',
+          timeColor:'rgba(245,228,168,0.65)',
+          innerBg:'rgba(0,0,0,0.22)',
+          innerBorder:'rgba(201,168,76,0.20)',
+          nameColor:'rgba(245,228,168,0.85)',
+          copyColor:'rgba(245,228,168,0.55)',
+          copyBg:'rgba(0,0,0,0.25)',
+          icon:'📤',
+          timeLabel:'Borrowed at',
+        }
+      : {
+          bg:'linear-gradient(135deg, #1b4d1e, #2e7d32)',
+          border:'rgba(90,158,92,0.55)',
+          accent:'#a5d6a7',
+          accentDim:'rgba(165,214,167,0.80)',
+          label:'RETURNED',
+          labelColor:'#c8e6c9',
+          dot:'#81c784',
+          timeColor:'rgba(200,230,201,0.70)',
+          innerBg:'rgba(0,0,0,0.18)',
+          innerBorder:'rgba(90,158,92,0.28)',
+          nameColor:'rgba(200,230,201,0.90)',
+          copyColor:'rgba(200,230,201,0.60)',
+          copyBg:'rgba(0,0,0,0.22)',
+          icon:'📥',
+          timeLabel:'Returned at',
+        }
+    : {
+        bg:'linear-gradient(135deg, #5a0a0a, #7a1a1a)',
+        border:'rgba(239,154,154,0.45)',
+        accent:'#ffcdd2',
+        accentDim:'rgba(255,205,210,0.80)',
+        label:'FAILED',
+        labelColor:'#ffcdd2',
+        dot:'#ef9a9a',
+        timeColor:null,
+        innerBg:'rgba(0,0,0,0.20)',
+        innerBorder:'rgba(239,154,154,0.22)',
+        nameColor:null,
+        copyColor:null,
+        copyBg:null,
+        icon:'⚠',
+        timeLabel:null,
+      };
+
 
   return (
     <div style={{
-      borderRadius:14, overflow:'hidden',
-      border:`1.5px solid ${cfg.border}`,
+      borderRadius:16, overflow:'hidden',
+      border:`2px solid ${cfg.border}`,
       background: cfg.bg,
-      animation:'bm-slideUp 0.35s cubic-bezier(0.34,1.56,0.64,1)',
-      boxShadow: ok ? '0 4px 20px rgba(0,0,0,0.08)' : '0 4px 20px rgba(120,0,0,0.12)',
+      boxShadow:'0 10px 32px rgba(0,0,0,0.32)',
     }}>
-      {/* Top accent stripe */}
-      <div style={{
-        height:3,
-        background: ok
-          ? `linear-gradient(90deg, transparent, ${cfg.accent}, transparent)`
-          : 'linear-gradient(90deg, transparent, #ef9a9a, transparent)',
-      }}/>
-
-      <div style={{ padding:'14px 18px' }}>
-        {/* Status row */}
-        <div style={{
-          display:'flex', alignItems:'center', gap:8, marginBottom: ok && result.data ? 12 : 0,
-        }}>
-          <span style={{ fontSize:16 }}>{cfg.emoji}</span>
-          <span style={{
-            fontSize:10.5, fontWeight:800, letterSpacing:'0.12em', textTransform:'uppercase',
-            color: cfg.accent, fontFamily:'var(--font-sans)',
-          }}>{cfg.label}</span>
-          {ok && (
-            <span style={{
-              marginLeft:'auto', fontSize:10, color:'rgba(245,228,168,0.35)',
-              fontFamily:'var(--font-sans)',
-            }}>
-              {cfg.timeLabel}: {isBorrow ? fmtTime(result.data?.borrowed_at) : fmtTime(result.data?.returned_at)}
-            </span>
-          )}
-        </div>
-
+      <div style={{ height:3, background:`linear-gradient(90deg, transparent 5%, ${cfg.dot} 40%, ${cfg.dot} 60%, transparent 95%)` }}/>
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 18px', borderBottom:`1px solid ${cfg.innerBorder}` }}>
+        <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontSize:11, fontWeight:800, letterSpacing:'0.14em', textTransform:'uppercase', color: cfg.labelColor, fontFamily:'var(--font-sans)' }}>
+          <span style={{ fontSize:16 }}>{cfg.icon}</span>
+          <span style={{ width:7, height:7, borderRadius:'50%', background:cfg.dot, flexShrink:0 }}/>
+          {cfg.label}
+        </span>
         {ok && result.data && (
-          <div style={{
-            background:'rgba(0,0,0,0.06)', borderRadius:10,
-            padding:'12px 14px',
-            border:'1px solid rgba(255,255,255,0.06)',
-          }}>
-            <div style={{
-              fontSize:14, color:GP, fontWeight:700,
-              fontFamily:"'Cinzel', serif", marginBottom:6,
-              letterSpacing:'0.02em', lineHeight:1.4,
-            }}>{result.data.book_title}</div>
-            <div style={{
-              display:'flex', alignItems:'center', gap:10, flexWrap:'wrap',
-            }}>
-              <span style={{
-                display:'inline-flex', alignItems:'center', gap:5,
-                fontSize:11.5, color:'rgba(245,228,168,0.55)',
-                fontFamily:'var(--font-sans)',
-              }}>
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                {result.data.student_name}
+          <span style={{ fontSize:11, color: cfg.timeColor, fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>
+            {cfg.timeLabel}: {isBorrow ? fmtTime(result.data?.borrowed_at) : fmtTime(result.data?.returned_at)}
+          </span>
+        )}
+      </div>
+      {ok && result.data && (
+        <div style={{ padding:'14px 18px' }}>
+          <div style={{ background: cfg.innerBg, borderRadius:11, padding:'13px 16px', border:`1px solid ${cfg.innerBorder}` }}>
+            <div style={{ fontSize:15, color: cfg.accent, fontWeight:700, fontFamily:"'Cinzel', serif", letterSpacing:'0.04em', lineHeight:1.45, textAlign:'center', marginBottom:10 }}>
+              {result.data.book_title}
+            </div>
+            <div style={{ height:1, background: cfg.innerBorder, marginBottom:10 }}/>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:12.5, color: cfg.nameColor, fontFamily:'var(--font-sans)', fontWeight:600 }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                {(result.data.student_name || '').replace(/\s*\[.*?\]\s*$/, '')}
               </span>
               {result.data.copy_label && (
-                <span style={{
-                  fontSize:10, fontFamily:'monospace',
-                  color:'rgba(245,228,168,0.3)',
-                  background:'rgba(0,0,0,0.15)', padding:'2px 7px', borderRadius:4,
-                }}>
-                  {String(result.data.copy_label).slice(0,12)}…
+                <span style={{ fontSize:10.5, fontFamily:'monospace', color: cfg.copyColor, background: cfg.copyBg, padding:'3px 9px', borderRadius:6 }}>
+                  Copy: {String(result.data.copy_label).slice(0, 8)}…
                 </span>
               )}
             </div>
           </div>
-        )}
-
-        {!ok && (
-          <div style={{
-            display:'flex', alignItems:'flex-start', gap:8, marginTop:6,
-            padding:'10px 12px', borderRadius:8,
-            background:'rgba(120,0,0,0.12)', border:'1px solid rgba(239,154,154,0.18)',
-          }}>
-            <span style={{ color:'#ef9a9a', fontSize:13, flexShrink:0 }}>✕</span>
-            <span style={{ fontSize:12.5, color:'rgba(239,154,154,0.85)', fontFamily:'var(--font-sans)', lineHeight:1.65 }}>
-              {result.message || 'Unknown error'}
-            </span>
+        </div>
+      )}
+      {!ok && (
+        <div style={{ padding:'14px 18px' }}>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'11px 14px', borderRadius:10, background:'rgba(0,0,0,0.22)', border:`1px solid ${cfg.innerBorder}` }}>
+            <span style={{ color:'#ffcdd2', fontSize:14, flexShrink:0 }}>✕</span>
+            <span style={{ fontSize:13, color:'#ffcdd2', fontFamily:'var(--font-sans)', lineHeight:1.65, fontWeight:500 }}>{result.message || 'Unknown error'}</span>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -599,9 +561,11 @@ function TxRow({ tx, onClick, onDelete }) {
       onMouseLeave={() => setHov(false)}
       onClick={onClick}
       style={{
-        background: hov ? 'rgba(139,0,0,0.05)' : CREAM,
+        background: hov ? '#FFFFFF' : CREAM,
         borderBottom:'1px solid rgba(139,0,0,0.07)',
-        cursor:'pointer', transition:'background 0.14s',
+        cursor:'pointer',
+        transition:'background 0.18s, box-shadow 0.18s',
+        boxShadow: hov ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
       }}
     >
       <td style={{ padding:'11px 14px' }}>
@@ -654,15 +618,15 @@ function TxRow({ tx, onClick, onDelete }) {
           style={{
             display:'inline-flex', alignItems:'center', gap:5,
             padding:'5px 11px', borderRadius:8, cursor:'pointer',
-            border:`1.5px solid ${delHov ? 'rgba(201,168,76,0.6)' : 'rgba(201,168,76,0.25)'}`,
-            background: delHov ? 'rgba(139,0,0,0.12)' : 'rgba(139,0,0,0.05)',
+            border:`1.5px solid ${delHov ? 'rgba(139,0,0,0.4)' : 'rgba(139,0,0,0.18)'}`,
+            background: delHov ? 'rgba(139,0,0,0.08)' : 'transparent',
             transition:'all 0.18s',
             fontFamily:'var(--font-sans)', fontSize:11, fontWeight:700,
-            color: G,
+            color: delHov ? MAR : '#9a7070',
             letterSpacing:'0.04em',
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={G} strokeWidth="2.2">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke={delHov ? MAR : '#9a7070'} strokeWidth="2.2">
             <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
           </svg>
           Delete
@@ -761,14 +725,8 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
           .eq('status', 'Borrowed');
       }
 
-      // Update available_copies
-      const delta = isBorrow ? -1 : 1;
-      const current = bookData.available_copies ?? bookData.copies ?? 0;
-      const newCount = Math.max(0, current + delta);
-      await supabaseAdmin.from('books').update({
-        available_copies: newCount,
-        status: newCount <= 0 ? 'Borrowed' : 'Available',
-      }).eq('id', bookData.id);
+      // Update books table from book_copies
+      await syncBooksFromCopies(bookData.id);
 
       const txPayload = {
         student_id:       studentData.id_no,
@@ -817,14 +775,6 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
 
   return (
     <>
-      {confirmData && (
-        <ConfirmPopup
-          data={confirmData}
-          onConfirm={handleConfirm}
-          onCancel={() => setConfirmData(null)}
-        />
-      )}
-
       <div style={{
         background:`linear-gradient(135deg, rgba(139,0,0,0.05), rgba(201,168,76,0.025))`,
         border:'1.5px solid rgba(201,168,76,0.2)',
@@ -930,13 +880,71 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
   );
 }
 
+// ─── Tab CSS (scoped with "bm-tab-" prefix) ───────────────────────────────────
+const TAB_CSS = `
+  .bm-tabs {
+    display: flex;
+    border-bottom: 1px solid rgba(139,0,0,0.18);
+    margin-bottom: 24px;
+    gap: 0;
+  }
+  .bm-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 10px 24px;
+    border: none;
+    border-bottom: 2.5px solid transparent;
+    margin-bottom: -1px;
+    background: transparent;
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted, #7A3030);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+    white-space: nowrap;
+    user-select: none;
+  }
+  .bm-tab:hover  { color: var(--text-secondary, #5A1010); }
+  .bm-tab.bm-on  {
+    font-weight: 700;
+    color: #8B0000;
+    border-bottom-color: #8B0000;
+  }
+  .bm-tab-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 800;
+    font-family: var(--font-sans);
+    line-height: 1;
+    background: rgba(139,0,0,0.10);
+    color: #8B0000;
+    border: 1px solid rgba(139,0,0,0.18);
+    transition: background 0.15s, color 0.15s;
+  }
+  .bm-tab.bm-on .bm-tab-badge {
+    background: rgba(139,0,0,0.15);
+    color: #8B0000;
+  }
+`;
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function BookManagement() {
+  const [activeTab,    setActiveTab]    = useState('scanner');
+
   const [step,         setStep]         = useState(0);
   const [student,      setStudent]      = useState(null);
   const [scanning,     setScanning]     = useState(false);
   const [focused,      setFocused]      = useState(true);
   const [lastResult,   setLastResult]   = useState(null);
+  const [resultVisible, setResultVisible] = useState(false);
 
   const [transactions, setTransactions] = useState([]);
   const [loadingTx,    setLoadingTx]    = useState(true);
@@ -944,6 +952,32 @@ export default function BookManagement() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTx,   setSelectedTx]  = useState(null);
 
+  // Scanner hardware state — updated by Web USB connect/disconnect events
+  const [scannerConnected, setScannerConnected] = useState(false);
+
+  // ── Real USB scanner plug/unplug detection ───────────────────────────────
+  // Uses the Web USB API's connect/disconnect events. QR scanners enumerate as
+  // USB HID devices. When one connects the badge goes green; when it disconnects
+  // it goes red. Falls back gracefully if the API is unavailable (Firefox, etc.).
+  useEffect(() => {
+    if (!navigator.usb) return; // API not supported — badge stays "Unplugged"
+
+    const handleConnect    = () => setScannerConnected(true);
+    const handleDisconnect = () => setScannerConnected(false);
+
+    // Check if any USB device is already connected on mount
+    navigator.usb.getDevices().then(devices => {
+      if (devices.length > 0) setScannerConnected(true);
+    }).catch(() => {});
+
+    navigator.usb.addEventListener('connect',    handleConnect);
+    navigator.usb.addEventListener('disconnect', handleDisconnect);
+
+    return () => {
+      navigator.usb.removeEventListener('connect',    handleConnect);
+      navigator.usb.removeEventListener('disconnect', handleDisconnect);
+    };
+  }, []);
 
   const [toast,        setToast]        = useState({ msg:'', type:'success' });
 
@@ -952,10 +986,21 @@ export default function BookManagement() {
   const timerRef    = useRef(null);
   const refocusRef  = useRef(null);
   const processingRef = useRef(false); // lock to prevent double-scan
+  const resultTimerRef = useRef(null); // auto-dismiss timer for ScanResultCard
 
   const showToast = useCallback((msg, type='success') => {
     setToast({ msg, type });
     setTimeout(() => setToast({ msg:'', type:'success' }), 3800);
+  }, []);
+
+  const showResult = useCallback((result) => {
+    if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
+    setLastResult(result);
+    setResultVisible(true);
+    resultTimerRef.current = setTimeout(() => {
+      setResultVisible(false);
+      setTimeout(() => setLastResult(null), 600);
+    }, 3400);
   }, []);
 
   // ── Load transactions ────────────────────────────────────────────────────
@@ -995,16 +1040,7 @@ export default function BookManagement() {
       // Also resync books.copies (total) and books.status for all affected books
       const affectedBookIds = [...new Set([...allCopies.map(c => c.book_id)])];
       for (const bookId of affectedBookIds) {
-        const bookCopies = allCopies.map(c =>
-          stale.find(s => s.copy_id === c.copy_id) ? { ...c, status: 'Available' } : c
-        ).filter(c => c.book_id === bookId);
-        const total     = bookCopies.length;
-        const available = bookCopies.filter(c => c.status === 'Available').length;
-        await supabaseAdmin.from('books').update({
-          copies:           total,
-          available_copies: available,
-          status:           available === 0 ? 'Borrowed' : 'Available',
-        }).eq('id', bookId);
+        await syncBooksFromCopies(bookId);
       }
     } catch (e) {
       console.warn('[syncCopyStatuses] error:', e.message);
@@ -1043,7 +1079,7 @@ export default function BookManagement() {
     if (!parsed) {
       playErrorSound();
       showToast('Invalid student QR — scan a valid school ID.', 'error');
-      setLastResult({ type:'error', message:'Invalid student QR code', time: new Date() });
+      showResult({ type:'error', message:'Invalid student QR code', time: new Date() });
       return;
     }
 
@@ -1108,7 +1144,7 @@ export default function BookManagement() {
     if (!parsed) {
       playErrorSound();
       showToast('Invalid book QR code.', 'error');
-      setLastResult({ type:'error', message:'Invalid book QR code', time: new Date() });
+      showResult({ type:'error', message:'Invalid book QR code', time: new Date() });
       setStep(0); setStudent(null); return;
     }
 
@@ -1155,7 +1191,7 @@ export default function BookManagement() {
       if (!bookRecord) {
         playErrorSound();
         showToast('Book not found in catalog.', 'error');
-        setLastResult({ type:'error', message:`No book matched "${parsed.raw}"`, time: new Date() });
+        showResult({ type:'error', message:`No book matched "${parsed.raw}"`, time: new Date() });
         setStep(0); setStudent(null); processingRef.current = false; return;
       }
 
@@ -1235,7 +1271,7 @@ export default function BookManagement() {
         const other = allOpenRows[0];
         playErrorSound();
         showToast(`Copy already borrowed by ${other.student_name || 'another student'}.`, 'error');
-        setLastResult({ type:'error', message:`Copy already out — borrowed by ${other.student_name}`, time: new Date() });
+        showResult({ type:'error', message:`Copy already out — borrowed by ${other.student_name}`, time: new Date() });
         setStep(0); setStudent(null); processingRef.current = false; return;
       }
 
@@ -1270,7 +1306,7 @@ export default function BookManagement() {
         if (borrowedRows.length >= BORROW_LIMIT) {
           playErrorSound();
           showToast(`Borrow limit reached — max ${BORROW_LIMIT} books allowed.`, 'error');
-          setLastResult({ type:'error', message:`Borrow limit of ${BORROW_LIMIT} books reached.`, time: new Date() });
+          showResult({ type:'error', message:`Borrow limit of ${BORROW_LIMIT} books reached.`, time: new Date() });
           setStep(0); setStudent(null); processingRef.current = false; return;
         }
 
@@ -1281,7 +1317,7 @@ export default function BookManagement() {
           if (thisCopy?.status === 'Borrowed') {
             playErrorSound();
             showToast('This copy is already borrowed. Scan a different copy.', 'error');
-            setLastResult({ type:'error', message:'Copy is already borrowed.', time: new Date() });
+            showResult({ type:'error', message:'Copy is already borrowed.', time: new Date() });
             setStep(0); setStudent(null); processingRef.current = false; return;
           }
         }
@@ -1302,19 +1338,9 @@ export default function BookManagement() {
       }
 
       // ── FIX #5: Recompute books table from book_copies (keeps catalog in sync) ──
-      // books.copies = total physical copies (never changes unless admin edits it)
-      // books.available_copies = how many are currently free
       {
-        const { data: allCopies } = await supabaseAdmin
-          .from('book_copies').select('status').eq('book_id', bookRecord.id);
-        const totalCopies    = (allCopies || []).length;
-        const availableCount = (allCopies || []).filter(c => c.status === 'Available').length;
-        await supabaseAdmin.from('books').update({
-          copies:           totalCopies,    // total physical copies (unchanged by borrows)
-          available_copies: availableCount, // currently free copies
-          status:           availableCount === 0 ? 'Borrowed' : 'Available',
-        }).eq('id', bookRecord.id);
-        console.log('[BookScan] books table updated — total:', totalCopies, '| available:', availableCount);
+        const { total, available } = await syncBooksFromCopies(bookRecord.id);
+        console.log('[BookScan] books table synced — total:', total, '| available:', available);
       }
 
       if (isBorrow) {
@@ -1354,15 +1380,7 @@ export default function BookManagement() {
             await supabaseAdmin.from('book_copies')
               .update({ status: 'Available' }).eq('copy_id', resolvedCopyId);
           }
-          const { data: rollbackCopies } = await supabaseAdmin
-            .from('book_copies').select('status').eq('book_id', bookRecord.id);
-          const rbTotal = (rollbackCopies || []).length;
-          const rbAvail = (rollbackCopies || []).filter(c => c.status === 'Available').length;
-          await supabaseAdmin.from('books').update({
-            copies:           rbTotal,
-            available_copies: rbAvail,
-            status:           rbAvail === 0 ? 'Borrowed' : 'Available',
-          }).eq('id', bookRecord.id);
+          await syncBooksFromCopies(bookRecord.id);
 
           // FIX: If column doesn't exist yet, retry without unknown columns
           // This lets the system work even before you run the SQL migration
@@ -1394,7 +1412,7 @@ export default function BookManagement() {
             if (!retryErr) {
               playSuccessSound();
               const result = { ...minimalPayload, id: retryTx?.id };
-              setLastResult({ type:'success', action:'borrowed', data: result, time: new Date() });
+              showResult({ type:'success', action:'borrowed', data: result, time: new Date() });
               showToast(`Borrowed: "${bookTitle}" — ${student.full_name}`, 'success');
               setTransactions(prev => [result, ...prev]);
               setStep(0); setStudent(null); processingRef.current = false;
@@ -1405,13 +1423,13 @@ export default function BookManagement() {
 
           playErrorSound();
           showToast(`DB error: ${txErr.message}`, 'error');
-          setLastResult({ type:'error', message: txErr.message, time: new Date() });
+          showResult({ type:'error', message: txErr.message, time: new Date() });
           setStep(0); setStudent(null); processingRef.current = false; return;
         }
 
         playSuccessSound();
         const result = { ...txPayload, id: newTx?.id };
-        setLastResult({ type:'success', action:'borrowed', data: result, time: new Date() });
+        showResult({ type:'success', action:'borrowed', data: result, time: new Date() });
         showToast(`Borrowed: "${bookTitle}" — ${student.full_name}`, 'success');
         setTransactions(prev => [result, ...prev]);
 
@@ -1431,18 +1449,10 @@ export default function BookManagement() {
             await supabaseAdmin.from('book_copies')
               .update({ status: 'Borrowed' }).eq('copy_id', resolvedCopyId);
           }
-          const { data: rollbackCopies } = await supabaseAdmin
-            .from('book_copies').select('status').eq('book_id', bookRecord.id);
-          const rbTotal2 = (rollbackCopies || []).length;
-          const rbAvail2 = (rollbackCopies || []).filter(c => c.status === 'Available').length;
-          await supabaseAdmin.from('books').update({
-            copies:           rbTotal2,
-            available_copies: rbAvail2,
-            status:           rbAvail2 === 0 ? 'Borrowed' : 'Available',
-          }).eq('id', bookRecord.id);
+          await syncBooksFromCopies(bookRecord.id);
           playErrorSound();
           showToast(`DB error: ${retErr.message}`, 'error');
-          setLastResult({ type:'error', message: retErr.message, time: new Date() });
+          showResult({ type:'error', message: retErr.message, time: new Date() });
           setStep(0); setStudent(null); processingRef.current = false; return;
         }
 
@@ -1460,7 +1470,7 @@ export default function BookManagement() {
           returned_at:     returnedAt,
           date:            today(),
         };
-        setLastResult({ type:'success', action:'returned', data: result, time: new Date() });
+        showResult({ type:'success', action:'returned', data: result, time: new Date() });
         showToast(`Returned: "${bookTitle}" — ${student.full_name}`, 'success');
         setTransactions(prev => prev.map(t => t.id === existingBorrow.id ? { ...t, ...result } : t));
       }
@@ -1471,7 +1481,7 @@ export default function BookManagement() {
       console.error('[BookScan] Unexpected error:', err);
       playErrorSound();
       showToast(`Error: ${err.message}`, 'error');
-      setLastResult({ type:'error', message: err.message, time: new Date() });
+      showResult({ type:'error', message: err.message, time: new Date() });
     }
 
     setStep(0); setStudent(null);
@@ -1534,8 +1544,9 @@ export default function BookManagement() {
   // ────────────────────────────────────────────────────────────────────────────
   return (
     <div className="lm-module" style={{ userSelect:'none' }}>
+      <style>{TAB_CSS}</style>
 
-      {/* Hidden keyboard capture */}
+      {/* Hidden keyboard capture — always mounted so scanner works on both tabs */}
       <input
         ref={inputRef} onKeyDown={handleKeyDown}
         onBlur={() => { setFocused(false); refocusIfSafe(); }}
@@ -1544,26 +1555,63 @@ export default function BookManagement() {
         style={{ position:'fixed', top:0, left:0, width:1, height:1, opacity:0, pointerEvents:'none', zIndex:-1, border:'none', outline:'none', background:'transparent' }}
       />
 
-      {/* ── Summary stat cards ── */}
+      {/* ── Summary stat cards — always visible above tabs ── */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(160px, 1fr))', gap:14, marginBottom:24 }}>
         {[
-          { label:'Total Transactions', value: transactions.length, color: MAR },
-          { label:'Currently Borrowed', value: borrowedCount, color: '#c0564e' },
-          { label:'Returned Today',     value: returnedToday, color: '#4a8e4c' },
-          { label:'Borrow Limit',       value: `${BORROW_LIMIT} books`, color: G },
-        ].map(({ label, value, color, icon }) => (
+          { label:'Total Transactions', value: transactions.length },
+          { label:'Currently Borrowed', value: borrowedCount },
+          { label:'Returned Today',     value: returnedToday },
+          { label:'Borrow Limit',       value: `${BORROW_LIMIT} books` },
+        ].map(({ label, value }) => (
           <div key={label} style={{
             background:`linear-gradient(135deg, ${MAR}, ${MAR2})`,
             border:`1px solid rgba(201,168,76,0.3)`,
             borderRadius:14, padding:'16px 18px',
             boxShadow:'0 4px 16px rgba(139,0,0,0.2)',
           }}>
-            <div style={{ fontSize:20, marginBottom:6 }}>{icon}</div>
             <div style={{ fontFamily:"'Cinzel', serif", fontSize:22, color:GP, fontWeight:700 }}>{value}</div>
             <div style={{ fontSize:11, color:'rgba(245,228,168,0.55)', fontFamily:'var(--font-sans)', marginTop:3, letterSpacing:'0.06em', textTransform:'uppercase' }}>{label}</div>
           </div>
         ))}
       </div>
+
+      {/* ── Tab bar ── */}
+      <div className="bm-tabs">
+        <button
+          className={`bm-tab${activeTab === 'scanner' ? ' bm-on' : ''}`}
+          onClick={() => setActiveTab('scanner')}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/>
+          </svg>
+          QR Scanner
+          {step > 0 && (
+            <span className="bm-tab-badge" style={{ background:'rgba(139,0,0,0.15)', color:'#8B0000' }}>
+              Step {step + 1}
+            </span>
+          )}
+        </button>
+        <button
+          className={`bm-tab${activeTab === 'history' ? ' bm-on' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
+            <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
+            <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
+          </svg>
+          Transaction History
+          {transactions.length > 0 && (
+            <span className="bm-tab-badge">{transactions.length}</span>
+          )}
+        </button>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════════
+          SCANNER TAB
+      ══════════════════════════════════════════════════════════ */}
+      {activeTab === 'scanner' && <>
 
       {/* ── Scanner Panel ── */}
       <div style={{
@@ -1612,25 +1660,28 @@ export default function BookManagement() {
             </div>
           </div>
 
-          {/* Focus indicator pill */}
-          <div style={{
-            display:'inline-flex', alignItems:'center', gap:6,
-            padding:'5px 12px', borderRadius:20,
-            background: focused ? 'rgba(46,125,50,0.09)' : 'rgba(201,168,76,0.09)',
-            border:`1px solid ${focused ? 'rgba(90,158,92,0.3)' : 'rgba(201,168,76,0.3)'}`,
-            fontSize:10.5, fontFamily:'var(--font-sans)', fontWeight:600,
-            color: focused ? '#5a9e5c' : G,
-            letterSpacing:'0.06em', textTransform:'uppercase',
-            cursor: focused ? 'default' : 'pointer',
-            transition:'all 0.3s',
-          }} onClick={() => inputRef.current?.focus({ preventScroll:true })}>
-            <span style={{
-              width:6, height:6, borderRadius:'50%',
-              background: focused ? '#5a9e5c' : G,
-              animation: focused ? 'bm-blink 2s ease-in-out infinite' : 'none',
-              flexShrink:0,
-            }}/>
-            {focused ? 'Scanner Active' : 'Click to Activate'}
+          {/* Focus indicator only */}
+          <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
+            <div style={{
+              display:'inline-flex', alignItems:'center', gap:5,
+              padding:'6px 14px', borderRadius:20,
+              background: focused ? 'rgba(46,125,50,0.10)' : 'rgba(201,168,76,0.09)',
+              border:`1.5px solid ${focused ? 'rgba(90,158,92,0.35)' : 'rgba(201,168,76,0.25)'}`,
+              fontSize:11, fontFamily:'var(--font-sans)', fontWeight:700,
+              color: focused ? '#3d8c40' : '#b08000',
+              letterSpacing:'0.07em', textTransform:'uppercase',
+              cursor: focused ? 'default' : 'pointer',
+              transition:'all 0.3s',
+            }} onClick={() => inputRef.current?.focus({ preventScroll:true })}>
+              <span style={{
+                width:7, height:7, borderRadius:'50%', flexShrink:0,
+                background: focused ? '#4caf50' : G,
+                boxShadow: focused ? '0 0 0 3px rgba(76,175,80,0.25)' : 'none',
+                animation: focused ? 'bm-blink 2s ease-in-out infinite' : 'none',
+                transition:'all 0.3s',
+              }}/>
+              {focused ? 'Input Ready' : 'Click to Activate'}
+            </div>
           </div>
         </div>
 
@@ -1746,9 +1797,19 @@ export default function BookManagement() {
           </div>
         )}
 
-        {/* Last result */}
+        {/* Last result — fades in on scan, fades out and disappears after ~4 s */}
         {lastResult && (
-          <div style={{ padding:'0 28px 20px' }}>
+          <div
+            key={lastResult.time?.getTime?.() ?? Math.random()}
+            style={{
+              padding:'0 28px 20px',
+              opacity: resultVisible ? 1 : 0,
+              transform: resultVisible ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.99)',
+              transition: resultVisible
+                ? 'opacity 0.45s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.22,1,0.36,1)'
+                : 'opacity 0.55s ease, transform 0.55s ease',
+            }}
+          >
             <ScanResultCard result={lastResult} />
           </div>
         )}
@@ -1774,6 +1835,13 @@ export default function BookManagement() {
           </div>
         </div>
       </div>
+
+      </>}{/* end scanner tab */}
+
+      {/* ══════════════════════════════════════════════════════════
+          TRANSACTION HISTORY TAB
+      ══════════════════════════════════════════════════════════ */}
+      {activeTab === 'history' && <>
 
       {/* ── Transaction Table ── */}
       <div className="lm-panel" style={{ marginBottom:0, padding:0, overflow:'hidden', borderRadius:14, border:'1.5px solid rgba(139,0,0,0.14)' }}>
@@ -1917,6 +1985,10 @@ export default function BookManagement() {
           </div>
         </div>
       )}
+
+      </>}{/* end history tab */}
+
+      {/* ── Global: Toast + Modals (position:fixed — always rendered outside tabs) ── */}
       <Toast msg={toast.msg} type={toast.type} />
 
       <style>{`

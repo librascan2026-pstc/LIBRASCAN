@@ -281,7 +281,9 @@ function BookFormModal({ book, onClose, onSaved }) {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true); setApiErr('');
     try {
-      const payload = { ...form };
+      // Strip any computed/local-only fields that don't exist in the DB schema
+      const { _availableCopies, available_copies: _ac, ...formClean } = form;
+      const payload = { ...formClean };
       const newCopiesCount = parseInt(payload.copies) || 0;
 
       // Auto-compute status from copies
@@ -380,18 +382,24 @@ function BookFormModal({ book, onClose, onSaved }) {
         }
       }
 
-      // ── Re-sync books.available_copies & books.copies from book_copies ─────
-      // This keeps the catalog status accurate after any add/remove operation.
+      // ── Re-sync books.copies & status from book_copies ─────────────────────
+      // available_copies is updated automatically by borrow/return in BookManagement.
+      // Here we only sync total copies count and status after add/remove operations.
       if (bookId) {
         const { data: freshCopies } = await supabaseAdmin
           .from('book_copies').select('status').eq('book_id', bookId);
         const totalAfter     = (freshCopies || []).length;
         const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
-        await supabaseAdmin.from('books').update({
-          copies:           totalAfter,
-          available_copies: availableAfter,
-          status:           availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
-        }).eq('id', bookId);
+        // Try updating with available_copies; if that column doesn't exist, fall back without it
+        const syncPayload = {
+          copies: totalAfter,
+          status: availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
+        };
+        const { error: syncErr } = await supabaseAdmin.from('books').update(syncPayload).eq('id', bookId);
+        if (syncErr) {
+          // Column issue — try without available_copies (already excluded above)
+          console.warn('[Book_Catalog] sync warning:', syncErr.message);
+        }
       }
 
       onSaved();
@@ -660,9 +668,7 @@ function BookFormModal({ book, onClose, onSaved }) {
               </span>
             </div>
           )}
-          <p style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 4 }}>
-            A unique QR code will be auto-generated for <strong>each copy</strong> using a globally unique Copy ID (UUID). Copies are tracked individually in the <code>book_copies</code> table.
-          </p>
+
         </div>
 
         {/* Footer */}
@@ -720,6 +726,7 @@ function ViewModal({ book, onClose, onEdit }) {
   const [generatingCopyQRs, setGeneratingCopyQRs] = useState(false);
   const [selectedCopyQR, setSelectedCopyQR]     = useState(null);
   const [dlFormat, setDlFormat]                 = useState('png');
+  const [deletingCopyId, setDeletingCopyId]     = useState(null);
 
   const copies      = parseInt(book.copies) || 1;
   const abstractData = parseAbstractData(book.abstract_text);
@@ -851,6 +858,48 @@ function ViewModal({ book, onClose, onEdit }) {
   // Download all copy QRs one by one (staggered to avoid browser pop-up blocking)
   const downloadAllCopyQRs = (format = 'png') => {
     copyQRs.forEach((qr, i) => setTimeout(() => downloadCopyQR(qr, format), i * 350));
+  };
+
+  // Delete a specific copy from book_copies table
+  const deleteCopy = async (qr) => {
+    if (!qr?.copy_id) return;
+    const confirmed = window.confirm(`Delete Copy #${qr.copyNum}?\n\nThis will permanently remove this copy's QR code and record. Only available copies can be deleted.`);
+    if (!confirmed) return;
+    setDeletingCopyId(qr.copy_id);
+    try {
+      // Only delete if copy is Available
+      if (qr.status === 'Borrowed') {
+        alert('Cannot delete a borrowed copy. Please return the book first.');
+        setDeletingCopyId(null);
+        return;
+      }
+      const { error } = await supabaseAdmin
+        .from('book_copies')
+        .delete()
+        .eq('copy_id', qr.copy_id);
+      if (error) throw error;
+
+      // Re-sync book copies count
+      const { data: freshCopies } = await supabaseAdmin
+        .from('book_copies').select('status').eq('book_id', book.id);
+      const totalAfter     = (freshCopies || []).length;
+      const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
+      await supabaseAdmin.from('books').update({
+        copies: totalAfter,
+        status: availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
+      }).eq('id', book.id);
+
+      // Update local state
+      const updated = copyQRs.filter(c => c.copy_id !== qr.copy_id);
+      setCopyQRs(updated);
+      if (selectedCopyQR?.copy_id === qr.copy_id) {
+        setSelectedCopyQR(updated[0] || null);
+      }
+    } catch (err) {
+      alert('Delete failed: ' + err.message);
+    } finally {
+      setDeletingCopyId(null);
+    }
   };
 
   const detail = (label, value) => value ? (
@@ -1324,24 +1373,49 @@ function ViewModal({ book, onClose, onEdit }) {
                     <span style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center' }}>Generating…</span>
                   </div>
                 ) : copyQRs.map(qr => (
-                  <button key={qr.copy_id || qr.copyNum} onClick={() => setSelectedCopyQR(qr)} style={{
-                    width: '100%', padding: '8px 10px', borderRadius: 8, fontSize: 12,
-                    fontFamily: 'var(--font-sans)', cursor: 'pointer', textAlign: 'left',
-                    border: selectedCopyQR?.copyNum === qr.copyNum ? '1px solid rgba(139,0,0,0.30)' : '1px solid transparent',
-                    background: selectedCopyQR?.copyNum === qr.copyNum ? 'rgba(139,0,0,0.08)' : 'transparent',
-                    color: selectedCopyQR?.copyNum === qr.copyNum ? 'var(--maroon-mid)' : 'var(--text-muted)',
-                    fontWeight: selectedCopyQR?.copyNum === qr.copyNum ? 600 : 400,
-                    marginBottom: 2, transition: 'all 0.15s',
-                  }}>
-                    Copy #{qr.copyNum}
-                    {qr.status && (
-                      <span style={{
-                        display: 'block', fontSize: 9.5, marginTop: 1,
-                        color: qr.status === 'Available' ? '#5a9e5c' : '#c0564e',
-                        fontWeight: 400,
-                      }}>{qr.status}</span>
-                    )}
-                  </button>
+                  <div key={qr.copy_id || qr.copyNum} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                    <button onClick={() => setSelectedCopyQR(qr)} style={{
+                      flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12,
+                      fontFamily: 'var(--font-sans)', cursor: 'pointer', textAlign: 'left',
+                      border: selectedCopyQR?.copyNum === qr.copyNum ? '1px solid rgba(139,0,0,0.30)' : '1px solid transparent',
+                      background: selectedCopyQR?.copyNum === qr.copyNum ? 'rgba(139,0,0,0.08)' : 'transparent',
+                      color: selectedCopyQR?.copyNum === qr.copyNum ? 'var(--maroon-mid)' : 'var(--text-muted)',
+                      fontWeight: selectedCopyQR?.copyNum === qr.copyNum ? 600 : 400,
+                      transition: 'all 0.15s',
+                    }}>
+                      Copy #{qr.copyNum}
+                      {qr.status && (
+                        <span style={{
+                          display: 'block', fontSize: 9.5, marginTop: 1,
+                          color: qr.status === 'Available' ? '#5a9e5c' : '#c0564e',
+                          fontWeight: 400,
+                        }}>{qr.status}</span>
+                      )}
+                    </button>
+                    {/* Delete copy icon button */}
+                    <button
+                      onClick={() => deleteCopy(qr)}
+                      disabled={deletingCopyId === qr.copy_id || qr.status === 'Borrowed'}
+                      title={qr.status === 'Borrowed' ? 'Cannot delete a borrowed copy' : `Delete Copy #${qr.copyNum}`}
+                      style={{
+                        width: 24, height: 24, borderRadius: 6, flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '1px solid rgba(192,86,78,0.25)',
+                        background: deletingCopyId === qr.copy_id ? 'rgba(192,86,78,0.15)' : 'rgba(192,86,78,0.07)',
+                        color: qr.status === 'Borrowed' ? 'rgba(192,86,78,0.3)' : '#c0564e',
+                        cursor: (deletingCopyId === qr.copy_id || qr.status === 'Borrowed') ? 'not-allowed' : 'pointer',
+                        transition: 'all 0.15s',
+                        opacity: qr.status === 'Borrowed' ? 0.45 : 1,
+                      }}
+                      onMouseEnter={e => { if (qr.status !== 'Borrowed' && !deletingCopyId) { e.currentTarget.style.background = 'rgba(192,86,78,0.18)'; e.currentTarget.style.borderColor = 'rgba(192,86,78,0.50)'; } }}
+                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(192,86,78,0.07)'; e.currentTarget.style.borderColor = 'rgba(192,86,78,0.25)'; }}
+                    >
+                      {deletingCopyId === qr.copy_id
+                        ? <span style={{ width: 10, height: 10, border: '1.5px solid rgba(192,86,78,0.3)', borderTopColor: '#c0564e', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }} />
+                        : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                      }
+                    </button>
+                  </div>
                 ))}
               </div>
 
@@ -1548,15 +1622,18 @@ export default function Book_Catalog() {
     setShowForm(true);
   };
 
-  // Derive status from available_copies (set by BookManagement on borrow/return).
-  // Falls back to total copies if available_copies hasn't been set yet (legacy rows).
+  // Derive display status. The DB status column is updated by both BookManagement (borrow/return)
+  // and BookFormModal (add/edit). We trust the DB status field as the source of truth,
+  // falling back to deriving from available_copies or copies if status is missing.
   const booksWithStatus = books.map(b => {
+    // If the DB has an explicit status, use it (set by borrow/return operations)
+    if (b.status) return { ...b };
+    // Fallback: derive from available_copies or copies
     const available = b.available_copies !== null && b.available_copies !== undefined
       ? parseInt(b.available_copies)
       : parseInt(b.copies) || 0;
     return {
       ...b,
-      _availableCopies: available,
       status: available > 0 ? 'Available' : (parseInt(b.copies) > 0 ? 'Borrowed' : 'Borrowed'),
     };
   });
@@ -1854,11 +1931,20 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           {book.isbn || '—'}
         </span>
       </td>
-      {/* Copies */}
+      {/* Copies — shows available/total so borrowing changes are visible */}
       <td style={{ padding: '11px 16px', textAlign: 'center' }}>
-        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)' }}>
-          {book.copies ?? '—'}
-        </span>
+        {(() => {
+          const total = parseInt(book.copies) ?? 0;
+          const avail = book.available_copies !== null && book.available_copies !== undefined
+            ? parseInt(book.available_copies)
+            : (book.status === 'Available' ? total : 0);
+          const allOut = avail === 0 && total > 0;
+          return (
+            <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: allOut ? '#c0564e' : 'var(--maroon-mid)' }}>
+              {avail}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)' }}>/{total}</span>
+            </span>
+          );
+        })()}
       </td>
       {/* Status */}
       <td style={{ padding: '11px 16px' }}>
