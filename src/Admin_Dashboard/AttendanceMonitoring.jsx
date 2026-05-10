@@ -394,7 +394,7 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
         background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
         borderBottom: '1.5px solid rgba(139,0,0,0.1)',
       }}>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-primary)', fontWeight: 700 }}>
           Attendance Log — {fmtDate(new Date())}
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -592,7 +592,7 @@ function VisitorHistoryTable({ onFocusChange }) {
           background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
           borderBottom: '1.5px solid rgba(139,0,0,0.1)',
         }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-primary)', fontWeight: 700 }}>
             Visitor History
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>

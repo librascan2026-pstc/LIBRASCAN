@@ -1572,23 +1572,61 @@ export default function Book_Catalog() {
     toastRef.current = setTimeout(() => setToast({ msg: '', type: 'success' }), 3200);
   };
 
-  const fetchBooks = useCallback(async () => {
-    setLoading(true);
+  // showSpinner=true only on first load; background refreshes update silently
+  const fetchBooks = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('books')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setBooks(data || []);
+      // Fetch books and all book_copies in parallel
+      const [{ data: booksData, error: booksErr }, { data: copiesData }] = await Promise.all([
+        supabase.from('books').select('*').order('created_at', { ascending: false }),
+        supabaseAdmin.from('book_copies').select('book_id, status'),
+      ]);
+      if (booksErr) throw booksErr;
+
+      // Build a map: book_id → { total, available }
+      const copiesMap = {};
+      (copiesData || []).forEach(c => {
+        if (!copiesMap[c.book_id]) copiesMap[c.book_id] = { total: 0, available: 0 };
+        copiesMap[c.book_id].total += 1;
+        if (c.status === 'Available') copiesMap[c.book_id].available += 1;
+      });
+
+      // Merge computed counts into each book record
+      const merged = (booksData || []).map(b => {
+        const counts = copiesMap[b.id];
+        if (!counts) return b; // no copies row yet — keep DB value
+        return {
+          ...b,
+          copies:           counts.total,
+          available_copies: counts.available,
+          status:           counts.available > 0 ? 'Available' : (counts.total > 0 ? 'Borrowed' : b.status),
+        };
+      });
+
+      setBooks(merged);
     } catch (err) {
       showToast('Failed to load books: ' + err.message, 'error');
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }, []);
 
-  useEffect(() => { fetchBooks(); }, [fetchBooks]);
+  useEffect(() => { fetchBooks(true); }, [fetchBooks]);
+
+  // Subscribe to book_copies, borrowings, AND books.
+  // borrowings is guaranteed to fire on every scan (BookManagement uses it too).
+  // book_copies fires if realtime is enabled on that table in Supabase.
+  // Either event triggers a silent background re-fetch — no loading spinner.
+  useEffect(() => {
+    const silentRefresh = () => fetchBooks(false);
+    const ch = supabase
+      .channel('catalog-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowings'  }, silentRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'books'       }, silentRefresh)
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchBooks]);
 
   const handleSaved = () => {
     fetchBooks();
@@ -1622,19 +1660,16 @@ export default function Book_Catalog() {
     setShowForm(true);
   };
 
-  // Derive display status. The DB status column is updated by both BookManagement (borrow/return)
-  // and BookFormModal (add/edit). We trust the DB status field as the source of truth,
-  // falling back to deriving from available_copies or copies if status is missing.
+  // available_copies is always computed fresh from book_copies in fetchBooks,
+  // so status is derived from actual copy availability — never stale.
   const booksWithStatus = books.map(b => {
-    // If the DB has an explicit status, use it (set by borrow/return operations)
-    if (b.status) return { ...b };
-    // Fallback: derive from available_copies or copies
-    const available = b.available_copies !== null && b.available_copies !== undefined
+    const avail = b.available_copies !== null && b.available_copies !== undefined
       ? parseInt(b.available_copies)
       : parseInt(b.copies) || 0;
+    const total = parseInt(b.copies) || 0;
     return {
       ...b,
-      status: available > 0 ? 'Available' : (parseInt(b.copies) > 0 ? 'Borrowed' : 'Borrowed'),
+      status: avail > 0 ? 'Available' : (total > 0 ? 'Borrowed' : 'Borrowed'),
     };
   });
 

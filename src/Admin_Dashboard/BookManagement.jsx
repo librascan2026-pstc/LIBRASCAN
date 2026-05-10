@@ -152,30 +152,8 @@ function Badge({ status }) {
 }
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
-function Toast({ msg, type }) {
-  if (!msg) return null;
-  const isErr = type === 'error';
-  return (
-    <div style={{
-      position:'fixed', bottom:28, right:28, zIndex:9999,
-      background: isErr ? 'rgba(80,0,0,0.97)' : 'rgba(15,35,15,0.97)',
-      border:`1px solid ${isErr ? 'rgba(220,100,100,0.4)' : 'rgba(90,158,92,0.4)'}`,
-      borderRadius:14, padding:'14px 22px',
-      display:'flex', alignItems:'center', gap:12,
-      fontFamily:'var(--font-sans)', fontSize:13.5, color:'#fff',
-      boxShadow:'0 12px 40px rgba(0,0,0,0.5)',
-      animation:'bm-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
-      maxWidth:380,
-    }}>
-      <span style={{
-        width:8, height:8, borderRadius:'50%', flexShrink:0,
-        background: isErr ? '#ef9a9a' : '#81c784',
-        boxShadow: `0 0 8px ${isErr ? '#ef9a9a' : '#81c784'}`,
-      }} />
-      {msg}
-    </div>
-  );
-}
+// Removed — confirmation is shown inline via ScanResultCard only.
+function Toast({ msg, type }) { return null; }
 
 // ─── Confirmation Popup (Mobile) ──────────────────────────────────────────────
 // ─── Step Dot ─────────────────────────────────────────────────────────────────
@@ -340,72 +318,71 @@ function ScanResultCard({ result }) {
   const ok = result.type === 'success';
   const isBorrow = result.action === 'borrowed';
 
+  // Muted teal/cream palette — matches Attendance Log card style
   const cfg = ok
     ? isBorrow
       ? {
-          bg:'linear-gradient(135deg, #5A0000, #8B0000)',
-          border:'rgba(201,168,76,0.55)',
-          accent:'#F5E4A8',
-          accentDim:'rgba(245,228,168,0.70)',
+          bg:'rgba(245,235,235,0.97)',
+          border:'rgba(160,60,60,0.30)',
+          accent:'#6b1a1a',
+          accentDim:'rgba(107,26,26,0.75)',
           label:'BORROWED',
-          labelColor:'#F5E4A8',
-          dot:'#C9A84C',
-          timeColor:'rgba(245,228,168,0.65)',
-          innerBg:'rgba(0,0,0,0.22)',
-          innerBorder:'rgba(201,168,76,0.20)',
-          nameColor:'rgba(245,228,168,0.85)',
-          copyColor:'rgba(245,228,168,0.55)',
-          copyBg:'rgba(0,0,0,0.25)',
-          icon:'📤',
+          labelColor:'#8b2020',
+          dot:'#c07070',
+          timeColor:'rgba(107,26,26,0.65)',
+          innerBg:'rgba(255,255,255,0.55)',
+          innerBorder:'rgba(160,60,60,0.18)',
+          nameColor:'#4a1010',
+          copyColor:'rgba(107,26,26,0.55)',
+          copyBg:'rgba(160,60,60,0.08)',
+          icon:null,
           timeLabel:'Borrowed at',
         }
       : {
-          bg:'linear-gradient(135deg, #1b4d1e, #2e7d32)',
-          border:'rgba(90,158,92,0.55)',
-          accent:'#a5d6a7',
-          accentDim:'rgba(165,214,167,0.80)',
+          bg:'rgba(232,242,235,0.97)',
+          border:'rgba(100,160,110,0.35)',
+          accent:'#2d5a35',
+          accentDim:'rgba(45,90,53,0.75)',
           label:'RETURNED',
-          labelColor:'#c8e6c9',
-          dot:'#81c784',
-          timeColor:'rgba(200,230,201,0.70)',
-          innerBg:'rgba(0,0,0,0.18)',
-          innerBorder:'rgba(90,158,92,0.28)',
-          nameColor:'rgba(200,230,201,0.90)',
-          copyColor:'rgba(200,230,201,0.60)',
-          copyBg:'rgba(0,0,0,0.22)',
-          icon:'📥',
+          labelColor:'#2d6b3a',
+          dot:'#6aaa78',
+          timeColor:'rgba(45,90,53,0.65)',
+          innerBg:'rgba(255,255,255,0.55)',
+          innerBorder:'rgba(100,160,110,0.20)',
+          nameColor:'#1e3d24',
+          copyColor:'rgba(45,90,53,0.55)',
+          copyBg:'rgba(100,160,110,0.10)',
+          icon:null,
           timeLabel:'Returned at',
         }
     : {
-        bg:'linear-gradient(135deg, #5a0a0a, #7a1a1a)',
-        border:'rgba(239,154,154,0.45)',
-        accent:'#ffcdd2',
-        accentDim:'rgba(255,205,210,0.80)',
+        bg:'rgba(245,235,235,0.97)',
+        border:'rgba(180,100,100,0.30)',
+        accent:'#7a2a2a',
+        accentDim:'rgba(122,42,42,0.75)',
         label:'FAILED',
-        labelColor:'#ffcdd2',
-        dot:'#ef9a9a',
+        labelColor:'#8b3030',
+        dot:'#c07070',
         timeColor:null,
-        innerBg:'rgba(0,0,0,0.20)',
-        innerBorder:'rgba(239,154,154,0.22)',
+        innerBg:'rgba(255,255,255,0.50)',
+        innerBorder:'rgba(180,100,100,0.18)',
         nameColor:null,
         copyColor:null,
         copyBg:null,
-        icon:'⚠',
+        icon:null,
         timeLabel:null,
       };
 
 
   return (
     <div style={{
-      borderRadius:16, overflow:'hidden',
-      border:`2px solid ${cfg.border}`,
+      borderRadius:14, overflow:'hidden',
+      border:`1.5px solid ${cfg.border}`,
       background: cfg.bg,
-      boxShadow:'0 10px 32px rgba(0,0,0,0.32)',
+      boxShadow:'0 4px 20px rgba(0,0,0,0.10)',
     }}>
-      <div style={{ height:3, background:`linear-gradient(90deg, transparent 5%, ${cfg.dot} 40%, ${cfg.dot} 60%, transparent 95%)` }}/>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'10px 18px', borderBottom:`1px solid ${cfg.innerBorder}` }}>
-        <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontSize:11, fontWeight:800, letterSpacing:'0.14em', textTransform:'uppercase', color: cfg.labelColor, fontFamily:'var(--font-sans)' }}>
-          <span style={{ fontSize:16 }}>{cfg.icon}</span>
+        <span style={{ display:'inline-flex', alignItems:'center', gap:7, fontSize:11, fontWeight:700, letterSpacing:'0.12em', textTransform:'uppercase', color: cfg.labelColor, fontFamily:'var(--font-sans)' }}>
           <span style={{ width:7, height:7, borderRadius:'50%', background:cfg.dot, flexShrink:0 }}/>
           {cfg.label}
         </span>
@@ -438,9 +415,9 @@ function ScanResultCard({ result }) {
       )}
       {!ok && (
         <div style={{ padding:'14px 18px' }}>
-          <div style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'11px 14px', borderRadius:10, background:'rgba(0,0,0,0.22)', border:`1px solid ${cfg.innerBorder}` }}>
-            <span style={{ color:'#ffcdd2', fontSize:14, flexShrink:0 }}>✕</span>
-            <span style={{ fontSize:13, color:'#ffcdd2', fontFamily:'var(--font-sans)', lineHeight:1.65, fontWeight:500 }}>{result.message || 'Unknown error'}</span>
+          <div style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'11px 14px', borderRadius:10, background:'rgba(180,80,80,0.08)', border:`1px solid ${cfg.innerBorder}` }}>
+            <span style={{ color:'#8b3030', fontSize:14, flexShrink:0 }}>✕</span>
+            <span style={{ fontSize:13, color:'#7a2a2a', fontFamily:'var(--font-sans)', lineHeight:1.65, fontWeight:500 }}>{result.message || 'Unknown error'}</span>
           </div>
         </div>
       )}
