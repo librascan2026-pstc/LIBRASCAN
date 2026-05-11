@@ -126,6 +126,18 @@ const TAB_CSS = `
     0%, 100% { opacity:1; }
     50%       { opacity:0.35; }
   }
+  @media (max-width: 480px) {
+    .am-tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
+    }
+    .am-tab {
+      padding: 10px 16px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+  }
 `;
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
@@ -241,7 +253,7 @@ function ScannerPanel({ onScan, scannerReady }) {
                 ? 'Reading QR code data…'
                 : !scannerReady
                 ? 'Scanner not detected — connect the Teklead T-D4 via USB'
-                : 'Ready — student can scan ID at any time, even while librarian is working'}
+                : 'Ready — student can scan ID at any time'}
             </div>
           </div>
 
@@ -385,7 +397,7 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
   });
 
   return (
-    <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'hidden', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
+    <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'visible', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
 
       {/* Header bar */}
       <div style={{
@@ -393,8 +405,9 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
         padding: '16px 20px',
         background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
         borderBottom: '1.5px solid rgba(139,0,0,0.1)',
+        borderRadius: '14px 14px 0 0',
       }}>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-primary)', fontWeight: 700 }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
           Attendance Log — {fmtDate(new Date())}
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -426,11 +439,9 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
           >
             <option value="all">All Status</option>
             <option value="time-in">Time In</option>
-            <option value="time-out">Time Out</option>
+
           </select>
-          <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
-            {filtered.length} record{filtered.length !== 1 ? 's' : ''}
-          </span>
+
         </div>
       </div>
 
@@ -583,7 +594,7 @@ function VisitorHistoryTable({ onFocusChange }) {
 
   return (
     <>
-      <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'hidden', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
+      <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'visible', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
 
         {/* Header bar */}
         <div style={{
@@ -591,8 +602,9 @@ function VisitorHistoryTable({ onFocusChange }) {
           padding: '16px 20px',
           background: 'linear-gradient(135deg, rgba(232,222,222,0.04), rgba(201,168,76,0.02))',
           borderBottom: '1.5px solid rgba(139,0,0,0.1)',
+          borderRadius: '14px 14px 0 0',
         }}>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-primary)', fontWeight: 700 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: 'var(--text-cream)', fontWeight: 700 }}>
             Visitor History
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -626,9 +638,7 @@ function VisitorHistoryTable({ onFocusChange }) {
               <option value="time-in">Time In</option>
               <option value="time-out">Time Out</option>
             </select>
-            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
-              {filtered.length} record{filtered.length !== 1 ? 's' : ''}
-            </span>
+
           </div>
         </div>
 

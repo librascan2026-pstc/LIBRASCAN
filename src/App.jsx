@@ -14,8 +14,10 @@ import {
 } from './constants'
 
 import { AuthProvider, useAuth } from './Login_SignUp/AuthContext'
+import { isAdminEmail } from './supabaseClient'
 import AuthRouter               from './Login_SignUp/AuthRouter'
 import Dashboard                from './Admin_Dashboard/Dashboard'
+import StudentDashboard         from './Student_Dashboard/StudentDashboard'
 import { AppLoader } from './PageTransition'
 
 // ─── Icon Components ──────────────────────────────────────────────────────────
@@ -131,88 +133,29 @@ function useInView(threshold = 0.2) {
 
 
 
-// ─── Student Dashboard ────────────────────────────────────────────────────────
-// Shown only to users with role === 'student'
-function StudentDashboard({ user, onSignOut }) {
-  const name = user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Student';
-  const borrowedBooks = [
-    { title:'Introduction to Algorithms', author:'Cormen et al.', due:'May 2, 2026', status:'On Time' },
-    { title:'Database System Concepts', author:'Silberschatz', due:'Apr 28, 2026', status:'Due Soon' },
-  ];
-
-  return (
-    <div style={{ minHeight:'100vh', background:'linear-gradient(135deg,#0f0000,#1a0500)', fontFamily:"'Crimson Text',Georgia,serif", color:'#F5E4A8' }}>
-      <nav style={{ background:'rgba(26,0,0,0.95)', borderBottom:'1px solid rgba(201,168,76,0.15)', padding:'14px 32px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ width:38, height:38, borderRadius:'50%', border:'2px solid #C9A84C', background:'rgba(201,168,76,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>📚</div>
-          <div style={{ fontSize:14, fontWeight:700, color:'#C9A84C', letterSpacing:'0.06em' }}>PSU LIBRARY</div>
-        </div>
-        <button onClick={onSignOut} style={{ padding:'7px 20px', background:'rgba(139,0,0,0.4)', border:'1px solid rgba(139,0,0,0.6)', borderRadius:20, color:'#F5E4A8', cursor:'pointer', fontSize:13, fontFamily:"'Crimson Text',serif" }}>
-          Sign Out
-        </button>
-      </nav>
-
-      <div style={{ maxWidth:900, margin:'0 auto', padding:'36px 24px' }}>
-        <div style={{ background:'linear-gradient(120deg,rgba(139,0,0,0.35),rgba(90,0,0,0.2))', border:'1px solid rgba(201,168,76,0.25)', borderRadius:16, padding:'28px 32px', marginBottom:28, display:'flex', alignItems:'center', gap:20 }}>
-          <div style={{ width:60, height:60, borderRadius:'50%', background:'rgba(201,168,76,0.15)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, flexShrink:0 }}>📖</div>
-          <div>
-            <h1 style={{ color:'#C9A84C', fontSize:22, margin:'0 0 6px', fontWeight:700 }}>Welcome, {name}!</h1>
-            <p style={{ color:'rgba(245,228,168,0.7)', fontSize:13, margin:0 }}>
-              Explore thousands of books, manage your loans, and track your library attendance.
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:24 }}>
-          <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(201,168,76,0.15)', borderRadius:14, padding:'22px' }}>
-            <h3 style={{ color:'#C9A84C', fontSize:15, margin:'0 0 16px', textTransform:'uppercase', letterSpacing:'0.05em' }}>My Borrowed Books</h3>
-            {borrowedBooks.map(({ title, author, due, status }) => (
-              <div key={title} style={{ paddingBottom:12, marginBottom:12, borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
-                <div style={{ fontSize:13.5, color:'#F5E4A8', fontWeight:600 }}>{title}</div>
-                <div style={{ fontSize:11.5, color:'rgba(245,228,168,0.5)', margin:'3px 0' }}>{author}</div>
-                <div style={{ display:'flex', justifyContent:'space-between', fontSize:11.5 }}>
-                  <span style={{ color:'rgba(201,168,76,0.6)' }}>Due: {due}</span>
-                  <span style={{ color: status === 'Due Soon' ? '#e67e22' : '#4caf8b', fontWeight:600 }}>{status}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ background:'rgba(255,255,255,0.03)', border:'1px solid rgba(201,168,76,0.15)', borderRadius:14, padding:'22px' }}>
-            <h3 style={{ color:'#C9A84C', fontSize:15, margin:'0 0 16px', textTransform:'uppercase', letterSpacing:'0.05em' }}>Search Catalog (OPAC)</h3>
-            <input type="text" placeholder="Search books, authors, subjects…"
-              style={{ width:'100%', padding:'10px 16px', borderRadius:22, border:'1.5px solid rgba(201,168,76,0.25)', background:'rgba(255,250,238,0.06)', color:'#F5E4A8', fontSize:13, fontFamily:"'Crimson Text',serif", outline:'none', boxSizing:'border-box', marginBottom:12 }} />
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
-              {['Browse All Books', 'New Arrivals', 'My Reading History', 'Library Hours'].map(label => (
-                <button key={label} style={{ padding:'10px', background:'rgba(201,168,76,0.08)', border:'1px solid rgba(201,168,76,0.2)', borderRadius:10, color:'rgba(245,228,168,0.8)', cursor:'pointer', fontSize:12, fontFamily:"'Crimson Text',serif", lineHeight:1.3 }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background:'rgba(255,255,255,0.02)', border:'1px solid rgba(201,168,76,0.1)', borderRadius:14, padding:'18px 24px', display:'flex', gap:32, flexWrap:'wrap' }}>
-          {[{ label:'Books Borrowed', val:'2 active' }, { label:'Overdue Fines', val:'₱0.00' }, { label:'Library Visits', val:'14 this sem' }, { label:'Account Status', val:'Active ✓' }].map(({ label, val }) => (
-            <div key={label}>
-              <div style={{ fontSize:10.5, color:'rgba(201,168,76,0.55)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3 }}>{label}</div>
-              <div style={{ fontSize:16, color:'#C9A84C', fontWeight:700 }}>{val}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Smart Root Dashboard — routes by role ────────────────────────────────────
 function RoleRouter({ user, onSignOut }) {
-  const { role } = useAuth();
-  // library_manager or admin → full Dashboard.jsx
-  if (role === 'library_manager' || role === 'admin') {
+  const { profile } = useAuth();
+
+  // Check role from all possible sources (most reliable first):
+  // 1. profiles table (loaded by AuthContext)
+  // 2. app_metadata (set server-side via Supabase Auth admin)
+  // 3. user_metadata (set at signup)
+  // 4. known admin email list (final fallback)
+  const role =
+    profile?.role ||
+    user?.app_metadata?.role ||
+    user?.user_metadata?.role ||
+    '';
+
+  const isAdmin =
+    role === 'library_manager' ||
+    role === 'admin' ||
+    isAdminEmail(user?.email);
+
+  if (isAdmin) {
     return <Dashboard user={user} onSignOut={onSignOut} />;
   }
-  // student (or any other role) → student view
   return <StudentDashboard user={user} onSignOut={onSignOut} />;
 }
 

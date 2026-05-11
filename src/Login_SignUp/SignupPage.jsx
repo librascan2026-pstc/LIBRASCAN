@@ -15,7 +15,7 @@ const PSU_PROGRAMS = [
   'BS Information Technology',
   'BS Education',
   'BS Business Administration',
-  'BS Entrepreneurship',
+  'BS Hospitality Management',
   
 ];
 

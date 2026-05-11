@@ -142,13 +142,13 @@ const CSS = `
   }
   @media (max-width: 840px) { .s-grid { grid-template-columns: 1fr; } }
 
-  /* ── Card ── white card on cream page background ── */
+  /* ── Card ── themed cream card consistent with dashboard ── */
   .s-card {
-    background: #FFFFFF;
-    border: 1px solid rgba(139,0,0,0.12);
-    border-radius: 12px;
-    padding: 22px 24px;
-    box-shadow: 0 1px 4px rgba(80,0,0,0.06), 0 4px 16px rgba(80,0,0,0.04);
+    background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
+    border: 1px solid rgba(139,0,0,0.14);
+    border-radius: 14px;
+    padding: 24px 26px;
+    box-shadow: 0 2px 8px rgba(80,0,0,0.07), 0 6px 24px rgba(80,0,0,0.05);
   }
   .s-card-h {
     font-family: var(--font-sans);
@@ -156,22 +156,25 @@ const CSS = `
     font-weight: 700;
     color: var(--text-primary);
     margin: 0 0 3px 0;
+    text-align: center;
   }
   .s-card-sub {
     font-size: 12px;
     color: var(--text-muted);
     line-height: 1.5;
     margin: 0 0 20px 0;
+    text-align: center;
   }
-  .s-line { height: 1px; background: rgba(139,0,0,0.09); margin: 18px 0; }
+  .s-line { height: 1px; background: rgba(139,0,0,0.10); margin: 18px 0; }
   .s-micro {
     font-family: var(--font-sans);
     font-size: 10.5px;
     font-weight: 700;
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--text-dim);
+    color: rgba(139,0,0,0.45);
     margin-bottom: 12px;
+    text-align: center;
   }
 
   /* ── Key-value info rows ── */
@@ -179,13 +182,16 @@ const CSS = `
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 0;
-    border-bottom: 1px solid rgba(139,0,0,0.07);
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    background: rgba(139,0,0,0.035);
+    border: 1px solid rgba(139,0,0,0.07);
     gap: 12px;
   }
-  .s-row:last-child { border-bottom: none; }
-  .s-row-k { font-size: 12px; color: var(--text-muted); flex-shrink: 0; }
-  .s-row-v { font-size: 12.5px; font-weight: 500; color: var(--text-primary); text-align: right; word-break: break-all; }
+  .s-row:last-child { margin-bottom: 0; }
+  .s-row-k { font-size: 11.5px; color: var(--text-muted); flex-shrink: 0; font-weight: 500; }
+  .s-row-v { font-size: 12.5px; font-weight: 600; color: var(--text-primary); text-align: right; word-break: break-all; }
 
   /* ── Form field ── */
   .s-field { margin-bottom: 14px; }
@@ -202,9 +208,9 @@ const CSS = `
   .s-input {
     width: 100%;
     padding: 9px 13px;
-    border: 1.5px solid rgba(139,0,0,0.18);
+    border: 1.5px solid rgba(139,0,0,0.16);
     border-radius: 8px;
-    background: #FAFAF8;
+    background: rgba(255,248,240,0.80);
     color: var(--text-primary);
     font-family: var(--font-sans);
     font-size: 13px;
@@ -215,11 +221,11 @@ const CSS = `
   .s-input:focus {
     border-color: rgba(123,0,0,0.50);
     box-shadow: 0 0 0 3px rgba(123,0,0,0.07);
-    background: #fff;
+    background: #fff8f2;
   }
   .s-input::placeholder { color: rgba(90,16,16,0.30); }
   .s-input.e { border-color: #C0392B !important; }
-  .s-input:disabled { background: rgba(139,0,0,0.04); color: var(--text-muted); cursor: not-allowed; }
+  .s-input:disabled { background: rgba(139,0,0,0.05); color: var(--text-muted); cursor: not-allowed; border-color: rgba(139,0,0,0.10); }
   .s-err  { display: block; margin-top: 4px; font-size: 11px; color: #C0392B; }
   .s-hint { display: block; margin-top: 4px; font-size: 11px; color: var(--text-dim); font-style: italic; }
 
@@ -286,35 +292,38 @@ const CSS = `
   .s-btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 
   /* ── Avatar ── */
-  .s-av-row {
-    display: flex; align-items: center; gap: 18px;
-    margin-bottom: 22px; padding-bottom: 20px;
-    border-bottom: 1px solid rgba(139,0,0,0.09);
+  .s-av-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px 0 22px;
+    border-bottom: 1px solid rgba(139,0,0,0.10);
+    margin-bottom: 20px;
   }
   .s-av-ring {
-    width: 72px; height: 72px; border-radius: 50%;
-    border: 2.5px solid rgba(201,168,76,0.45);
+    width: 90px; height: 90px; border-radius: 50%;
+    border: 3px solid rgba(201,168,76,0.55);
     overflow: hidden; position: relative; flex-shrink: 0;
-    background: rgba(123,0,0,0.10);
+    background: rgba(123,0,0,0.08);
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 0 0 4px rgba(201,168,76,0.08);
+    box-shadow: 0 0 0 5px rgba(201,168,76,0.12), 0 4px 18px rgba(80,0,0,0.14);
   }
   .s-av-ring img { width: 100%; height: 100%; object-fit: cover; }
   .s-av-init {
     font-family: var(--font-display);
-    font-size: 24px; font-weight: 700; color: var(--maroon);
+    font-size: 30px; font-weight: 700; color: var(--maroon);
   }
   .s-av-cam {
-    position: absolute; bottom: 0; right: 0;
-    width: 22px; height: 22px; border-radius: 50%;
-    background: var(--maroon); border: 2px solid #fff;
+    position: absolute; bottom: 2px; right: 2px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: var(--maroon); border: 2px solid #FDF6EC;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer; color: #F5E4A8; transition: background 0.14s;
   }
   .s-av-cam:hover:not(:disabled) { background: #8B0000; }
   .s-av-cam:disabled { opacity: 0.5; cursor: not-allowed; }
-  .s-av-name { font-size: 14px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
-  .s-av-role { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; }
+  .s-av-name { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 3px; text-align: center; }
+  .s-av-role { font-size: 12px; color: var(--text-muted); text-align: center; margin-bottom: 0; }
 
   /* ── Role badge ── */
   .s-badge {
@@ -331,8 +340,8 @@ const CSS = `
     gap: 14px;
     padding: 13px 16px;
     background: rgba(139,0,0,0.04);
-    border: 1px solid rgba(139,0,0,0.11);
-    border-radius: 9px;
+    border: 1px solid rgba(139,0,0,0.10);
+    border-radius: 10px;
     margin-bottom: 18px;
   }
   .s-mfa-label { font-size: 13px; font-weight: 700; color: var(--text-primary); margin-bottom: 2px; }
@@ -416,7 +425,7 @@ const CSS = `
     margin-top: 10px;
     border: 2px solid rgba(139,0,0,0.18);
     border-radius: 8px;
-    background: #FAFAF8;
+    background: rgba(255,248,240,0.80);
     color: var(--text-primary);
     font-family: 'Courier New', monospace;
     font-size: 22px; font-weight: 700;
@@ -430,7 +439,7 @@ const CSS = `
   /* ── Backup codes grid ── */
   .s-codes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; }
   .s-code {
-    background: #FAFAF8;
+    background: rgba(255,248,240,0.90);
     border: 1px solid rgba(139,0,0,0.12);
     border-radius: 6px;
     padding: 7px 10px;
@@ -626,8 +635,9 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
   };
 
   return (
-    <div className="s-av-row">
-      <div style={{ position: 'relative', flexShrink: 0 }}>
+    <div className="s-av-wrap">
+      {/* Avatar ring — centered, larger */}
+      <div style={{ position: 'relative', display: 'inline-block' }}>
         <div className="s-av-ring">
           {preview ? <img src={preview} alt="avatar" /> : <span className="s-av-init">{initials}</span>}
         </div>
@@ -639,21 +649,27 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
         </button>
         <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
       </div>
-      <div>
-        <div className="s-av-name">{displayName}</div>
-        <div className="s-av-role">{roleLabel}</div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button className="s-btn o" style={{ padding: '6px 14px', fontSize: 12 }} onClick={() => ref.current?.click()} disabled={busy}>
-            {busy ? 'Uploading…' : 'Upload Photo'}
+
+      {/* Name + role */}
+      <div className="s-av-name" style={{ marginTop: 12, fontSize: 16 }}>{displayName}</div>
+      <div className="s-av-role" style={{ marginBottom: 14 }}>{roleLabel}</div>
+
+      {/* Action buttons */}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
+        <button className="s-btn o" style={{ padding: '6px 16px', fontSize: 12 }} onClick={() => ref.current?.click()} disabled={busy}>
+          {busy ? 'Uploading…' : 'Upload Photo'}
+        </button>
+        {preview && (
+          <button className="s-btn d" style={{ padding: '6px 16px', fontSize: 12 }} onClick={handleRemove} disabled={busy}>
+            Remove
           </button>
-          {preview && (
-            <button className="s-btn d" style={{ padding: '6px 14px', fontSize: 12 }} onClick={handleRemove} disabled={busy}>
-              Remove
-            </button>
-          )}
-        </div>
-        <span className="s-hint" style={{ marginTop: 6 }}>JPG, PNG or WebP · Max 2 MB</span>
+        )}
       </div>
+
+      {/* Hint */}
+      <span className="s-hint" style={{ marginTop: 8, display: 'block', textAlign: 'center' }}>
+        JPG, PNG or WebP · Max 2 MB
+      </span>
     </div>
   );
 }
@@ -664,7 +680,8 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
 function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
-  const fullName   = `${firstName} ${lastName}`.trim() || user?.email?.split('@')[0] || 'Library Manager';
+  const middleName = profile?.middle_name || '';
+  const fullName   = [firstName, middleName, lastName].filter(Boolean).join(' ').trim() || user?.email?.split('@')[0] || 'Library Manager';
   const email      = user?.email || '';
   const role       = profile?.role || user?.user_metadata?.role || 'library_manager';
   const username   = profile?.username || '—';
@@ -676,11 +693,13 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   const [form,   setForm]   = useState({
     first_name:  firstName,
     last_name:   lastName,
-    middle_name: profile?.middle_name || '',
+    middle_name: middleName,
     username:    profile?.username    || '',
+    email:       email,
   });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  const isAdmin = role === 'admin';
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
 
@@ -688,6 +707,13 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
     const errs = {};
     if (!form.first_name.trim()) errs.first_name = 'First name is required.';
     if (!form.last_name.trim())  errs.last_name  = 'Last name is required.';
+    if (isAdmin && form.email.trim() !== email) {
+      if (!form.email.trim()) {
+        errs.email = 'Email address is required.';
+      } else if (!/^[^\s@]+@pampangastateu\.edu\.ph$/.test(form.email.trim())) {
+        errs.email = 'Email must be a @pampangastateu.edu.ph address.';
+      }
+    }
     if (Object.keys(errs).length) { setErrors(errs); return; }
     if (!uid) { onToast('Profile not found. Please refresh.', false); return; }
     setSaving(true);
@@ -700,11 +726,16 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         updated_at:  new Date().toISOString(),
       }).eq('id', uid);
       if (pErr) throw pErr;
-      const { error: mErr } = await supabase.auth.updateUser({
-        data: { first_name: form.first_name.trim(), last_name: form.last_name.trim() },
-      });
-      if (mErr) throw mErr;
-      onToast('Profile updated successfully.', true);
+      const metaUpdate = { first_name: form.first_name.trim(), last_name: form.last_name.trim() };
+      if (isAdmin && form.email.trim() && form.email.trim() !== email) {
+        const { error: mErr } = await supabase.auth.updateUser({ email: form.email.trim(), data: metaUpdate });
+        if (mErr) throw mErr;
+        onToast('Profile updated. Check your new email inbox to confirm the change.', true);
+      } else {
+        const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
+        if (mErr) throw mErr;
+        onToast('Profile updated successfully.', true);
+      }
       onRefresh?.();
     } catch (err) { onToast(err.message, false); }
     finally { setSaving(false); }
@@ -714,8 +745,8 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
     <div className="s-grid">
       {/* ── Left: Account Info ── */}
       <div className="s-card">
-        <p className="s-card-h">Account Information</p>
-        <p className="s-card-sub">Your current profile at a glance.</p>
+        <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Account Information</p>
+        <p className="s-card-sub" style={{ marginBottom: 20 }}>Your current profile at a glance.</p>
 
         <AvatarUpload
           avatarUrl={profile?.avatar_url || null}
@@ -726,6 +757,9 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
           onToast={onToast}
           onRefresh={onRefresh}
         />
+
+        <div className="s-line" style={{ margin: '4px 0 16px' }} />
+        <div className="s-micro" style={{ marginBottom: 14 }}>Profile Details</div>
 
         {[
           { k: 'Full Name',    v: fullName },
@@ -743,8 +777,14 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
 
       {/* ── Right: Edit Form ── */}
       <div className="s-card">
-        <p className="s-card-h">Edit Profile</p>
-        <p className="s-card-sub">Update your name and username. To change your email, contact an administrator.</p>
+        <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Edit Profile</p>
+        <p className="s-card-sub" style={{ marginBottom: 20 }}>
+          {isAdmin
+            ? 'Update your name, username, and email address.'
+            : 'Update your name and username. To change your email, contact an administrator.'}
+        </p>
+
+        <div className="s-micro" style={{ marginBottom: 14 }}>Personal Information</div>
 
         <div className="s-2">
           <div className="s-field">
@@ -767,22 +807,47 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
             onChange={e => set('middle_name', e.target.value)} placeholder="Middle name" />
         </div>
 
+        <div className="s-line" style={{ margin: '6px 0 18px' }} />
+        <div className="s-micro" style={{ marginBottom: 14 }}>Account Details</div>
+
         <div className="s-field">
           <label className="s-label">Username</label>
           <input className="s-input" value={form.username}
             onChange={e => set('username', e.target.value)} placeholder="e.g. librarian_psu" />
         </div>
 
+        {/* Email — editable for admin, read-only for everyone else */}
         <div className="s-field">
-          <label className="s-label">Email Address</label>
-          <input className="s-input" value={email} disabled />
-          <span className="s-hint">Email cannot be changed here. Contact an administrator.</span>
+          <label className="s-label">
+            Email Address
+            {isAdmin && (
+              <span style={{
+                marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
+                textTransform: 'uppercase', padding: '1px 7px', borderRadius: 20,
+                background: 'rgba(201,168,76,0.12)', color: '#7B5500',
+                border: '1px solid rgba(201,168,76,0.30)', verticalAlign: 'middle',
+              }}>Admin</span>
+            )}
+          </label>
+          <input
+            className={`s-input${errors.email ? ' e' : ''}`}
+            value={form.email}
+            onChange={e => isAdmin && set('email', e.target.value)}
+            disabled={!isAdmin}
+            placeholder="username@pampangastateu.edu.ph"
+          />
+          {errors.email
+            ? <span className="s-err">{errors.email}</span>
+            : isAdmin
+              ? <span className="s-hint">Only @pampangastateu.edu.ph addresses are allowed.</span>
+              : <span className="s-hint">Email cannot be changed here. Contact an administrator.</span>
+          }
         </div>
 
-        <div className="s-line" />
+        <div className="s-line" style={{ margin: '6px 0 18px' }} />
 
         <div className="s-btn-row">
-          <button className="s-btn p" onClick={handleSave} disabled={saving}>
+          <button className="s-btn p" style={{ paddingLeft: 24, paddingRight: 24 }} onClick={handleSave} disabled={saving}>
             {saving
               ? 'Saving…'
               : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>Save Changes</>
@@ -1229,8 +1294,6 @@ export default function Settings({ user, onSignOut }) {
       icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> },
     { id: 'security', label: 'Security',
       icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
-    { id: 'sessions', label: 'Sessions',
-      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> },
   ];
 
   return (
@@ -1252,7 +1315,6 @@ export default function Settings({ user, onSignOut }) {
       {/* Content */}
       {tab === 'profile'  && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
       {tab === 'security' && <SecurityTab onToast={toast} />}
-      {tab === 'sessions' && <SessionsTab  />}
     </div>
   );
 }

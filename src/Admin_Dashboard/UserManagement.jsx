@@ -395,7 +395,7 @@ export default function UserManagement({ onStatsRefresh }) {
     try {
       const { data, error } = await supabaseAdmin
         .from('profiles')
-        .select('id, first_name, last_name, email, role, created_at')
+        .select('id, first_name, last_name, email, role, created_at, avatar_url')
         .order('created_at', { ascending: false });
       if (error) throw error;
       setUsers(data || []);
@@ -481,38 +481,45 @@ export default function UserManagement({ onStatsRefresh }) {
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
 
-      {/* ── Header Actions ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 20 }}>
-        <button
-          className="lm-btn lm-btn--primary"
-          style={{ gap: 7 }}
-          onClick={() => { setModalUser(null); setShowModal(true); }}
-        >
-          {Icon.plus(14)} Add User
-        </button>
-      </div>
-
-      {/* ── Summary chips ── */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      {/* ── Summary chips + Header Actions (single row) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
-          { label: 'Total Users',      value: counts.total,   icon: Icon.users(15),   color: G },
-          { label: 'Students',         value: counts.student, icon: Icon.student(15), color: '#64b5f6' },
-          { label: 'Library Managers', value: counts.manager, icon: Icon.shield(15),  color: '#ef9a9a' },
-          { label: 'Administrators',   value: counts.admin,   icon: Icon.shield(15),  color: G },
-        ].map(({ label, value, icon, color }) => (
+          { label: 'Total Users',    value: counts.total   },
+          { label: 'Students',       value: counts.student },
+          { label: 'Administrators', value: counts.admin   },
+        ].map(({ label, value }) => (
           <div key={label} style={{
             padding: '8px 16px', borderRadius: 8,
             background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
             border: '1px solid rgba(139,0,0,0.12)',
             display: 'flex', alignItems: 'center', gap: 10,
           }}>
-            <span style={{ color }}>{icon}</span>
             <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-display)' }}>
               {loading ? '—' : value}
             </span>
             <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
           </div>
         ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button onClick={loadUsers} title="Refresh" style={{
+            padding: '9px 11px', borderRadius: 8, fontSize: 12,
+            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
+            color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+            transition: 'all 0.18s',
+          }}
+            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>
+          </button>
+          <button
+            className="lm-btn lm-btn--primary"
+            style={{ gap: 7 }}
+            onClick={() => { setModalUser(null); setShowModal(true); }}
+          >
+            {Icon.plus(14)} Add User
+          </button>
+        </div>
       </div>
 
       {/* ── Filters ── */}
@@ -538,7 +545,6 @@ export default function UserManagement({ onStatsRefresh }) {
         <select className="lm-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
           <option value="all">All Roles</option>
           <option value="student">Students</option>
-          <option value="library_manager">Library Managers</option>
           <option value="admin">Administrators</option>
         </select>
         <span style={{
@@ -566,9 +572,10 @@ export default function UserManagement({ onStatsRefresh }) {
       ) : (
         <div style={{
           borderRadius: 10, border: '1px solid rgba(139,0,0,0.13)',
-          overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+          overflow: 'auto', overflowX: 'auto', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+          WebkitOverflowScrolling: 'touch',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 520 }}>
             <colgroup>
               <col style={{ width: '26%' }} />
               <col style={{ width: '28%' }} />
@@ -578,15 +585,15 @@ export default function UserManagement({ onStatsRefresh }) {
             </colgroup>
             <thead>
               <tr style={{
-                background: 'linear-gradient(135deg,rgba(139,0,0,0.10),rgba(201,168,76,0.06))',
-                borderBottom: '1.5px solid rgba(139,0,0,0.15)',
+                background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+                borderBottom: '2px solid rgba(201,168,76,0.35)',
               }}>
                 {['Name', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
                   <th key={h} style={{
                     padding: '11px 14px', textAlign: 'left',
                     fontFamily: 'var(--font-sans)', fontSize: 10.5,
                     fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: 'var(--text-dim)', whiteSpace: 'nowrap',
+                    color: '#F5E4A8', whiteSpace: 'nowrap',
                   }}>{h}</th>
                 ))}
               </tr>
@@ -645,8 +652,11 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: 'var(--font-display)', fontSize: 11, fontWeight: 600, color: GP,
             boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+            overflow: 'hidden',
           }}>
-            {initials}
+            {u.avatar_url
+              ? <img src={u.avatar_url} alt={initials} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+              : initials}
           </div>
           <span style={{
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

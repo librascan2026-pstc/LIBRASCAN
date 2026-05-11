@@ -35,16 +35,16 @@ const NavIcons = {
 
 // ─── Nav Structure ────────────────────────────────────────────────────────────
 const NAV = [
-  { id: 'overview',    label: 'Overview',             icon: 'overview',   section: 'MAIN' },
-  { id: 'attendance',  label: 'Attendance Monitoring', icon: 'attendance', section: 'MAIN' },
-  { id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: 'LIBRARY' },
-  { id: 'catalog',  label: 'Book Catalog',      icon: 'catalog',  section: 'LIBRARY' },
-  { id: 'users',    label: 'User Management',   icon: 'users',    section: 'ADMIN' },
-  { id: 'reports',  label: 'Reports & Analytics', icon: 'reports', section: 'ADMIN' },
-  { id: 'settings', label: 'Settings',          icon: 'settings', section: 'SYSTEM' },
+  { id: 'overview',    label: 'Overview',             icon: 'overview',   section: '' },
+  { id: 'attendance',  label: 'Attendance Monitoring', icon: 'attendance', section: '' },
+  { id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: '' },
+  { id: 'catalog',  label: 'Book Catalog',      icon: 'catalog',  section: '' },
+  { id: 'users',    label: 'User Management',   icon: 'users',    section: '' },
+  { id: 'reports',  label: 'Reports & Analytics', icon: 'reports', section: '' },
+  { id: 'settings', label: 'Settings',          icon: 'settings', section: '' },
 ];
 
-const SECTION_LABELS = ['MAIN', 'LIBRARY', 'ADMIN', 'SYSTEM'];
+const SECTION_LABELS = ['',  ];
 
 const LABEL_MAP = {
   overview:    'Overview Dashboard',
@@ -62,6 +62,8 @@ export default function Dashboard({ user, onSignOut }) {
   const [activeTab, setActiveTab]       = useState('overview');
   const [notifOpen, setNotifOpen]       = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen]     = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
   // Derive display info
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name || '';
@@ -75,10 +77,12 @@ export default function Dashboard({ user, onSignOut }) {
 
   const navigate = (tab) => {
     setActiveTab(tab);
+    setMobileOpen(false);
   };
 
   const navigateFromOverview = (tab) => {
     setActiveTab(tab);
+    setMobileOpen(false);
   };
 
   const renderContent = () => {
@@ -103,8 +107,13 @@ export default function Dashboard({ user, onSignOut }) {
   return (
     <div className="lm-shell">
 
+      {/* ── Mobile sidebar overlay ── */}
+      {mobileOpen && (
+        <div className="lm-sidebar-overlay" onClick={() => setMobileOpen(false)} />
+      )}
+
       {/* ── Sidebar ── */}
-      <aside className={`lm-sidebar${sidebarCollapsed ? ' collapsed' : ''}`}>
+      <aside className={`lm-sidebar${sidebarCollapsed ? ' collapsed' : ''}${mobileOpen ? ' mobile-open' : ''}`}>
 
         {/* Logo */}
         <div className="lm-sidebar-logo">
@@ -162,7 +171,7 @@ export default function Dashboard({ user, onSignOut }) {
         <div className="lm-sidebar-footer">
           <button
             className="lm-nav-item lm-nav-item--logout"
-            onClick={onSignOut}
+            onClick={() => setShowLogoutConfirm(true)}
             data-tooltip={sidebarCollapsed ? 'Sign Out' : undefined}
             title={sidebarCollapsed ? 'Sign Out' : undefined}
           >
@@ -172,12 +181,134 @@ export default function Dashboard({ user, onSignOut }) {
         </div>
       </aside>
 
+      {/* ── Logout Confirmation Modal ── */}
+      {showLogoutConfirm && (
+        <div style={{
+          position:'fixed', inset:0, zIndex:9999,
+          background:'rgba(0,0,0,0.55)',
+          backdropFilter:'blur(6px)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+        }} onClick={() => setShowLogoutConfirm(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width:460,
+            background:'var(--cream)',
+            borderRadius:16,
+            overflow:'hidden',
+            boxShadow:'0 24px 60px rgba(0,0,0,0.40)',
+            animation:'lm-fade-in .22s ease both',
+          }}>
+
+            {/* ── Maroon header band ── */}
+            <div style={{
+              background:'linear-gradient(135deg, var(--maroon), var(--maroon-deep))',
+              padding:'22px 28px',
+              display:'flex', alignItems:'center', gap:14,
+            }}>
+              <div style={{
+                width:38, height:38, borderRadius:'50%',
+                background:'rgba(0,0,0,0.22)',
+                border:'1.5px solid rgba(201,168,76,0.35)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                flexShrink:0,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.90)" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </div>
+              <div style={{ textAlign:'left' }}>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:16, fontWeight:700, color:'var(--gold-pale)', letterSpacing:'.06em' }}>
+                  Sign Out
+                </div>
+                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'rgba(245,228,168,0.55)', marginTop:2 }}>
+                  This will end your current session
+                </div>
+              </div>
+            </div>
+
+            {/* ── Body ── */}
+            <div style={{ padding:'24px 28px 28px' }}>
+              {/* Info card */}
+              <div style={{
+                background:'rgba(139,0,0,0.06)',
+                border:'1px solid rgba(139,0,0,0.14)',
+                borderRadius:10,
+                padding:'14px 18px',
+                textAlign:'left',
+                marginBottom:24,
+              }}>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:14, fontWeight:600, color:'var(--text-primary)', letterSpacing:'.03em', textAlign:'Center' }}>
+                  Are you sure you want to sign out?
+                </div>
+                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', marginTop:5, textAlign:'Center' }}>
+                  of the PSU Library System
+                </div>
+              </div>
+
+              {/* Buttons */}
+              <div style={{ display:'flex', gap:12 }}>
+                <button
+                  onClick={() => setShowLogoutConfirm(false)}
+                  style={{
+                    flex:1, padding:'12px',
+                    background:'transparent',
+                    border:'1.5px solid rgba(139,0,0,0.22)',
+                    borderRadius:10,
+                    color:'var(--text-secondary)',
+                    fontFamily:'var(--font-display)',
+                    fontSize:13, fontWeight:600,
+                    letterSpacing:'.05em',
+                    cursor:'pointer', transition:'all .18s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background='rgba(139,0,0,0.06)'; e.currentTarget.style.borderColor='rgba(139,0,0,0.35)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='rgba(139,0,0,0.22)'; }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onSignOut}
+                  style={{
+                    flex:1, padding:'12px',
+                    background:'linear-gradient(135deg,#8B0000,#6B0000)',
+                    border:'none',
+                    borderRadius:10,
+                    color:'#F5E4A8',
+                    fontFamily:'var(--font-display)',
+                    fontSize:13, fontWeight:700,
+                    letterSpacing:'.05em',
+                    cursor:'pointer', transition:'all .18s',
+                    boxShadow:'0 4px 14px rgba(90,0,0,0.35)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background='linear-gradient(135deg,#6B0000,#4A0000)'; e.currentTarget.style.boxShadow='0 6px 20px rgba(80,0,0,.50)'; e.currentTarget.style.transform='translateY(-1px)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='linear-gradient(135deg,#8B0000,#6B0000)'; e.currentTarget.style.boxShadow='0 4px 14px rgba(90,0,0,0.35)'; e.currentTarget.style.transform='none'; }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Main Area ── */}
       <div className={`lm-main${sidebarCollapsed ? ' sidebar-collapsed' : ''}`}>
 
         {/* Topbar */}
         <header className="lm-topbar">
           <div className="lm-topbar-left">
+            {/* Hamburger — only visible on mobile via CSS */}
+            <button
+              className="lm-hamburger"
+              onClick={() => setMobileOpen(o => !o)}
+              aria-label="Toggle menu"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="3" y1="6" x2="21" y2="6"/>
+                <line x1="3" y1="12" x2="21" y2="12"/>
+                <line x1="3" y1="18" x2="21" y2="18"/>
+              </svg>
+            </button>
             <div className="lm-topbar-title">{LABEL_MAP[activeTab] || 'Dashboard'}</div>
             <div className="lm-breadcrumb">
               {activeTab === 'overview'    && "Welcome back. Here's what's happening at the library today."}

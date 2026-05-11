@@ -910,6 +910,18 @@ const TAB_CSS = `
     background: rgba(139,0,0,0.15);
     color: #8B0000;
   }
+  @media (max-width: 480px) {
+    .bm-tabs {
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-wrap: nowrap;
+    }
+    .bm-tab {
+      padding: 10px 16px;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+  }
 `;
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -1821,7 +1833,7 @@ export default function BookManagement() {
       {activeTab === 'history' && <>
 
       {/* ── Transaction Table ── */}
-      <div className="lm-panel" style={{ marginBottom:0, padding:0, overflow:'hidden', borderRadius:14, border:'1.5px solid rgba(139,0,0,0.14)' }}>
+      <div className="lm-panel" style={{ marginBottom:0, padding:0, overflow:'visible', borderRadius:14, border:'1.5px solid rgba(139,0,0,0.14)' }}>
 
         {/* Table header bar */}
         <div style={{
@@ -1829,6 +1841,7 @@ export default function BookManagement() {
           padding:'16px 20px',
           background:`linear-gradient(135deg, rgba(232, 222, 222, 0.04), rgba(201,168,76,0.02))`,
           borderBottom:'1.5px solid rgba(139,0,0,0.1)',
+          borderRadius:'14px 14px 0 0',
         }}>
           <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:'var(--text-cream)', fontWeight:700 }}>
             Transaction History
@@ -1864,9 +1877,7 @@ export default function BookManagement() {
               <option value="borrowed">Borrowed</option>
               <option value="returned">Returned</option>
             </select>
-            <span style={{ fontSize:11.5, color:'var(--text-dim)', fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>
-              {filtered.length} record{filtered.length !== 1 ? 's' : ''}
-            </span>
+
           </div>
         </div>
 

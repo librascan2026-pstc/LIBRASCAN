@@ -13,7 +13,6 @@ const GP = '#F5E4A8';
 const BUCKET = 'book-images';
 
 const SHELF_LOCATIONS = [
-  'All Book',
   'Filipiniana Section',
   'Circulation Section',
   'Reference Section',
@@ -1734,8 +1733,27 @@ export default function Book_Catalog() {
     <div className="lm-module">
       <Toast message={toast.msg} type={toast.type} />
 
-      {/* ── Header Actions ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, alignItems: 'center', marginBottom: 20 }}>
+      {/* ── Summary Chips + Header Actions (single row) ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Total Titles', value: totalBooks },
+          { label: 'Total Copies', value: totalCopies },
+          { label: 'Available', value: availableCount },
+          { label: 'Borrowed', value: totalBooks - availableCount },
+        ].map(({ label, value }) => (
+          <div key={label} style={{
+            padding: '8px 16px', borderRadius: 8,
+            background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
+            border: '1px solid rgba(139,0,0,0.12)',
+            display: 'flex', alignItems: 'center', gap: 10,
+          }}>
+            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-display)' }}>
+              {loading ? '—' : value}
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
+          </div>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={fetchBooks} title="Refresh" style={{
             padding: '9px 11px', borderRadius: 8, fontSize: 12,
             border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
@@ -1760,28 +1778,7 @@ export default function Book_Catalog() {
           >
             {Ic.plus} Add Book
           </button>
-      </div>
-
-      {/* ── Summary Chips ── */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Total Titles', value: totalBooks },
-          { label: 'Total Copies', value: totalCopies },
-          { label: 'Available', value: availableCount },
-          { label: 'Borrowed', value: totalBooks - availableCount },
-        ].map(({ label, value }) => (
-          <div key={label} style={{
-            padding: '8px 16px', borderRadius: 8,
-            background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
-            border: '1px solid rgba(139,0,0,0.12)',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-display)' }}>
-              {loading ? '—' : value}
-            </span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
-          </div>
-        ))}
+        </div>
       </div>
 
       {/* ── Filters ── */}
