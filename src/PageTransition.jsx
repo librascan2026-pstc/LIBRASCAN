@@ -1,15 +1,6 @@
-// src/PageTransition.jsx
-// ── AESTHETIC PAGE TRANSITION LOADER ──────────────────────────────────────────
-// A cinematic full-screen transition that plays when navigating between pages.
-// Features: book-page-turn effect, gold particle dust, maroon curtain sweep.
-// Usage: wrap any page-change trigger with <PageTransition key={page} />
-//
-// Also exports: <AppLoader /> — the initial auth-loading screen (replaces
-// the plain spinner in App.jsx)
-
 import { useEffect, useState, useRef } from 'react';
 
-// ── Keyframes injected once globally ──────────────────────────────────────────
+
 const STYLES = `
   @keyframes pt-spin     { to { transform: rotate(360deg); } }
   @keyframes pt-fadeIn   { from { opacity: 0; } to { opacity: 1; } }
@@ -53,7 +44,7 @@ function injectStyles() {
   document.head.appendChild(el);
 }
 
-// ── Gold particle ──────────────────────────────────────────────────────────────
+
 function Particle({ x, delay, size }) {
   return (
     <div style={{
@@ -70,7 +61,7 @@ function Particle({ x, delay, size }) {
   );
 }
 
-// ── SVG Decorative ring ───────────────────────────────────────────────────────
+
 function DecorRing({ r, opacity, delay }) {
   return (
     <circle
@@ -87,7 +78,7 @@ function DecorRing({ r, opacity, delay }) {
   );
 }
 
-// ── AppLoader: initial auth/session loading ───────────────────────────────────
+
 export function AppLoader() {
   injectStyles();
   const [dots, setDots] = useState('');
@@ -99,7 +90,7 @@ export function AppLoader() {
     return () => clearInterval(id);
   }, []);
 
-  // Generate stable particles
+
   const particles = useRef(
     Array.from({ length: 12 }, (_, i) => ({
       x: 10 + (i * 7.5),
@@ -115,25 +106,25 @@ export function AppLoader() {
       background: '#1a0000',
       overflow: 'hidden',
     }}>
-      {/* Background texture */}
+  
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'url(/LoginBG.png)',
         backgroundSize: 'cover', backgroundPosition: 'center',
         opacity: 0.18,
       }} />
-      {/* Deep maroon gradient overlay */}
+
       <div style={{
         position: 'absolute', inset: 0,
         background: 'radial-gradient(ellipse at center, rgba(80,0,0,0.5) 0%, rgba(10,0,0,0.9) 70%)',
       }} />
 
-      {/* Decorative SVG rings */}
+
       <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', overflow: 'visible', pointerEvents: 'none' }}>
         <DecorRing r={120} opacity={0.35} delay={0}   />
         <DecorRing r={180} opacity={0.2}  delay={0.4} />
         <DecorRing r={240} opacity={0.1}  delay={0.8} />
-        {/* Diagonal lines */}
+      
         {Array.from({ length: 8 }, (_, i) => (
           <line key={i}
             x1={`${i * 14}%`} y1="0"
@@ -143,20 +134,20 @@ export function AppLoader() {
         ))}
       </svg>
 
-      {/* Gold dust particles */}
+
       <div style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
         {particles.map((p, i) => <Particle key={i} {...p} />)}
       </div>
 
-      {/* Center content */}
+
       <div style={{
         position: 'relative', zIndex: 2,
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0,
         animation: 'pt-logoIn 0.7s ease forwards',
       }}>
-        {/* Logo with animated golden ring */}
+
         <div style={{ position: 'relative', marginBottom: 28, animation: 'pt-float 3s ease-in-out infinite' }}>
-          {/* Outer spinning ring */}
+
           <div style={{
             position: 'absolute', inset: -6,
             border: '1.5px solid transparent',
@@ -165,7 +156,7 @@ export function AppLoader() {
             borderRadius: '50%',
             animation: 'pt-spin 1.4s linear infinite',
           }} />
-          {/* Inner spinning ring (reverse) */}
+     
           <div style={{
             position: 'absolute', inset: -12,
             border: '1px solid transparent',
@@ -186,7 +177,7 @@ export function AppLoader() {
           />
         </div>
 
-        {/* Title */}
+
         <div style={{
           fontFamily: "'Playfair Display', Georgia, serif",
           fontSize: 13, fontWeight: 700,
@@ -201,7 +192,7 @@ export function AppLoader() {
           PSU Library
         </div>
 
-        {/* Gold progress bar */}
+    
         <div style={{
           width: 120, height: 2,
           background: 'rgba(201,168,76,0.15)',
@@ -216,7 +207,7 @@ export function AppLoader() {
           }} />
         </div>
 
-        {/* Status text */}
+       
         <p style={{
           color: 'rgba(201,168,76,0.55)',
           fontSize: 9.5,
@@ -234,22 +225,16 @@ export function AppLoader() {
   );
 }
 
-// ── PageTransition: plays on every page/route change ─────────────────────────
-// Usage in AuthRouter or LandingApp:
-//   wrap route changes with: setTransitioning(true) → render <PageTransition onDone={() => actuallyChangePage()} />
-//
-// OR simpler: just render this as an overlay during the transition phase.
-// The component auto-calls onDone after the animation completes.
 export function PageTransition({ onDone, label = '' }) {
   injectStyles();
-  const [phase, setPhase] = useState('in'); // 'in' → 'hold' → 'out'
+  const [phase, setPhase] = useState('in'); 
 
   useEffect(() => {
-    // Phase 1: curtain sweeps in (400ms)
+
     const t1 = setTimeout(() => setPhase('hold'), 100);
-    // Phase 2: hold briefly (300ms)
+
     const t2 = setTimeout(() => setPhase('out'), 400);
-    // Phase 3: curtain sweeps out, call onDone
+
     const t3 = setTimeout(() => onDone?.(), 7050);
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   }, []);
@@ -267,7 +252,7 @@ export function PageTransition({ onDone, label = '' }) {
 
   return (
     <div style={curtainStyle}>
-      {/* Gold diagonal stripe overlay */}
+
       <div style={{
         position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none',
       }}>
@@ -281,7 +266,6 @@ export function PageTransition({ onDone, label = '' }) {
         ))}
       </div>
 
-      {/* Logo + label */}
       <div style={{
         display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
         animation: 'pt-logoIn 0.3s 0.15s ease both',
@@ -308,12 +292,7 @@ export function PageTransition({ onDone, label = '' }) {
   );
 }
 
-// ── usePageTransition hook ─────────────────────────────────────────────────────
-// Returns: { transitioning, startTransition(cb) }
-// Usage:
-//   const { transitioning, startTransition } = usePageTransition();
-//   <button onClick={() => startTransition(() => setPage('login'))}>Go</button>
-//   {transitioning && <PageTransition onDone={...} />}
+
 export function usePageTransition() {
   const [transitioning, setTransitioning] = useState(false);
   const pendingCb = useRef(null);

@@ -1,14 +1,8 @@
-/* ============================================================
-Dashboard.css — LIBRASCAN QR Library Management System
-PSU Sto. Tomas Campus — Maroon & Gold Academic Theme
-Redesigned to EXACTLY match reference UI
-============================================================ */
-
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
 
-/* ─── CSS Variables ──────────────────────────────────────────────────────── */
+
 :root {
-  /* Core Palette — matches reference exactly */
+  
   --maroon:         #7B0000;
   --maroon-deep:    #5A0000;
   --maroon-mid:     #8B0000;
@@ -23,28 +17,28 @@ Redesigned to EXACTLY match reference UI
   --gold-dim:       #9E7D35;
   --gold-border:    rgba(201,168,76,0.45);
 
-  /* Cream/Parchment — main content background (from reference) */
+  
   --cream:          #FDF8F0;
   --cream-light:    #FDF8F0;
   --cream-dark:     #FDF8F0;
   --cream-bg:       #FDF8F0;
 
-  /* Backgrounds */
-  --bg-base:        #FDF8F0;   /* Parchment/cream main area */
-  --bg-sidebar:     #6E0000;   /* Deep maroon sidebar */
+  
+  --bg-base:        #FDF8F0;   
+  --bg-sidebar:     #6E0000;   
   --bg-surface:     #EAD9B4;
-  --bg-card:        #7A0000;   /* Maroon cards (stat cards, panels) */
+  --bg-card:        #7A0000;   
   --bg-card-alt:    #6B0000;
   --bg-card-hover:  #8B0000;
   --bg-hover:       rgba(123,0,0,0.12);
   --bg-active:      rgba(245,228,168,0.22);
   --bg-gold-subtle: rgba(201,168,76,0.10);
 
-  /* Content area panels (cream bg) */
+  
   --panel-bg:       #EAD9B4;
   --panel-border:   rgba(139,0,0,0.18);
 
-  /* Text on cream backgrounds */
+  
   --text-primary:   #3A0000;
   --text-secondary: #5A1010;
   --text-muted:     #7A3030;
@@ -52,24 +46,24 @@ Redesigned to EXACTLY match reference UI
   --text-white:     #FFFFFF;
   --text-cream:     #F5E4A8;
 
-  /* Sidebar text */
+  
   --sidebar-text:       rgba(245,228,168,0.90);
   --sidebar-text-dim:   rgba(245,228,168,0.45);
   --sidebar-text-muted: rgba(245,228,168,0.60);
 
-  /* Borders */
+  
   --border:         rgba(139,0,0,0.18);
   --border-card:    rgba(201,168,76,0.40);
   --border-hover:   rgba(201,168,76,0.60);
   --border-active:  rgba(201,168,76,0.75);
   --border-cream:   rgba(139,0,0,0.18);
 
-  /* Fonts */
+  
   --font-display: 'Cinzel', 'Cormorant Garamond', serif;
   --font-serif:   'Cormorant Garamond', Georgia, serif;
   --font-sans:    'DM Sans', system-ui, sans-serif;
 
-  /* Layout */
+  
   --sidebar-w:    252px;
   --sidebar-collapsed-w: 68px;
   --topbar-h:     72px;
@@ -79,7 +73,7 @@ Redesigned to EXACTLY match reference UI
   --radius-lg:    14px;
   --radius-xl:    20px;
 
-  /* Shadows */
+  
   --shadow-sm:    0 2px 8px rgba(50,0,0,0.12);
   --shadow-md:    0 4px 20px rgba(50,0,0,0.18);
   --shadow-lg:    0 10px 40px rgba(50,0,0,0.28);
@@ -87,18 +81,18 @@ Redesigned to EXACTLY match reference UI
   --shadow-gold:  0 0 22px rgba(201,168,76,0.15);
   --shadow-sidebar: 4px 0 24px rgba(30,0,0,0.40);
 
-  /* Transitions */
+  
   --ease: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
   --ease-bounce: 0.3s cubic-bezier(0.34,1.56,0.64,1);
 }
 
-/* ─── Reset ──────────────────────────────────────────────────────────────── */
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body, #root { height: 100%; width: 100%; }
 button { cursor: pointer; }
 a { text-decoration: none; }
 
-/* ─── Shell ──────────────────────────────────────────────────────────────── */
+
 .lm-shell {
   display: flex;
   min-height: 100vh;
@@ -111,7 +105,7 @@ a { text-decoration: none; }
   overflow: hidden;
 }
 
-/* ─── Sidebar ────────────────────────────────────────────────────────────── */
+
 .lm-sidebar {
   width: var(--sidebar-w);
   min-height: 100vh;
@@ -129,7 +123,7 @@ a { text-decoration: none; }
   transition: width 0.32s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Collapsed sidebar */
+
 .lm-sidebar.collapsed {
   width: var(--sidebar-collapsed-w);
 }
@@ -182,7 +176,7 @@ a { text-decoration: none; }
   justify-content: center;
 }
 
-/* Sidebar toggle button */
+
 .lm-collapse-btn {
   display: flex;
   align-items: center;
@@ -217,7 +211,7 @@ a { text-decoration: none; }
   transform: rotate(180deg);
 }
 
-/* Tooltip for collapsed items */
+
 .lm-sidebar.collapsed .lm-nav-item {
   position: relative;
 }
@@ -241,7 +235,7 @@ a { text-decoration: none; }
   pointer-events: none;
 }
 
-/* Dark overlay for readability over MenuBG */
+
 .lm-sidebar::before {
   content: '';
   position: absolute;
@@ -256,7 +250,7 @@ a { text-decoration: none; }
   z-index: 0;
 }
 
-/* Gold top accent bar */
+
 .lm-sidebar::after {
   content: '';
   position: absolute;
@@ -273,10 +267,10 @@ a { text-decoration: none; }
   z-index: 3;
 }
 
-/* All sidebar children above overlay */
+
 .lm-sidebar > * { position: relative; z-index: 1; }
 
-/* ── Logo / Branding — uses LibraryLogo.png ── */
+
 .lm-sidebar-logo {
   padding: 22px 16px 18px;
   border-bottom: 2px solid rgba(201,168,76,0.30);
@@ -294,7 +288,7 @@ a { text-decoration: none; }
   overflow: hidden;
 }
 
-/* Overlay to keep text legible over logo area */
+
 .lm-sidebar-logo::before {
   content: '';
   position: absolute;
@@ -308,10 +302,10 @@ a { text-decoration: none; }
   z-index: 0;
 }
 
-/* Make children sit above the logo overlay */
+
 .lm-sidebar-logo > * { position: relative; z-index: 1; }
 
-/* Gold shimmer border bottom */
+
 .lm-sidebar-logo::after {
   content: '';
   position: absolute;
@@ -321,7 +315,7 @@ a { text-decoration: none; }
   z-index: 2;
 }
 
-/* PSU Logo circle — shows LibraryLogo.png */
+
 .lm-logo-icon {
   width: 110px;
   height: 110px;
@@ -360,7 +354,7 @@ a { text-decoration: none; }
   filter: drop-shadow(0 2px 6px rgba(201,168,76,0.30));
 }
 
-/* LIBRASCAN title text — always visible */
+
 .lm-logo-text {
   font-family: var(--font-display);
   font-size: 19px;
@@ -388,7 +382,7 @@ a { text-decoration: none; }
   text-shadow: 0 1px 6px rgba(0,0,0,0.70);
 }
 
-/* Gold divider line below logo */
+
 .lm-sidebar-logo-divider {
   width: 60%;
   height: 1px;
@@ -396,7 +390,7 @@ a { text-decoration: none; }
   margin-top: 4px;
 }
 
-/* ── Nav ── */
+
 .lm-nav {
   padding: 10px 12px;
   flex: 1;
@@ -408,7 +402,7 @@ a { text-decoration: none; }
 .lm-nav::-webkit-scrollbar-track { background: transparent; }
 .lm-nav::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.20); border-radius: 4px; }
 
-/* Section labels — clearly visible */
+
 .lm-nav-section { padding: 14px 8px 4px; }
 .lm-nav-section-label {
   font-family: var(--font-sans);
@@ -420,7 +414,7 @@ a { text-decoration: none; }
   display: block;
 }
 
-/* ── Nav Items ── */
+
 .lm-nav-item {
   display: flex;
   align-items: center;
@@ -428,7 +422,7 @@ a { text-decoration: none; }
   padding: 11px 14px;
   margin-bottom: 3px;
   cursor: pointer;
-  /* Solid, always-readable text color */
+  
   color: rgba(255,232,160,0.92);
   border-radius: var(--radius);
   background: transparent;
@@ -454,7 +448,7 @@ a { text-decoration: none; }
   text-shadow: 0 1px 4px rgba(0,0,0,0.60);
 }
 
-/* Nav item label — fades on collapse */
+
 .lm-nav-item-label {
   flex: 1;
   transition: opacity 0.18s ease, max-width 0.32s cubic-bezier(0.4,0,0.2,1);
@@ -464,7 +458,7 @@ a { text-decoration: none; }
   transition: opacity 0.18s ease, transform 0.2s ease;
 }
 
-/* Shimmer effect on hover */
+
 .lm-nav-item::before {
   content: '';
   position: absolute;
@@ -517,7 +511,7 @@ a { text-decoration: none; }
 }
 .lm-nav-item:hover .lm-nav-item-icon { color: #FFE97A; }
 
-/* ── Sub-menu ── */
+
 .lm-nav-sub {
   overflow: hidden;
   max-height: 0;
@@ -556,7 +550,7 @@ a { text-decoration: none; }
   background: rgba(201,168,76,0.10);
 }
 
-/* ── Footer / Logout ── */
+
 .lm-sidebar-footer {
   padding: 14px 14px 22px;
   border-top: 1px solid rgba(201,168,76,0.22);
@@ -564,7 +558,7 @@ a { text-decoration: none; }
   flex-shrink: 0;
 }
 
-/* ─── Main Area ──────────────────────────────────────────────────────────── */
+
 .lm-main {
   margin-left: var(--sidebar-w);
   flex: 1;
@@ -578,7 +572,7 @@ a { text-decoration: none; }
   margin-left: var(--sidebar-collapsed-w);
 }
 
-/* ─── Topbar ─────────────────────────────────────────────────────────────── */
+
 .lm-topbar {
   height: var(--topbar-h);
   background-color: #F5E4A8;
@@ -597,7 +591,7 @@ a { text-decoration: none; }
   overflow: hidden;
 }
 
-/* Semi-transparent cream overlay for topbar readability */
+
 .lm-topbar::before {
   content: '';
   position: absolute;
@@ -606,10 +600,10 @@ a { text-decoration: none; }
   z-index: 0;
 }
 
-/* Make topbar children above overlay */
+
 .lm-topbar > * { position: relative; z-index: 1; }
 
-/* Gold bottom accent line on topbar */
+
 .lm-topbar::after {
   content: '';
   position: absolute;
@@ -651,7 +645,7 @@ a { text-decoration: none; }
   gap: 14px;
 }
 
-/* ── Notification Bell ── */
+
 .lm-notif-btn {
   width: 42px;
   height: 42px;
@@ -685,7 +679,7 @@ a { text-decoration: none; }
   50% { transform: scale(1.25); opacity: 0.8; }
 }
 
-/* ── Profile Chip — matches reference exactly ── */
+
 .lm-profile-chip {
   display: flex;
   align-items: center;
@@ -738,7 +732,7 @@ a { text-decoration: none; }
   letter-spacing: 0.02em;
 }
 
-/* ─── Content Area ───────────────────────────────────────────────────────── */
+
 .lm-content {
   flex: 1;
   padding: 28px 30px;
@@ -746,7 +740,7 @@ a { text-decoration: none; }
   background: var(--bg-base);
 }
 
-/* ─── Module Wrapper ─────────────────────────────────────────────────────── */
+
 .lm-module {
   animation: lm-fade-in 0.32s ease;
 }
@@ -781,7 +775,7 @@ a { text-decoration: none; }
   line-height: 1.55;
 }
 
-/* ─── Stat Cards ─────────────────────────────────────────────────────────── */
+
 .lm-stats-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -804,7 +798,7 @@ a { text-decoration: none; }
   cursor: default;
 }
 
-/* Gold top stripe */
+
 .lm-stat-card::before {
   content: '';
   position: absolute;
@@ -813,7 +807,7 @@ a { text-decoration: none; }
   background: linear-gradient(90deg, var(--gold-dim), var(--gold-light), var(--gold));
 }
 
-/* Corner glow */
+
 .lm-stat-card::after {
   content: '';
   position: absolute;
@@ -871,7 +865,7 @@ a { text-decoration: none; }
   margin-top: 2px;
 }
 
-/* ─── Panels ─────────────────────────────────────────────────────────────── */
+
 .lm-panel {
   background: linear-gradient(145deg, #850000 0%, #6E0000 100%);
   border: 1px solid rgba(201,168,76,0.38);
@@ -896,7 +890,7 @@ a { text-decoration: none; }
   gap: 8px;
 }
 
-/* ─── Overview Grid ──────────────────────────────────────────────────────── */
+
 .lm-overview-grid {
   display: grid;
   grid-template-columns: 1fr 320px;
@@ -904,7 +898,7 @@ a { text-decoration: none; }
   margin-top: 18px;
 }
 
-/* ─── Activity List ──────────────────────────────────────────────────────── */
+
 .lm-activity-list { display: flex; flex-direction: column; gap: 0; }
 
 .lm-activity-item {
@@ -943,7 +937,7 @@ a { text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
-/* ─── Quick Stats ────────────────────────────────────────────────────────── */
+
 .lm-quick-stats { display: flex; flex-direction: column; gap: 0; }
 
 .lm-quick-stat {
@@ -967,7 +961,7 @@ a { text-decoration: none; }
   letter-spacing: 0.02em;
 }
 
-/* ─── Buttons ────────────────────────────────────────────────────────────── */
+
 .lm-btn {
   display: inline-flex;
   align-items: center;
@@ -1021,7 +1015,7 @@ a { text-decoration: none; }
   transform: translateY(-1px);
 }
 
-/* ─── Filters / Search ───────────────────────────────────────────────────── */
+
 .lm-filters {
   display: flex;
   align-items: center;
@@ -1091,7 +1085,7 @@ a { text-decoration: none; }
   font-variant-numeric: tabular-nums;
 }
 
-/* ─── Table ──────────────────────────────────────────────────────────────── */
+
 .lm-table-wrap {
   background: linear-gradient(145deg, #880000 0%, #6A0000 100%);
   border: 1px solid rgba(201,168,76,0.38);
@@ -1140,7 +1134,7 @@ a { text-decoration: none; }
   vertical-align: middle;
 }
 
-/* Table action buttons */
+
 .lm-table-btn {
   display: inline-flex;
   align-items: center;
@@ -1175,7 +1169,7 @@ a { text-decoration: none; }
   transform: translateY(-1px);
 }
 
-/* ─── Form Elements ──────────────────────────────────────────────────────── */
+
 .lm-label {
   display: block;
   font-size: 11px;
@@ -1225,7 +1219,7 @@ a { text-decoration: none; }
 }
 .lm-pw-toggle:hover { color: var(--text-muted); }
 
-/* ── Role Badge ── */
+
 .lm-role-badge {
   display: inline-block;
   padding: 3px 10px;
@@ -1237,7 +1231,7 @@ a { text-decoration: none; }
   white-space: nowrap;
 }
 
-/* ── Status Badge ── */
+
 .lm-status-badge {
   display: inline-flex;
   align-items: center;
@@ -1251,7 +1245,7 @@ a { text-decoration: none; }
   white-space: nowrap;
 }
 
-/* ─── Modal ──────────────────────────────────────────────────────────────── */
+
 .lm-modal-bg {
   position: fixed;
   inset: 0;
@@ -1346,7 +1340,7 @@ a { text-decoration: none; }
   background: rgba(139,0,0,0.05);
 }
 
-/* ─── Book Grid ──────────────────────────────────────────────────────────── */
+
 .lm-book-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
@@ -1413,7 +1407,7 @@ a { text-decoration: none; }
 }
 .lm-book-actions { display: flex; gap: 6px; margin-top: 10px; }
 
-/* ─── Empty / Loading States ─────────────────────────────────────────────── */
+
 .lm-empty {
   text-align: center;
   padding: 60px 20px;
@@ -1441,7 +1435,7 @@ a { text-decoration: none; }
 }
 @keyframes lm-spin { to { transform: rotate(360deg); } }
 
-/* ─── Coming Soon ────────────────────────────────────────────────────────── */
+
 .lm-coming-soon {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   min-height: 440px;
@@ -1496,7 +1490,7 @@ a { text-decoration: none; }
   line-height: 1.75;
 }
 
-/* ─── Toast ──────────────────────────────────────────────────────────────── */
+
 .lm-toast {
   position: fixed;
   bottom: 28px; right: 28px;
@@ -1517,7 +1511,7 @@ a { text-decoration: none; }
   to   { opacity: 1; transform: translateX(0) scale(1); }
 }
 
-/* ─── Error Banner ───────────────────────────────────────────────────────── */
+
 .lm-error-banner {
   background: rgba(139,0,0,0.09);
   border: 1px solid rgba(139,0,0,0.26);
@@ -1529,7 +1523,7 @@ a { text-decoration: none; }
   line-height: 1.6;
 }
 
-/* ─── Pagination ─────────────────────────────────────────────────────────── */
+
 .lm-pagination {
   display: flex;
   align-items: center;
@@ -1566,14 +1560,14 @@ a { text-decoration: none; }
 }
 .lm-page-btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
 
-/* ─── Divider ────────────────────────────────────────────────────────────── */
+
 .lm-divider {
   height: 1px;
   background: linear-gradient(90deg, transparent, rgba(139,0,0,0.15), transparent);
   margin: 20px 0;
 }
 
-/* ─── Info Row (Settings) ────────────────────────────────────────────────── */
+
 .lm-info-row {
   display: flex;
   align-items: center;
@@ -1598,7 +1592,7 @@ a { text-decoration: none; }
   text-align: right;
 }
 
-/* ─── Scanner / Attendance ───────────────────────────────────────────────── */
+
 .lm-scanner-box {
   background: var(--cream-light);
   border: 2px dashed rgba(139,0,0,0.26);
@@ -1633,7 +1627,7 @@ a { text-decoration: none; }
   border-color: rgba(139,0,0,0.28);
 }
 
-/* ─── Scrollbar (content area) ───────────────────────────────────────────── */
+
 .lm-content::-webkit-scrollbar { width: 5px; }
 .lm-content::-webkit-scrollbar-track { background: rgba(139,0,0,0.04); }
 .lm-content::-webkit-scrollbar-thumb {
@@ -1642,23 +1636,23 @@ a { text-decoration: none; }
 }
 .lm-content::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.30); }
 
-/* ─── Responsive ─────────────────────────────────────────────────────────── */
 
-/* ── Large desktop (1600px+) ── */
+
+
 @media (min-width: 1600px) {
   :root { --sidebar-w: 275px; }
   .lm-content { padding: 34px 38px; }
   .lm-module-title { font-size: 25px; }
 }
 
-/* ── Medium desktop (1200px) ── */
+
 @media (max-width: 1200px) {
   .lm-stats-grid { grid-template-columns: repeat(2, 1fr); }
   .lm-overview-grid { grid-template-columns: 1fr; }
   .lm-overview-bottom { grid-template-columns: 1fr !important; }
 }
 
-/* ── Small desktop / large tablet (960px) ── */
+
 @media (max-width: 960px) {
   :root { --sidebar-w: 220px; }
   .lm-content { padding: 20px 22px; }
@@ -1666,149 +1660,149 @@ a { text-decoration: none; }
   .lm-topbar-title { font-size: 18px; }
   .lm-breadcrumb { display: none; }
 
-  /* Settings grid stacks */
+  
   .s-grid { grid-template-columns: 1fr !important; }
 }
 
-/* ── Tablet (768px) ── */
+
 @media (max-width: 768px) {
   :root {
     --sidebar-w: 252px;
     --topbar-h: 60px;
   }
 
-  /* Sidebar slides off-screen; toggled by .mobile-open */
+  
   .lm-sidebar {
     transform: translateX(-100%);
     transition: transform 0.30s cubic-bezier(0.4, 0, 0.2, 1), width 0.30s cubic-bezier(0.4, 0, 0.2, 1);
     z-index: 300;
-    width: var(--sidebar-w) !important; /* always full-width on mobile, not collapsed */
+    width: var(--sidebar-w) !important; 
   }
   .lm-sidebar.mobile-open {
     transform: translateX(0);
   }
-  /* Dim overlay behind open sidebar */
+  
   .lm-sidebar-overlay {
     display: block !important;
   }
 
-  /* Main takes full width */
+  
   .lm-main,
   .lm-main.sidebar-collapsed {
     margin-left: 0 !important;
   }
 
-  /* Topbar */
+  
   .lm-topbar { padding: 0 14px; gap: 8px; }
   .lm-topbar-title { font-size: 17px; }
   .lm-breadcrumb { display: none; }
   .lm-topbar-left { flex-direction: row; align-items: center; gap: 10px; }
 
-  /* Hamburger button — shown on mobile */
+  
   .lm-hamburger { display: flex !important; }
 
-  /* Profile chip — hide text, show avatar only */
+  
   .lm-profile-name,
   .lm-profile-role { display: none; }
   .lm-profile-chip { padding: 4px; border-radius: 50%; gap: 0; }
 
-  /* Stats grid */
+  
   .lm-stats-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
 
-  /* Content padding */
+  
   .lm-content { padding: 14px 14px 24px; }
   .lm-module { padding: 0; }
 
-  /* Overview bottom stacks */
+  
   .lm-overview-bottom { grid-template-columns: 1fr !important; gap: 12px; }
 
-  /* Tables — horizontal scroll */
+  
   .lm-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .lm-table { min-width: 560px; }
 
-  /* Form rows stack */
+  
   .lm-form-row,
   .s-2 { grid-template-columns: 1fr !important; }
 
-  /* Settings cards stack */
+  
   .s-grid { grid-template-columns: 1fr !important; }
 
-  /* Quick stats in 2 cols */
+  
   .lm-quick-stats { grid-template-columns: repeat(2, 1fr); }
 
-  /* Book catalog grid */
+  
   .lm-catalog-grid { grid-template-columns: repeat(2, 1fr) !important; }
 
-  /* Modals full-width */
+  
   .lm-modal { width: 95vw !important; max-width: 95vw !important; margin: 0 auto; }
 
-  /* Collapse btn hidden on mobile (sidebar is toggled by hamburger) */
+  
   .lm-collapse-btn { display: none !important; }
 }
 
-/* ── Mobile (480px) ── */
+
 @media (max-width: 480px) {
   :root { --topbar-h: 56px; }
 
   .lm-topbar { padding: 0 10px; }
   .lm-topbar-title { font-size: 15px; letter-spacing: 0.01em; }
 
-  /* Stats go single column */
+  
   .lm-stats-grid { grid-template-columns: 1fr; gap: 8px; }
   .lm-stat-card { padding: 14px 16px; }
   .lm-stat-value { font-size: 26px; }
 
-  /* Content */
+  
   .lm-content { padding: 10px 10px 20px; }
 
-  /* Quick stats single col */
+  
   .lm-quick-stats { grid-template-columns: 1fr; }
 
-  /* Book catalog single col */
+  
   .lm-catalog-grid { grid-template-columns: 1fr !important; }
 
-  /* Activity card max-height shorter */
+  
   .lm-activity-card { max-height: 360px !important; }
 
-  /* Right col in overview */
+  
   .lm-right-col { gap: 10px; }
 
-  /* Panel padding tighter */
+  
   .lm-panel { padding: 14px !important; }
 
-  /* Topbar notif bell smaller */
+  
   .lm-notif-btn { width: 36px; height: 36px; }
 
-  /* Avatar smaller on settings */
+  
   .s-av-ring { width: 72px !important; height: 72px !important; }
   .s-av-init { font-size: 22px !important; }
 
-  /* Module title */
+  
   .lm-module-title { font-size: 17px !important; }
 
-  /* Table font smaller */
+  
   .lm-table th, .lm-table td { font-size: 11.5px; padding: 8px 10px; }
 
-  /* Pagination tighter */
+  
   .lm-pagination { gap: 4px; }
   .lm-page-btn { min-width: 28px; height: 28px; font-size: 11px; }
 
-  /* Toast */
+  
   .lm-toast { bottom: 12px; right: 12px; left: 12px; max-width: none; font-size: 12px; padding: 10px 14px; }
   .s-toast { bottom: 12px; right: 12px; left: 12px; max-width: none; }
 
-  /* Logout modal */
+  
   .lm-shell > div[style*="position:fixed"] > div { width: 92vw !important; }
 }
 
-/* ── Tiny mobile (360px) ── */
+
 @media (max-width: 360px) {
   .lm-topbar-title { font-size: 13px; }
   .lm-stat-value { font-size: 22px; }
   .lm-content { padding: 8px 8px 16px; }
 }
 
-/* ── Sidebar overlay (hidden by default, shown on tablet/mobile) ── */
+
 .lm-sidebar-overlay {
   display: none;
   position: fixed;
@@ -1819,7 +1813,7 @@ a { text-decoration: none; }
   animation: lm-fade-in 0.22s ease;
 }
 
-/* ── Hamburger button (hidden on desktop, shown on mobile) ── */
+
 .lm-hamburger {
   display: none;
   align-items: center;

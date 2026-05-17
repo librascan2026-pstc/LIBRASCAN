@@ -1,5 +1,3 @@
-// src/Login_SignUp/SignupPage.jsx
-
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../supabaseClient';
@@ -9,17 +7,16 @@ const PSU_DOMAIN   = '@pampangastateu.edu.ph';
 const FONT_BODY    = "'Crimson Pro', Georgia, serif";
 const FONT_SANS    = "'Josefin Sans', sans-serif";
 
-// ── PSU Programs List ─────────────────────────────────────────────────────────
+
 const PSU_PROGRAMS = [
 
   'BS Information Technology',
-  'BS Education',
   'BS Business Administration',
   'BS Hospitality Management',
-  
+  'Bachelor of Elementary Education',  
 ];
 
-// ── Shared UI ─────────────────────────────────────────────────────────────────
+
 function PrimaryButton({ loading, children, style = {} }) {
   return (
     <motion.button
@@ -70,13 +67,13 @@ function ErrorBox({ message }) {
   );
 }
 
-// ── Regexes ───────────────────────────────────────────────────────────────────
+
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
 const USERNAME_REGEX    = /^[A-Za-z0-9_\-]+$/;
-const STUDENT_NO_REGEX  = /^\d{4}-\d{5,7}$/; // e.g. 2023-12345 or 2023-9293210
+const STUDENT_NO_REGEX  = /^\d{4}-\d{5,7}$/; 
 
-// ── Per-field validators ──────────────────────────────────────────────────────
+
 const validators = {
   firstName: (v) => {
     if (!v.trim())                  return 'First name is required.';
@@ -110,10 +107,7 @@ const validators = {
     if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYY-NNNNNNN (e.g. 2023-9293210).';
     return '';
   },
-  program: (v) => {
-    if (!v || v === '')  return 'Please select your program.';
-    return '';
-  },
+
   email: (v) => {
     if (!v.trim())                  return 'Email is required.';
     if (!v.trim().toLowerCase().endsWith(PSU_DOMAIN)) return `Must be a ${PSU_DOMAIN} address.`;
@@ -135,7 +129,7 @@ const validators = {
   },
 };
 
-// ── Password strength ─────────────────────────────────────────────────────────
+
 function pwStrength(pw) {
   let s = 0;
   if (pw.length >= 8)           s++;
@@ -169,7 +163,7 @@ function StrengthBar({ password }) {
   );
 }
 
-// ── Compact field component ───────────────────────────────────────────────────
+
 function Field({ label, type = 'text', value, onChange, onBlur, placeholder, error, disabled, autoComplete }) {
   const [show,    setShow]    = useState(false);
   const [focused, setFocused] = useState(false);
@@ -244,7 +238,7 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
   );
 }
 
-// ── Select field component ────────────────────────────────────────────────────
+
 function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder }) {
   const [focused, setFocused] = useState(false);
   const hasError = Boolean(error);
@@ -306,7 +300,6 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
             <option key={opt} value={opt}>{opt}</option>
           ))}
         </select>
-        {/* Dropdown arrow */}
         <div style={{
           position: 'absolute', right: 11, top: '50%', transform: 'translateY(-50%)',
           pointerEvents: 'none', color: '#8B4513', opacity: 0.65,
@@ -320,7 +313,7 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
   );
 }
 
-// ── Main Component ────────────────────────────────────────────────────────────
+
 const EMPTY = {
   firstName: '', lastName: '', middleName: '', username: '',
   studentNumber: '', program: '',
@@ -377,7 +370,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     if (Object.keys(errs).length) return;
     setLoad(true);
 
-    // ── Step 1: Create auth user ──────────────────────────────────────────────
+
     const { data: sd, error: authErr } = await supabase.auth.signUp({
       email: form.email.trim().toLowerCase(),
       password: form.password,
@@ -403,7 +396,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
       return;
     }
 
-    // ── Step 2: Upsert profiles row (includes student_number & program) ────────
+
     if (sd?.user) {
       const { error: profileErr } = await supabase.from('profiles').upsert({
         id:             sd.user.id,
@@ -419,7 +412,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
       }, { onConflict: 'id' });
 
       if (profileErr) {
-        // Non-fatal: auth succeeded, profile write failed (RLS or missing column)
+      
         console.error('[SignupPage] profiles upsert error:', profileErr.message);
       }
     }
@@ -428,7 +421,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     setOk(true);
   };
 
-  // ── Success ────────────────────────────────────────────────────────────────
+
   if (success) {
     return (
       <AuthLayout title="Almost There!" subtitle="Check your inbox to confirm your account" onExit={handleExit}>
@@ -462,24 +455,24 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     );
   }
 
-  // ── Registration form ──────────────────────────────────────────────────────
+
   return (
     <AuthLayout title="Create Account" subtitle={`${PSU_DOMAIN} addresses only`} onExit={handleExit}>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
 
-        {/* First Name */}
+    
         <Field label="First Name" value={form.firstName} onChange={handleChange('firstName')} onBlur={handleBlur('firstName')} placeholder="Enter your first name" error={fieldErrors.firstName} disabled={loading} />
 
-        {/* Last Name */}
+
         <Field label="Last Name" value={form.lastName} onChange={handleChange('lastName')} onBlur={handleBlur('lastName')} placeholder="Enter your last name" error={fieldErrors.lastName} disabled={loading} />
 
-        {/* Middle Name */}
+    
         <Field label="Middle Name (Optional)" value={form.middleName} onChange={handleChange('middleName')} onBlur={handleBlur('middleName')} placeholder="Enter your middle name" error={fieldErrors.middleName} disabled={loading} />
 
-        {/* Username */}
+     
         <Field label="Username" value={form.username} onChange={handleChange('username')} onBlur={handleBlur('username')} placeholder="Enter your username" error={fieldErrors.username} autoComplete="username" disabled={loading} />
 
-        {/* Student Number — NEW */}
+
         <Field
           label="Student Number"
           value={form.studentNumber}
@@ -490,7 +483,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           disabled={loading}
         />
 
-        {/* Program — NEW */}
+     
         <SelectField
           label="Program / Course"
           value={form.program}
@@ -502,17 +495,17 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           options={PSU_PROGRAMS}
         />
 
-        {/* Email */}
+
         <Field label="Email Address" type="email" value={form.email} onChange={handleChange('email')} onBlur={handleBlur('email')} placeholder={`e.g 2023929321${PSU_DOMAIN}`} error={fieldErrors.email} autoComplete="email" disabled={loading} />
 
-        {/* Password */}
+ 
         <Field label="Password" type="password" value={form.password} onChange={handleChange('password')} onBlur={handleBlur('password')} placeholder="Enter your password" error={fieldErrors.password} autoComplete="new-password" disabled={loading} />
         <StrengthBar password={form.password} />
 
-        {/* Confirm Password */}
+       
         <Field label="Confirm Password" type="password" value={form.confirm} onChange={handleChange('confirm')} onBlur={handleBlur('confirm')} placeholder="Re-enter your password" error={fieldErrors.confirm} autoComplete="new-password" disabled={loading} />
 
-        {/* Password hint */}
+      
         <div style={{ background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.25)', borderRadius: 7, padding: '5px 10px', fontSize: 9.5, fontFamily: FONT_BODY, color: '#5a3010', marginBottom: 4, lineHeight: 1.55 }}>
           Password: 8+ chars · 1 uppercase · 1 lowercase · 1 number
         </div>

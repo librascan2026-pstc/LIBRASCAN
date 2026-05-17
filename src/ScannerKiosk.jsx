@@ -1,15 +1,4 @@
-// src/ScannerKiosk.jsx
-// ─────────────────────────────────────────────────────────────────────────────
-// STANDALONE SCANNER KIOSK — open this in its own small browser window.
-// It connects directly to Supabase and saves attendance independently of
-// whatever the librarian is doing in the main dashboard tab.
-//
-// How to use:
-//   1. Add a route in your router: <Route path="/kiosk" element={<ScannerKiosk />} />
-//   2. Librarian opens: http://localhost:5173/kiosk  (or your deployed URL/kiosk)
-//   3. Right-click the URL bar → "Open in new window" → resize to ~400×300px
-//   4. Leave it in the corner of the screen — it will always capture scans.
-// ─────────────────────────────────────────────────────────────────────────────
+
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase } from './supabaseClient';
@@ -39,9 +28,9 @@ export default function ScannerKiosk() {
   const refocusRef = useRef(null);
 
   const [clock,    setClock]    = useState(new Date());
-  const [last,     setLast]     = useState(null);   // last scan result
-  const [count,    setCount]    = useState(0);      // today's count
-  const [scanning, setScanning] = useState(false);  // receiving keystrokes
+  const [last,     setLast]     = useState(null); 
+  const [count,    setCount]    = useState(0);   
+  const [scanning, setScanning] = useState(false); 
   const [focused,  setFocused]  = useState(true);
 
   // Live clock
@@ -50,7 +39,7 @@ export default function ScannerKiosk() {
     return () => clearInterval(t);
   }, []);
 
-  // Load today's count on mount
+
   useEffect(() => {
     supabase
       .from('attendance_logs')
@@ -59,7 +48,7 @@ export default function ScannerKiosk() {
       .then(({ count: c }) => setCount(c || 0));
   }, []);
 
-  // Refocus helper — won't steal focus from real inputs
+
   const refocusIfSafe = useCallback(() => {
     clearTimeout(refocusRef.current);
     refocusRef.current = setTimeout(() => {
@@ -70,14 +59,14 @@ export default function ScannerKiosk() {
     }, 80);
   }, []);
 
-  // Auto-focus + poll
+  
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
     const poll = setInterval(refocusIfSafe, 1500);
     return () => { clearInterval(poll); clearTimeout(refocusRef.current); clearTimeout(timerRef.current); };
   }, [refocusIfSafe]);
 
-  // Save attendance to Supabase
+ 
   const saveAttendance = useCallback(async (parsed) => {
     const now = new Date();
     const { data, error } = await supabase
@@ -101,7 +90,7 @@ export default function ScannerKiosk() {
     }
   }, []);
 
-  // Keyboard handler on the hidden input
+  
   const handleKeyDown = useCallback((e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Enter') {
@@ -142,7 +131,7 @@ export default function ScannerKiosk() {
       gap: 20,
       userSelect: 'none',
     }}>
-      {/* Hidden capture input */}
+ 
       <input
         ref={inputRef}
         onKeyDown={handleKeyDown}
@@ -159,7 +148,7 @@ export default function ScannerKiosk() {
         }}
       />
 
-      {/* Header */}
+     
       <div style={{ textAlign: 'center' }}>
         <div style={{
           fontFamily: "'Cinzel', serif",
@@ -185,7 +174,7 @@ export default function ScannerKiosk() {
         </div>
       </div>
 
-      {/* Scanner zone */}
+
       <div style={{
         width: '100%',
         maxWidth: 340,
@@ -196,7 +185,7 @@ export default function ScannerKiosk() {
         textAlign: 'center',
         transition: 'all 0.25s ease',
       }}>
-        {/* QR icon */}
+
         <div style={{
           width: 72, height: 72,
           margin: '0 auto 16px',
@@ -226,7 +215,6 @@ export default function ScannerKiosk() {
           }
         </div>
 
-        {/* Focus lost warning */}
         {!focused && (
           <div style={{
             marginTop: 12,
@@ -241,7 +229,7 @@ export default function ScannerKiosk() {
         )}
       </div>
 
-      {/* Last scan result */}
+
       {last && (
         <div style={{
           width: '100%',
@@ -271,7 +259,7 @@ export default function ScannerKiosk() {
         </div>
       )}
 
-      {/* Today count */}
+ 
       <div style={{
         fontSize: 11, color: 'rgba(245,228,168,0.3)',
         letterSpacing: '0.06em',
@@ -279,7 +267,6 @@ export default function ScannerKiosk() {
         {count} student{count !== 1 ? 's' : ''} logged today
       </div>
 
-      {/* Status dot */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <div style={{
           width: 7, height: 7, borderRadius: '50%',

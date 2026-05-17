@@ -1,4 +1,3 @@
-// ─── Color Tokens ────────────────────────────────────────────────────────────
 export const MAROON       = "#8B0000";
 export const MAROON_DEEP  = "#6B0000";
 export const MAROON_LIGHT = "#A80000";
@@ -8,7 +7,7 @@ export const GOLD_PALE    = "#F5E4A8";
 export const CREAM        = "#FDF8F0";
 export const WHITE        = "#FFFFFF";
 
-// ─── Features ─────────────────────────────────────────────────────────────────
+
 export const FEATURES = [
   {
     iconKey: "qr",
@@ -42,7 +41,7 @@ export const FEATURES = [
   },
 ];
 
-// ─── Benefits ─────────────────────────────────────────────────────────────────
+
 export const BENEFITS = {
   students: {
     title: " Students",
@@ -73,7 +72,7 @@ export const BENEFITS = {
   },
 };
 
-// ─── Process Steps ─────────────────────────────────────────────────────────────
+
 export const STEPS = [
   { num: "01", title: "Requirements Gathering", desc: "Interviews and observations with library staff and students of PSU Sto. Tomas Campus to define system requirements." },
   { num: "02", title: "System Design",          desc: "Architecture, database structure, UI design, and QR code workflow designed for both web and mobile platforms." },
@@ -83,7 +82,7 @@ export const STEPS = [
   { num: "06", title: "Deployment",             desc: "Live deployment at PSU Sto. Tomas Campus library, with ongoing monitoring and maintenance support." },
 ];
 
-// ─── Team ──────────────────────────────────────────────────────────────────────
+
 export const TEAM = [
   { name: "Xandru C. Bondoc"          },
   { name: "Rusty A. Pineda"            },
@@ -92,17 +91,17 @@ export const TEAM = [
   { name: "Jerry Yan A. Balagtas"     },
 ];
 
-// ─── Scope Tags ────────────────────────────────────────────────────────────────
+
 export const SCOPE_TAGS = [
   { label: "Web Platform",  accent: MAROON },
   { label: "Android App",   accent: GOLD   },
-  { label: "iOS App",       accent: MAROON },
-  { label: "Admin Portal",  accent: GOLD   },
   { label: "QR Generator",  accent: MAROON },
+  { label: "Admin Portal",  accent: GOLD   },
+  { label: "Student Portal",  accent: MAROON },
   { label: "Live Reports",  accent: GOLD   },
 ];
 
-// ─── Stats ─────────────────────────────────────────────────────────────────────
+
 export const STAT_TARGETS = [
   { target: 5000, suffix: "+", label: "Books in Catalog"  },
   { target: 1200, suffix: "+", label: "Registered Users"  },

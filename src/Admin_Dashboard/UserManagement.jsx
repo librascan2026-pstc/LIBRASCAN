@@ -1,12 +1,9 @@
-// src/Admin_Dashboard/UserManagement.jsx
-
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
 const Icon = {
   eye:    (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
   eyeOff: (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
@@ -19,7 +16,6 @@ const Icon = {
   student:(s=18) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>,
 };
 
-// ─── Role Config ──────────────────────────────────────────────────────────────
 const ROLE_CONFIG = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.12)',  color: '#64b5f6',  border: 'rgba(100,181,246,0.28)' },
   library_manager: { label: 'Library Manager', bg: 'rgba(239,154,154,0.12)', color: '#ef9a9a',  border: 'rgba(239,154,154,0.28)' },
@@ -43,7 +39,6 @@ function RoleBadge({ role }) {
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
 function Toast({ message, isError }) {
   if (!message) return null;
   return (
@@ -67,7 +62,6 @@ function Toast({ message, isError }) {
   );
 }
 
-// ─── User Modal (Add / Edit) ──────────────────────────────────────────────────
 function UserModal({ user, onClose, onSave }) {
   const isEdit = Boolean(user?.id);
   const [form, setForm] = useState({
@@ -113,7 +107,6 @@ function UserModal({ user, onClose, onSave }) {
     }
   };
 
-  // Section divider
   const SectionTitle = ({ children }) => (
     <div style={{
       fontFamily: 'var(--font-display)', fontSize: 10.5, letterSpacing: '0.12em',
@@ -157,7 +150,6 @@ function UserModal({ user, onClose, onSave }) {
         animation: 'lm-modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1)',
         overflow: 'hidden',
       }}>
-        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px',
@@ -185,7 +177,6 @@ function UserModal({ user, onClose, onSave }) {
           >✕</button>
         </div>
 
-        {/* Body */}
         <div style={{ padding: '22px 24px', overflowY: 'auto', background: 'var(--cream-light)' }}>
           {apiErr && (
             <div style={{
@@ -197,7 +188,6 @@ function UserModal({ user, onClose, onSave }) {
 
           <SectionTitle>Personal Information</SectionTitle>
 
-          {/* Name row */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <label style={labelStyle}>First Name <span style={{ color: '#c0564e' }}>*</span></label>
@@ -272,7 +262,6 @@ function UserModal({ user, onClose, onSave }) {
           </div>
         </div>
 
-        {/* Footer */}
         <div style={{
           display: 'flex', justifyContent: 'flex-end', gap: 10,
           padding: '16px 24px',
@@ -306,73 +295,71 @@ function UserModal({ user, onClose, onSave }) {
   );
 }
 
-// ─── Confirm Delete Modal ─────────────────────────────────────────────────────
 function ConfirmDeleteModal({ user, loading, onClose, onConfirm }) {
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(15,0,0,0.72)',
-      backdropFilter: 'blur(5px)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 500, animation: 'lm-fade-in 0.2s ease',
+      position: 'fixed', inset: 0, zIndex: 3000,
+      background: 'rgba(10,0,0,0.78)', backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+      animation: 'lm-fade-in 0.2s ease',
     }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
       <div style={{
-        background: 'var(--cream)', borderRadius: 14, padding: '28px 28px 22px',
-        border: '1px solid rgba(192,86,78,0.22)', maxWidth: 400, width: '100%',
-        boxShadow: '0 24px 60px rgba(40,0,0,0.50)',
+        background: 'var(--cream)', borderRadius: 20, width: '100%', maxWidth: 380,
+        border: '2px solid rgba(201,168,76,0.35)',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
         animation: 'lm-modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1)',
-        textAlign: 'center',
+        overflow: 'hidden',
       }}>
         <div style={{
-          width: 52, height: 52, borderRadius: 14, margin: '0 auto 18px',
-          background: 'rgba(192,86,78,0.10)', border: '1px solid rgba(192,86,78,0.24)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#c0564e',
+          background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+          padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
-          {Icon.trash(22)}
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', fontWeight: 700 }}>Delete User Account</div>
+            <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
+          </div>
         </div>
-        <h3 style={{
-          fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--maroon-deep)',
-          marginBottom: 10, letterSpacing: '0.03em',
-        }}>Delete User Account</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', lineHeight: 1.65, margin: 0 }}>
-          Are you sure you want to permanently delete{' '}
-          <strong style={{ color: 'var(--text-primary)' }}>
-            {user?.first_name} {user?.last_name}
-          </strong>?
-          <br />
-          <span style={{ fontSize: 12, color: '#c0564e', fontStyle: 'italic', display: 'block', marginTop: 4 }}>
-            This action cannot be undone.
-          </span>
-        </p>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
-          <button onClick={onClose} disabled={loading} style={{
-            padding: '9px 22px', borderRadius: 8, fontSize: 13,
-            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
-            color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
-            transition: 'all 0.18s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.05)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >Cancel</button>
-          <button onClick={onConfirm} disabled={loading} style={{
-            padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-            border: '1px solid rgba(192,86,78,0.35)',
-            background: loading ? 'rgba(192,86,78,0.5)' : 'linear-gradient(135deg,#c0564e,#922)',
-            color: '#fff', fontFamily: 'var(--font-sans)', cursor: loading ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: 7,
+        <div style={{ padding: '20px 24px' }}>
+          <div style={{
+            padding: '12px 14px', borderRadius: 10, marginBottom: 18,
+            background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+            textAlign: 'center',
           }}>
-            {loading
-              ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Deleting…</>
-              : 'Delete User'}
-          </button>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>
+              {user?.first_name} {user?.last_name}
+            </div>
+            {user?.email && (
+              <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)', marginTop: 2 }}>{user.email}</div>
+            )}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <button onClick={onClose} disabled={loading} style={{
+              padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+              background: 'transparent', cursor: 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: '#8B0000',
+            }}>Cancel</button>
+            <button onClick={onConfirm} disabled={loading} style={{
+              padding: '12px', borderRadius: 10, border: 'none',
+              background: loading ? 'rgba(139,0,0,0.35)' : 'linear-gradient(135deg, #8B0000, #6B0000)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: '#F5E4A8',
+              boxShadow: loading ? 'none' : '0 4px 14px rgba(139,0,0,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            }}>
+              {loading
+                ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Deleting…</>
+                : 'Delete User'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── UserManagement ───────────────────────────────────────────────────────────
 export default function UserManagement({ onStatsRefresh }) {
   const [users,      setUsers]      = useState([]);
   const [loading,    setLoading]    = useState(true);
@@ -469,7 +456,6 @@ export default function UserManagement({ onStatsRefresh }) {
     return matchSearch && matchRole;
   });
 
-  // Role counts for summary chips
   const counts = {
     total:   users.length,
     student: users.filter(u => u.role === 'student').length,
@@ -481,7 +467,6 @@ export default function UserManagement({ onStatsRefresh }) {
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
 
-      {/* ── Summary chips + Header Actions (single row) ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
           { label: 'Total Users',    value: counts.total   },
@@ -522,14 +507,12 @@ export default function UserManagement({ onStatsRefresh }) {
         </div>
       </div>
 
-      {/* ── Filters ── */}
       <div style={{
         display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
         padding: '14px 16px', borderRadius: 10,
         background: 'linear-gradient(135deg,rgba(139,0,0,0.04),rgba(201,168,76,0.03))',
         border: '1px solid rgba(139,0,0,0.10)',
       }}>
-        {/* Search */}
         <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
           <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }}>
             {Icon.search(14)}
@@ -541,7 +524,6 @@ export default function UserManagement({ onStatsRefresh }) {
             style={{ paddingLeft: 34 }}
           />
         </div>
-        {/* Role filter */}
         <select className="lm-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
           <option value="all">All Roles</option>
           <option value="student">Students</option>
@@ -557,7 +539,6 @@ export default function UserManagement({ onStatsRefresh }) {
         </span>
       </div>
 
-      {/* ── Table ── */}
       {loading ? (
         <div className="lm-loading">
           <div className="lm-spinner" />
@@ -624,7 +605,6 @@ export default function UserManagement({ onStatsRefresh }) {
   );
 }
 
-// ─── Table Row ────────────────────────────────────────────────────────────────
 function UserRow({ user: u, idx, onEdit, onDelete }) {
   const [hov, setHov] = useState(false);
   const initials = ((u.first_name?.[0] || u.email?.[0] || '?') + (u.last_name?.[0] || '')).toUpperCase();
@@ -642,7 +622,6 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
         transition: 'background 0.14s',
       }}
     >
-      {/* Name */}
       <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{
@@ -667,15 +646,12 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
           </span>
         </div>
       </td>
-      {/* Email */}
       <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.email || '—'}</span>
       </td>
-      {/* Role */}
       <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
         <RoleBadge role={u.role} />
       </td>
-      {/* Joined */}
       <td style={{ padding: '12px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
           {u.created_at
@@ -683,7 +659,6 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
             : '—'}
         </span>
       </td>
-      {/* Actions */}
       <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <ActionBtn variant="edit" onClick={onEdit}>

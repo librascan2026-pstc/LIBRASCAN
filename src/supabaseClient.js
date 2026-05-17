@@ -1,4 +1,3 @@
-// src/supabaseClient.js
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl         = import.meta.env.VITE_SUPABASE_URL;
@@ -8,7 +7,7 @@ const supabaseServiceRole = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 const url  = supabaseUrl  || 'https://placeholder.supabase.co';
 const anon = supabaseAnon || 'placeholder-anon-key';
 
-// ─── Standard client (anon key) — read operations ────────────────────────────
+
 export const supabase = createClient(url, anon, {
   auth: {
     autoRefreshToken:   true,
@@ -17,8 +16,7 @@ export const supabase = createClient(url, anon, {
   },
 });
 
-// ─── Admin client (service-role key) — bypasses RLS for write operations ─────
-// Falls back to anon only if service role key is truly missing (will log warning)
+
 if (!supabaseServiceRole) {
   console.warn(
     '[supabaseClient] VITE_SUPABASE_SERVICE_ROLE_KEY is missing!\n' +
@@ -42,7 +40,7 @@ export const supabaseAdmin = createClient(url, supabaseServiceRole || anon, {
   },
 });
 
-// ─── Admin emails ─────────────────────────────────────────────────────────────
+
 export const ADMIN_EMAILS = [
   'admin@pampangastateu.edu.ph',
   'librarian@pampangastateu.edu.ph',

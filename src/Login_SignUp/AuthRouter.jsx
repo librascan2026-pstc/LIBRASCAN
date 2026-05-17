@@ -1,10 +1,3 @@
-// src/Login_SignUp/AuthRouter.jsx
-// ── Clean page transitions — no curtain overlay bug ────────────────────────────
-// Uses framer-motion AnimatePresence with a smooth slide+fade.
-// The PageTransition curtain is removed from AuthRouter entirely —
-// it was causing the blank cream screen because the curtain stayed mounted
-// while the underlying page already changed.
-
 import { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import LoginPage          from './LoginPage';
@@ -12,7 +5,6 @@ import SignupPage         from './SignupPage';
 import ForgotPasswordPage from './ForgotPasswordPage';
 import ResetPasswordPage  from './ResetPasswordPage';
 
-// Direction-aware slide variants
 const variants = {
   enter: (dir) => ({
     opacity: 0,
@@ -30,12 +22,7 @@ const variants = {
 
 const PAGE_ORDER = ['login', 'signup', 'forgot-password', 'reset-password'];
 
-/**
- * Props:
- *   initialPage     — 'login' | 'signup' | 'forgot-password' | 'reset-password'
- *   onLoginSuccess  — called with user after captcha passes
- *   onGoLanding     — called when user clicks X/exit
- */
+
 export default function AuthRouter({ initialPage = 'login', onLoginSuccess, onGoLanding }) {
   const [page, setPage] = useState(() => {
     if (window.location.hash.includes('type=recovery')) return 'forgot-password';
@@ -61,7 +48,6 @@ export default function AuthRouter({ initialPage = 'login', onLoginSuccess, onGo
   const handleGoLanding = onGoLanding || (() => { window.location.href = '/'; });
 
   return (
-    // Outer wrapper — fixed, full-screen, clips the slide animation
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden' }}>
       <AnimatePresence mode="wait" custom={dir}>
         <motion.div

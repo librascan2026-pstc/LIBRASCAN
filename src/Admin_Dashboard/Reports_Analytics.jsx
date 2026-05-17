@@ -1,4 +1,3 @@
-// src/Admin_Dashboard/Reports_Analytics.jsx
 export default function ReportsAnalytics() {
   return (
     <div className="lm-coming-soon">

@@ -1,18 +1,3 @@
-// src/Login_SignUp/LoginPage.jsx
-//
-// FLOW:
-//   1. User fills email + password → clicks Sign In
-//   2. Supabase auth attempt → on success, show CAPTCHA screen
-//   3. User solves CAPTCHA → commitUser() → onLoginSuccess(user)
-//
-// REMEMBER ME:
-//   • Checkbox stored in localStorage key "lm_remember_email"
-//   • If checked: saves email to localStorage on successful auth attempt
-//   • On mount: pre-fills email if saved value exists
-//   • Unchecking and submitting clears the saved value
-//
-// ⚠️  CAPTCHA IS HANDLED HERE. App.jsx must NOT add a second captcha.
-
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from './AuthContext';
@@ -26,7 +11,33 @@ const FONT_SANS    = "'Josefin Sans', sans-serif";
 
 const REMEMBER_KEY = 'lm_remember_email';
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+function BackToLoginBtn({ onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 7,
+        background: hov ? 'rgba(139,0,0,0.07)' : 'transparent',
+        border: `1.5px solid ${hov ? 'rgba(139,0,0,0.30)' : 'rgba(139,0,0,0.16)'}`,
+        borderRadius: 20, padding: '7px 18px',
+        cursor: 'pointer', color: '#8B0000',
+        fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600,
+        transition: 'all 0.18s',
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="19" y1="12" x2="5" y2="12"/>
+        <polyline points="12 19 5 12 12 5"/>
+      </svg>
+      Back to Login
+    </button>
+  );
+}
+
 function PrimaryButton({ loading, children, onClick, disabled, style = {} }) {
   const off = loading || disabled;
   return (
@@ -90,7 +101,6 @@ function ErrorBox({ message }) {
   );
 }
 
-// ─── Remember Me checkbox — styled to match the parchment AuthLayout theme ────
 function RememberMe({ checked, onChange }) {
   const [hovered, setHovered] = useState(false);
 
@@ -103,7 +113,6 @@ function RememberMe({ checked, onChange }) {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Custom checkbox */}
       <span style={{
         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         width: 16, height: 16, borderRadius: 4, flexShrink: 0,
@@ -137,7 +146,6 @@ function RememberMe({ checked, onChange }) {
   );
 }
 
-// ─── Main component ───────────────────────────────────────────────────────────
 export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGoLanding }) {
   const { signIn, commitUser } = useAuth();
 
@@ -153,7 +161,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
 
   const handleExit = onGoLanding || (() => { window.location.href = '/'; });
 
-  // ── On mount: restore saved email ──
   useEffect(() => {
     try {
       const saved = localStorage.getItem(REMEMBER_KEY);
@@ -164,7 +171,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     } catch {}
   }, []);
 
-  // ── Validation ──
   const validate = () => {
     const e = {};
     if (!email.trim())
@@ -178,7 +184,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     return e;
   };
 
-  // ── Sign in ──
   const handleSubmit = async (ev) => {
     ev?.preventDefault();
     setError('');
@@ -197,7 +202,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
           : authErr.message
       );
     } else {
-      // Persist or clear remembered email
       try {
         if (rememberMe) {
           localStorage.setItem(REMEMBER_KEY, email.trim().toLowerCase());
@@ -212,12 +216,20 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     }
   };
 
-  // ── Commit after captcha ──
   const handleCaptchaSubmit = async () => {
     if (!captchaOk || !pendingUser) return;
     await commitUser(pendingUser);
     onLoginSuccess?.(pendingUser);
   };
+
+  useEffect(() => {
+    if (screen !== 'captcha') return;
+    const handler = (e) => {
+      if (e.key === 'Enter' && captchaOk) handleCaptchaSubmit();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [screen, captchaOk, pendingUser]);
 
   const title    = screen === 'captcha' ? 'Verification'                          : 'Welcome Back';
   const subtitle = screen === 'captcha' ? 'Complete the security check to proceed' : 'Sign in to your library account';
@@ -226,7 +238,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     <AuthLayout title={title} subtitle={subtitle} onExit={handleExit}>
       <AnimatePresence mode="wait">
 
-        {/* ── LOGIN FORM ── */}
         {screen === 'login' && (
           <motion.form
             key="login"
@@ -265,7 +276,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
               disabled={loading}
             />
 
-            {/* Remember me + Forgot password row */}
             <div style={{
               display: 'flex',
               alignItems: 'center',
@@ -300,7 +310,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
           </motion.form>
         )}
 
-        {/* ── CAPTCHA SCREEN ── */}
         {screen === 'captcha' && (
           <motion.div
             key="captcha"
@@ -310,7 +319,6 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             transition={{ duration: 0.2 }}
             style={{ display: 'flex', flexDirection: 'column' }}
           >
-            {/* Info banner */}
             <div style={{
               background: 'rgba(201,168,76,0.12)',
               border: '1px solid rgba(201,168,76,0.38)',
@@ -328,7 +336,14 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                 <line x1="12" y1="8" x2="12" y2="12"/>
                 <line x1="12" y1="16" x2="12.01" y2="16"/>
               </svg>
-              Enter the 6 characters shown in the image to complete sign in.
+              <div>
+                Enter the <strong style={{ color: '#8B0000' }}>6 characters</strong> shown in the image to complete sign in.
+                {captchaOk && (
+                  <span style={{ color: '#2e7d32', fontWeight: 600, marginLeft: 6 }}>
+                    ✓ Press Enter or click Submit.
+                  </span>
+                )}
+              </div>
             </div>
 
             <AuthCaptcha
@@ -344,18 +359,9 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
               Submit
             </PrimaryButton>
 
-            {/* Back to login */}
-            <p style={{
-              textAlign: 'center', marginTop: 14,
-              fontSize: 12, fontFamily: FONT_BODY, color: '#7a4020',
-            }}>
-              <LinkBtn
-                onClick={() => { setScreen('login'); setCaptchaOk(false); }}
-                style={{ fontSize: 12 }}
-              >
-                ← Back to login
-              </LinkBtn>
-            </p>
+            <div style={{ textAlign: 'center', marginTop: 14 }}>
+              <BackToLoginBtn onClick={() => { setScreen('login'); setCaptchaOk(false); }} />
+            </div>
           </motion.div>
         )}
 

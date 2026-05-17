@@ -1,12 +1,3 @@
-// src/Login_SignUp/AuthContext.jsx
-//
-// Matches your actual profiles table schema:
-//   id, first_name, last_name, middle_name, username, email, role, avatar_url, created_at, updated_at
-//
-// signIn() does NOT call setUser/setRole.
-// LoginPage holds the user in `pendingUser` until the post-login CAPTCHA is passed,
-// then calls commitUser() to set the real user state.
-
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { supabase, supabaseAdmin, isAdminEmail } from '../supabaseClient';
 
@@ -18,14 +9,12 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null);      // row from profiles table
   const [loading, setLoading] = useState(true);
 
-  // Derive role: admin email → 'library_manager', else from profiles table or metadata
   const deriveRole = (sessionUser) => {
     if (!sessionUser) return null;
     if (isAdminEmail(sessionUser.email)) return 'library_manager';
     return sessionUser.user_metadata?.role || 'student';
   };
 
-  // Fetch profile row — uses supabaseAdmin to bypass RLS so avatar_url always loads
   const fetchProfile = useCallback(async (userId) => {
     if (!userId) { setProfile(null); return; }
     const { data } = await supabaseAdmin
@@ -34,7 +23,6 @@ export function AuthProvider({ children }) {
       .eq('id', userId)
       .single();
     setProfile(data || null);
-    // If profiles table has a role, use that as the canonical role
     if (data?.role) setRole(data.role);
   }, []);
 
@@ -103,14 +91,12 @@ export function AuthProvider({ children }) {
     return { data, error };
   };
 
-  // Called by LoginPage after CAPTCHA is passed
   const commitUser = async (sessionUser) => {
     setUser(sessionUser);
     setRole(deriveRole(sessionUser));
     await fetchProfile(sessionUser.id);
   };
 
-  // Called by Settings after avatar upload or profile update — re-fetches fresh profile
   const refreshProfile = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) await fetchProfile(session.user.id);

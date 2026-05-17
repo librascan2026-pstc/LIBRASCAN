@@ -1,4 +1,3 @@
-// src/Admin_Dashboard/Overview.jsx
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -27,7 +26,7 @@ const SCROLL_STYLE = `
   .lm-activity-scroll::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.22); border-radius: 99px; }
   .lm-activity-scroll::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.40); }
 
-  /* The overview grid: right column aligns to start so it only takes its own height */
+  
   .lm-overview-bottom {
     display: grid;
     grid-template-columns: 1fr 300px;
@@ -36,7 +35,7 @@ const SCROLL_STYLE = `
     align-items: start;
   }
 
-  /* Activity card has a fixed max-height so the scroll area activates */
+  
   .lm-activity-card {
     display: flex;
     flex-direction: column;
@@ -59,7 +58,7 @@ const SCROLL_STYLE = `
     justify-content: space-between;
   }
 
-  /* Scroll area fills remaining height inside the card */
+  
   .lm-activity-scroll {
     flex: 1;
     overflow-y: auto;
@@ -68,14 +67,14 @@ const SCROLL_STYLE = `
     scrollbar-color: rgba(139,0,0,0.22) rgba(139,0,0,0.04);
   }
 
-  /* Right column stacks panels with a gap */
+  
   .lm-right-col {
     display: flex;
     flex-direction: column;
     gap: 16px;
   }
 
-  /* Delete confirmation modal */
+  
   .lm-confirm-overlay {
     position: fixed; inset: 0; z-index: 1000;
     background: rgba(20,0,0,0.45);
@@ -108,7 +107,7 @@ export default function Overview({ onNavigate }) {
   const [activity,      setActivity]      = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [actLoading,    setActLoading]    = useState(true);
-  const [confirmDelete, setConfirmDelete] = useState(null); // holds the activity item + index to delete
+  const [confirmDelete, setConfirmDelete] = useState(null); 
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -133,7 +132,6 @@ export default function Overview({ onNavigate }) {
         supabase.from('profiles').select('*',              { count: 'exact', head: true }).gte('created_at', todayStr),
         supabaseAdmin.from('borrowings').select('*',        { count: 'exact', head: true }).eq('status', 'pending'),
       ]);
-      // Count exactly like the catalog does — filter book_copies rows where status = 'Available'
       const available = (copiesData || []).filter(c => c.status === 'Available').length;
       setStats({
         users: users || 0, books: books || 0, borrowed: borrowed || 0,
@@ -177,10 +175,12 @@ export default function Overview({ onNavigate }) {
       (borrows || []).forEach(b => {
         const name = b.student_name || 'A student';
         const book = b.book_title   || 'a book';
-        if (b.status === 'returned' && b.returned_at) {
+        const statusLower = (b.status || '').toLowerCase();
+        if ((statusLower === 'returned' || statusLower === 'return') && b.returned_at) {
           events.push({ text: `${name} returned "${book}"`, ts: b.returned_at, color: '#64b5f6', tag: 'Return' });
+          events.push({ text: `${name} borrowed "${book}"`, ts: b.borrowed_at, color: '#81c784', tag: 'Borrow' });
         } else if (b.borrowed_at) {
-          const overdue = b.status === 'overdue';
+          const overdue = statusLower === 'overdue';
           events.push({ text: `${name} borrowed "${book}"`, ts: b.borrowed_at, color: overdue ? '#ff8a65' : '#81c784', tag: overdue ? 'Overdue' : 'Borrow' });
         }
       });
@@ -248,7 +248,6 @@ export default function Overview({ onNavigate }) {
     <div className="lm-module">
       <style>{SCROLL_STYLE}</style>
 
-      {/* Stat Cards */}
       <div className="lm-stats-grid">
         {STAT_CARDS.map(({ label, value, icon, sub }) => (
           <div key={label} className="lm-stat-card">
@@ -264,10 +263,8 @@ export default function Overview({ onNavigate }) {
         ))}
       </div>
 
-      {/* Bottom: Activity (left) + Quick Stats & Actions (right) */}
       <div className="lm-overview-bottom">
 
-        {/* ── Recent Activity card ─────────────────────────────────────────── */}
         <div className="lm-activity-card">
 
           <div className="lm-activity-header">
@@ -343,10 +340,8 @@ export default function Overview({ onNavigate }) {
           </div>
         </div>
 
-        {/* ── Right column ─────────────────────────────────────────────────── */}
         <div className="lm-right-col">
 
-          {/* Quick Stats */}
           <div className="lm-panel" style={{ marginBottom: 0 }}>
             <div className="lm-panel-title">Quick Stats</div>
             <div className="lm-quick-stats">
@@ -369,7 +364,6 @@ export default function Overview({ onNavigate }) {
             </div>
           </div>
 
-          {/* Quick Actions */}
           <div className="lm-panel" style={{ marginBottom: 0 }}>
             <div className="lm-panel-title">Quick Actions</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -392,34 +386,65 @@ export default function Overview({ onNavigate }) {
 
         </div>
       </div>
-      {/* ── Delete Confirmation Modal ──────────────────────────────────────── */}
       {confirmDelete && (
-        <div className="lm-confirm-overlay" onClick={() => setConfirmDelete(null)}>
-          <div className="lm-confirm-box" onClick={e => e.stopPropagation()}>
-            <div className="lm-confirm-title">Delete Activity Entry</div>
-            <div className="lm-confirm-body">
-              Are you sure you want to delete this activity entry?
-              <br /><br />
-              <span style={{ fontWeight: 600, color: '#8B0000' }}>{confirmDelete.item.text}</span>
+        <div
+          style={{
+            position: 'fixed', inset: 0, zIndex: 3000,
+            background: 'rgba(10,0,0,0.78)', backdropFilter: 'blur(8px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          }}
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div
+            style={{
+              background: '#FAF6EE', borderRadius: 20, width: '100%', maxWidth: 380,
+              border: '2px solid rgba(201,168,76,0.35)',
+              boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+              overflow: 'hidden',
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{
+              background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+              padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', fontWeight: 700 }}>Delete Activity Entry</div>
+                <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
+              </div>
             </div>
-            <div className="lm-confirm-actions">
-              <button
-                className="lm-btn lm-btn--ghost"
-                style={{ fontSize: 12.5 }}
-                onClick={() => setConfirmDelete(null)}
-              >
-                Cancel
-              </button>
-              <button
-                className="lm-btn lm-btn--primary"
-                style={{ fontSize: 12.5, background: '#8B0000', borderColor: '#8B0000' }}
-                onClick={() => {
-                  setActivity(prev => prev.filter((_, i) => i !== confirmDelete.index));
-                  setConfirmDelete(null);
-                }}
-              >
-                Delete
-              </button>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{
+                padding: '12px 14px', borderRadius: 10, marginBottom: 18,
+                background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{confirmDelete.item.text}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button
+                  onClick={() => setConfirmDelete(null)}
+                  style={{
+                    padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+                    background: 'transparent', cursor: 'pointer',
+                    fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: '#8B0000',
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={() => {
+                    setActivity(prev => prev.filter((_, i) => i !== confirmDelete.index));
+                    setConfirmDelete(null);
+                  }}
+                  style={{
+                    padding: '12px', borderRadius: 10, border: 'none',
+                    background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: '#F5E4A8',
+                    boxShadow: '0 4px 14px rgba(139,0,0,0.3)',
+                  }}
+                >Delete</button>
+              </div>
             </div>
           </div>
         </div>

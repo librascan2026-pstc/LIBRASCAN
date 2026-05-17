@@ -1,13 +1,8 @@
-// src/Admin_Dashboard/Book_Catalog.jsx
-// Full-featured Book Catalog — LIBRASCAN Library Management System
-// Supabase DB + Storage · QR Code · Image Upload · CRUD · View/Edit/Delete
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
 import { extractAbstractText } from '../ocrClient';
 
-// ─── Constants ────────────────────────────────────────────────────────────────
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
 const BUCKET = 'book-images';
@@ -52,7 +47,6 @@ const EMPTY_FORM = {
   qr_code_url: '',
 };
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
   search:   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
   plus:     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>,
@@ -67,11 +61,9 @@ const Ic = {
   refresh:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>,
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 async function uploadImage(file, folder = 'covers') {
   const ext  = file.name.split('.').pop();
   const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-  // Use supabaseAdmin to bypass storage RLS policies
   const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, file, { upsert: true });
   if (error) throw error;
   const { data } = supabaseAdmin.storage.from(BUCKET).getPublicUrl(path);
@@ -87,7 +79,6 @@ async function generateAndUploadQR(value) {
   return uploadImage(file, 'qrcodes');
 }
 
-// Generate a UUID v4 (no external dep needed)
 function generateUUID() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
     const r = (Math.random() * 16) | 0;
@@ -95,15 +86,11 @@ function generateUUID() {
   });
 }
 
-// Generate a QR data URL for a specific copy using its unique copy_id
-// QR value = copy_id (UUID) — globally unique per physical copy
-// Returns { dataUrl, label, copy_id }
 async function generateCopyQR(copyId, copyNum) {
   const dataUrl = await QRCode.toDataURL(copyId, { width: 400, margin: 2, color: { dark: '#5A0000', light: '#FDF8F0' } });
   return { dataUrl, label: copyId, copyNum, copy_id: copyId };
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
 
 function Toast({ message, type = 'success' }) {
   if (!message) return null;
@@ -218,7 +205,6 @@ function ImageUploadField({ label, value, preview, onFileChange, accept = 'image
   );
 }
 
-// ─── Add/Edit Modal ───────────────────────────────────────────────────────────
 function BookFormModal({ book, onClose, onSaved }) {
   const isEdit = Boolean(book?.id);
   const [form, setForm]         = useState(book ? { ...EMPTY_FORM, ...book } : { ...EMPTY_FORM });
@@ -229,7 +215,6 @@ function BookFormModal({ book, onClose, onSaved }) {
   const [abstractFile, setAbstractFile] = useState(null);
   const [coverPreview, setCoverPreview]    = useState(book?.cover_image_url || '');
   const [abstractPreview, setAbstractPreview] = useState(book?.abstract_image_url || '');
-  // abstract_text is stored as JSON string: { heading, paragraphs, keywords }
   const parseAbstractText = (v) => {
     if (!v) return null;
     if (typeof v === 'object') return v;
@@ -254,7 +239,6 @@ function BookFormModal({ book, onClose, onSaved }) {
     setAbstractOcrError('');
     try {
       const structured = await extractAbstractText(f, (pct, status) => {
-        // Live Tesseract progress fed into the loading label
         const label = status?.replace(/_/g, ' ') || 'processing';
         setAbstractOcrProgress(`${label} — ${pct}%`);
       });
@@ -280,26 +264,21 @@ function BookFormModal({ book, onClose, onSaved }) {
     if (Object.keys(errs).length) { setErrors(errs); return; }
     setSaving(true); setApiErr('');
     try {
-      // Strip any computed/local-only fields that don't exist in the DB schema
       const { _availableCopies, available_copies: _ac, ...formClean } = form;
       const payload = { ...formClean };
       const newCopiesCount = parseInt(payload.copies) || 0;
 
-      // Auto-compute status from copies
       payload.status = newCopiesCount > 0 ? 'Available' : 'Borrowed';
 
-      // Upload images via supabaseAdmin (bypasses storage RLS)
       if (coverFile) {
         payload.cover_image_url = await uploadImage(coverFile, 'covers');
       }
       if (abstractFile) {
         payload.abstract_image_url = await uploadImage(abstractFile, 'abstracts');
       }
-      // Persist extracted abstract text (stored as JSON string)
       if (abstractData) {
         payload.abstract_text = JSON.stringify(abstractData);
       }
-      // Generate + upload one representative QR (for the book record itself, Copy 1)
       const qrValue = form.isbn?.trim() || form.title?.trim();
       if (qrValue) {
         setQrProgress('Generating book QR…');
@@ -310,7 +289,6 @@ function BookFormModal({ book, onClose, onSaved }) {
       const { id, ...rest } = payload;
       let bookId = id;
 
-      // ── Upsert book record ────────────────────────────────────────────────────
       if (isEdit) {
         const { error } = await supabaseAdmin.from('books').update(rest).eq('id', id);
         if (error) throw error;
@@ -321,8 +299,6 @@ function BookFormModal({ book, onClose, onSaved }) {
         bookId = inserted.id;
       }
 
-      // ── Manage book_copies ────────────────────────────────────────────────────
-      // Fetch existing copies for this book (sorted so we delete from the end)
       let existingCopies = [];
       if (bookId) {
         const { data: fetchedCopies } = await supabaseAdmin
@@ -336,7 +312,6 @@ function BookFormModal({ book, onClose, onSaved }) {
       const existingCount = existingCopies.length;
 
       if (newCopiesCount > existingCount) {
-        // ── Add new copies ────────────────────────────────────────────────────
         const copiesToCreate = newCopiesCount - existingCount;
         const nextCopyNumber = existingCount > 0
           ? Math.max(...existingCopies.map(c => c.copy_number)) + 1
@@ -364,8 +339,6 @@ function BookFormModal({ book, onClose, onSaved }) {
         setQrProgress('');
 
       } else if (newCopiesCount < existingCount) {
-        // ── Remove surplus copies from the end (highest copy_number first) ───
-        // Only delete copies that are Available — never delete a Borrowed copy.
         const surplus = existingCount - newCopiesCount;
         const deletable = [...existingCopies]
           .reverse()                          // highest copy_number first
@@ -381,22 +354,17 @@ function BookFormModal({ book, onClose, onSaved }) {
         }
       }
 
-      // ── Re-sync books.copies & status from book_copies ─────────────────────
-      // available_copies is updated automatically by borrow/return in BookManagement.
-      // Here we only sync total copies count and status after add/remove operations.
       if (bookId) {
         const { data: freshCopies } = await supabaseAdmin
           .from('book_copies').select('status').eq('book_id', bookId);
         const totalAfter     = (freshCopies || []).length;
         const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
-        // Try updating with available_copies; if that column doesn't exist, fall back without it
         const syncPayload = {
           copies: totalAfter,
           status: availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
         };
         const { error: syncErr } = await supabaseAdmin.from('books').update(syncPayload).eq('id', bookId);
         if (syncErr) {
-          // Column issue — try without available_copies (already excluded above)
           console.warn('[Book_Catalog] sync warning:', syncErr.message);
         }
       }
@@ -411,7 +379,6 @@ function BookFormModal({ book, onClose, onSaved }) {
     }
   };
 
-  // Section divider
   const SectionTitle = ({ children }) => (
     <div style={{
       fontFamily: 'var(--font-display)', fontSize: 11.5, letterSpacing: '0.1em',
@@ -437,7 +404,6 @@ function BookFormModal({ book, onClose, onSaved }) {
         width: '100%', maxWidth: 720,
         animation: 'lm-fade-in 0.25s ease',
       }}>
-        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px',
@@ -473,7 +439,6 @@ function BookFormModal({ book, onClose, onSaved }) {
           </button>
         </div>
 
-        {/* Body */}
         <div style={{ padding: '22px 24px', maxHeight: 'calc(90vh - 140px)', overflowY: 'auto' }}>
           {apiErr && (
             <div style={{
@@ -484,27 +449,23 @@ function BookFormModal({ book, onClose, onSaved }) {
           )}
 
           <SectionTitle>Book Information</SectionTitle>
-          {/* Title */}
           <div style={{ marginBottom: 14 }}>
             <FieldLabel required>Book Title</FieldLabel>
             <input style={inputStyle(errors.title)} value={form.title}
               onChange={e => set('title', e.target.value)} placeholder="Enter book title" />
             {errors.title && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)' }}>{errors.title}</span>}
           </div>
-          {/* Volume Title */}
           <div style={{ marginBottom: 14 }}>
             <FieldLabel>Volume Title</FieldLabel>
             <input style={inputStyle()} value={form.volume_title}
               onChange={e => set('volume_title', e.target.value)} placeholder="Volume title (if any)" />
           </div>
-          {/* Authors */}
           <div style={{ marginBottom: 14 }}>
             <FieldLabel required>Authors</FieldLabel>
             <input style={inputStyle(errors.authors)} value={form.authors}
               onChange={e => set('authors', e.target.value)} placeholder="e.g. Cormen, Leiserson, Rivest" />
             {errors.authors && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)' }}>{errors.authors}</span>}
           </div>
-          {/* Publisher + Place */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <FieldLabel>Publisher</FieldLabel>
@@ -517,7 +478,6 @@ function BookFormModal({ book, onClose, onSaved }) {
                 onChange={e => set('place_of_publication', e.target.value)} placeholder="City, Country" />
             </div>
           </div>
-          {/* Year + Volume + Edition */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <FieldLabel>Year Published</FieldLabel>
@@ -535,7 +495,6 @@ function BookFormModal({ book, onClose, onSaved }) {
                 onChange={e => set('edition', e.target.value)} placeholder="e.g. 3rd" />
             </div>
           </div>
-          {/* ISBN + Pages */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <FieldLabel>ISBN</FieldLabel>
@@ -550,7 +509,6 @@ function BookFormModal({ book, onClose, onSaved }) {
           </div>
 
           <SectionTitle>Classification</SectionTitle>
-          {/* Shelf + Genre */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <FieldLabel>Shelf Location</FieldLabel>
@@ -567,7 +525,6 @@ function BookFormModal({ book, onClose, onSaved }) {
               </select>
             </div>
           </div>
-          {/* Copies + Color — Status is auto-computed */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 8 }}>
             <div>
               <FieldLabel>Copies</FieldLabel>
@@ -580,7 +537,6 @@ function BookFormModal({ book, onClose, onSaved }) {
                 onChange={e => set('color', e.target.value)} placeholder="e.g. Red" />
             </div>
           </div>
-          {/* Auto status preview */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
             padding: '8px 12px', borderRadius: 8,
@@ -611,7 +567,6 @@ function BookFormModal({ book, onClose, onSaved }) {
               onFileChange={handleAbstractFile}
             />
           </div>
-          {/* OCR status */}
           {abstractOcrLoading && (
             <div style={{
               display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12,
@@ -670,7 +625,6 @@ function BookFormModal({ book, onClose, onSaved }) {
 
         </div>
 
-        {/* Footer */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10,
           padding: '16px 24px',
@@ -710,8 +664,6 @@ function BookFormModal({ book, onClose, onSaved }) {
   );
 }
 
-// ─── View Details Modal ───────────────────────────────────────────────────────
-// ─── Parse abstract_text from DB (may be JSON string or plain text) ──────────
 function parseAbstractData(raw) {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
@@ -736,7 +688,6 @@ function ViewModal({ book, onClose, onEdit }) {
     if (copyQRs.length === 0) {
       setGeneratingCopyQRs(true);
       try {
-        // Step 1: Load existing book_copies rows via admin client (bypasses RLS)
         const { data: dbCopies, error } = await supabaseAdmin
           .from('book_copies')
           .select('copy_id, copy_number, qr_code_url, status')
@@ -747,8 +698,6 @@ function ViewModal({ book, onClose, onEdit }) {
 
         let allCopies = dbCopies || [];
 
-        // Step 2: If book_copies rows are missing (book added before this feature),
-        // auto-create them now so QR codes are stable from this point on.
         if (allCopies.length < copies) {
           const existingNums = allCopies.map(c => c.copy_number);
           const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
@@ -758,7 +707,6 @@ function ViewModal({ book, onClose, onEdit }) {
           for (let i = 0; i < toCreate; i++) {
             const copyNum = nextNum + i;
             const copyId  = generateUUID();
-            // Generate QR and upload it
             const { dataUrl } = await generateCopyQR(copyId, copyNum);
             const qrBlob  = await (await fetch(dataUrl)).blob();
             const qrFile  = new File([qrBlob], `qr_${copyId}.png`, { type: 'image/png' });
@@ -773,8 +721,6 @@ function ViewModal({ book, onClose, onEdit }) {
           allCopies = [...allCopies, ...(inserted || [])];
         }
 
-        // Step 3: Always regenerate QR locally from copy_id — avoids CORS/broken URL issues.
-        // The copy_id is the stable, unique value that the scanner reads.
         const results = await Promise.all(allCopies.map(async (c) => {
           const { dataUrl } = await generateCopyQR(c.copy_id, c.copy_number);
           return {
@@ -799,26 +745,22 @@ function ViewModal({ book, onClose, onEdit }) {
     }
   };
 
-  // Download a single copy QR to the browser's file explorer (Downloads folder)
   const downloadCopyQR = (qr, format = 'png') => {
     if (!qr) return;
     const canvas   = document.createElement('canvas');
     const img      = new window.Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
-      // Render at 2× for crisp printing
       const scale = 2;
       canvas.width  = img.naturalWidth  * scale;
       canvas.height = img.naturalHeight * scale;
       const ctx = canvas.getContext('2d');
       ctx.imageSmoothingEnabled = false;
 
-      // White/cream background (required for JPG, looks good for PNG too)
       ctx.fillStyle = '#FDF8F0';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      // Label text at bottom
       const labelH = Math.round(36 * scale);
       ctx.fillStyle = '#FDF8F0';
       ctx.fillRect(0, canvas.height - labelH, canvas.width, labelH);
@@ -830,7 +772,6 @@ function ViewModal({ book, onClose, onEdit }) {
       const mimeType = format === 'jpg' ? 'image/jpeg' : 'image/png';
       const quality  = format === 'jpg' ? 0.96 : undefined;
 
-      // Trigger browser Save dialog → Downloads / file explorer
       canvas.toBlob(blob => {
         const url = URL.createObjectURL(blob);
         const a   = document.createElement('a');
@@ -843,7 +784,6 @@ function ViewModal({ book, onClose, onEdit }) {
       }, mimeType, quality);
     };
     img.onerror = () => {
-      // Fallback: direct dataUrl download if canvas fails (e.g. CORS)
       const a   = document.createElement('a');
       a.href    = qr.dataUrl;
       a.download = `LIBRASCAN_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
@@ -854,19 +794,16 @@ function ViewModal({ book, onClose, onEdit }) {
     img.src = qr.dataUrl;
   };
 
-  // Download all copy QRs one by one (staggered to avoid browser pop-up blocking)
   const downloadAllCopyQRs = (format = 'png') => {
     copyQRs.forEach((qr, i) => setTimeout(() => downloadCopyQR(qr, format), i * 350));
   };
 
-  // Delete a specific copy from book_copies table
   const deleteCopy = async (qr) => {
     if (!qr?.copy_id) return;
     const confirmed = window.confirm(`Delete Copy #${qr.copyNum}?\n\nThis will permanently remove this copy's QR code and record. Only available copies can be deleted.`);
     if (!confirmed) return;
     setDeletingCopyId(qr.copy_id);
     try {
-      // Only delete if copy is Available
       if (qr.status === 'Borrowed') {
         alert('Cannot delete a borrowed copy. Please return the book first.');
         setDeletingCopyId(null);
@@ -878,7 +815,6 @@ function ViewModal({ book, onClose, onEdit }) {
         .eq('copy_id', qr.copy_id);
       if (error) throw error;
 
-      // Re-sync book copies count
       const { data: freshCopies } = await supabaseAdmin
         .from('book_copies').select('status').eq('book_id', book.id);
       const totalAfter     = (freshCopies || []).length;
@@ -888,7 +824,6 @@ function ViewModal({ book, onClose, onEdit }) {
         status: availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
       }).eq('id', book.id);
 
-      // Update local state
       const updated = copyQRs.filter(c => c.copy_id !== qr.copy_id);
       setCopyQRs(updated);
       if (selectedCopyQR?.copy_id === qr.copy_id) {
@@ -927,7 +862,6 @@ function ViewModal({ book, onClose, onEdit }) {
         display: 'flex', flexDirection: 'column',
         animation: 'lm-fade-in 0.22s ease',
       }}>
-        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px',
@@ -972,15 +906,12 @@ function ViewModal({ book, onClose, onEdit }) {
           </div>
         </div>
 
-        {/* Body */}
         <div style={{ display: 'flex', gap: 0, overflowY: 'auto', flex: 1 }}>
-          {/* Left: images */}
           <div style={{
             width: 200, flexShrink: 0, padding: '20px 16px',
             borderRight: '1px solid rgba(139,0,0,0.10)',
             display: 'flex', flexDirection: 'column', gap: 14,
           }}>
-            {/* Cover */}
             <div>
               <div style={{
                 fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
@@ -998,7 +929,6 @@ function ViewModal({ book, onClose, onEdit }) {
                 }
               </div>
             </div>
-            {/* Abstract thumbnail — shown if image OR extracted text exists */}
             {hasAbstract && (
               <div>
                 <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)' }}>Abstract</div>
@@ -1022,7 +952,6 @@ function ViewModal({ book, onClose, onEdit }) {
                       {abstractData?.paragraphs?.[0]?.slice(0, 140)}{abstractData?.paragraphs?.[0]?.length > 140 ? '…' : ''}
                     </div>
                   )}
-                  {/* hover overlay */}
                   <div style={{
                     position: 'absolute', inset: 0, background: 'rgba(80,0,0,0.62)',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
@@ -1037,7 +966,6 @@ function ViewModal({ book, onClose, onEdit }) {
                 </div>
               </div>
             )}
-            {/* QR */}
             <div>
               <div style={{
                 fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
@@ -1061,7 +989,6 @@ function ViewModal({ book, onClose, onEdit }) {
             </div>
           </div>
 
-          {/* Right: details */}
           <div style={{ flex: 1, padding: '24px 28px', overflowY: 'auto' }}>
             <div style={{ marginBottom: 20 }}>
               <h3 style={{
@@ -1115,7 +1042,6 @@ function ViewModal({ book, onClose, onEdit }) {
         </div>
       </div>
 
-      {/* Abstract Text Modal */}
       {abstractModalOpen && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.78)',
@@ -1134,7 +1060,6 @@ function ViewModal({ book, onClose, onEdit }) {
           }}
             onClick={e => e.stopPropagation()}
           >
-            {/* Header */}
             <div style={{
               padding: '16px 22px', borderRadius: '14px 14px 0 0',
               background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
@@ -1157,10 +1082,8 @@ function ViewModal({ book, onClose, onEdit }) {
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>{Ic.close}</button>
             </div>
-            {/* Body — two-panel: image left + formatted text right */}
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-              {/* ── Left: Original Image ── */}
               {book.abstract_image_url && (
                 <div style={{
                   width: 210, flexShrink: 0, padding: '16px 14px',
@@ -1176,11 +1099,9 @@ function ViewModal({ book, onClose, onEdit }) {
                 </div>
               )}
 
-              {/* ── Right: Formatted Abstract Text ── */}
               <div style={{ flex: 1, padding: '28px 32px', overflowY: 'auto', background: '#FFFDF8' }}>
                 {abstractData ? (
                   <>
-                    {/* ── Heading block ── */}
                     <div style={{ marginBottom: 22, textAlign: 'center' }}>
                       {abstractData.heading ? (
                         <div style={{
@@ -1206,14 +1127,12 @@ function ViewModal({ book, onClose, onEdit }) {
                         </div>
                       )}
 
-                      {/* Gold rule */}
                       <div style={{
                         width: 56, height: 2, margin: '0 auto 12px',
                         background: 'linear-gradient(90deg, transparent, #C9A84C, transparent)',
                         borderRadius: 2,
                       }} />
 
-                      {/* Book byline */}
                       <div style={{
                         fontSize: 12.5, color: '#7a5c3a',
                         fontFamily: '"Georgia", serif', fontStyle: 'italic',
@@ -1223,13 +1142,11 @@ function ViewModal({ book, onClose, onEdit }) {
                       </div>
                     </div>
 
-                    {/* ── Divider ── */}
                     <div style={{
                       borderTop: '1px solid rgba(139,0,0,0.12)',
                       marginBottom: 20,
                     }} />
 
-                    {/* ── Body paragraphs ── */}
                     <div>
                       {(abstractData.paragraphs || []).map((para, i) => {
                         const isSubhead = abstractData.subheadings?.includes(para);
@@ -1266,7 +1183,6 @@ function ViewModal({ book, onClose, onEdit }) {
                       })}
                     </div>
 
-                    {/* ── Keywords ── */}
                     {abstractData.keywords?.length > 0 && (
                       <div style={{
                         marginTop: 22, paddingTop: 16,
@@ -1314,7 +1230,6 @@ function ViewModal({ book, onClose, onEdit }) {
         </div>
       )}
 
-      {/* Per-Copy QR Modal */}
       {qrModalOpen && (
         <div style={{
           position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.78)',
@@ -1333,7 +1248,6 @@ function ViewModal({ book, onClose, onEdit }) {
           }}
             onClick={e => e.stopPropagation()}
           >
-            {/* Header */}
             <div style={{
               padding: '16px 22px', borderRadius: '14px 14px 0 0',
               background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
@@ -1356,9 +1270,7 @@ function ViewModal({ book, onClose, onEdit }) {
               }}>{Ic.close}</button>
             </div>
 
-            {/* Body */}
             <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              {/* Copy list */}
               <div style={{
                 width: 140, flexShrink: 0, overflowY: 'auto', padding: '12px 8px',
                 borderRight: '1px solid rgba(139,0,0,0.10)',
@@ -1391,7 +1303,6 @@ function ViewModal({ book, onClose, onEdit }) {
                         }}>{qr.status}</span>
                       )}
                     </button>
-                    {/* Delete copy icon button */}
                     <button
                       onClick={() => deleteCopy(qr)}
                       disabled={deletingCopyId === qr.copy_id || qr.status === 'Borrowed'}
@@ -1418,7 +1329,6 @@ function ViewModal({ book, onClose, onEdit }) {
                 ))}
               </div>
 
-              {/* QR Preview */}
               <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, overflowY: 'auto' }}>
                 {generatingCopyQRs ? (
                   <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', fontSize: 13 }}>Generating unique QR codes…</div>
@@ -1442,7 +1352,6 @@ function ViewModal({ book, onClose, onEdit }) {
                         ID: {selectedCopyQR.copy_id || selectedCopyQR.label}
                       </div>
                     </div>
-                    {/* Download buttons */}
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
                       {[['PNG', 'png'], ['JPG', 'jpg']].map(([label, fmt]) => (
                         <button key={fmt} onClick={() => downloadCopyQR(selectedCopyQR, fmt)} style={{
@@ -1485,69 +1394,67 @@ function ViewModal({ book, onClose, onEdit }) {
   );
 }
 
-// ─── Delete Confirm Modal ─────────────────────────────────────────────────────
 function DeleteModal({ book, loading, onClose, onConfirm }) {
   return (
     <div style={{
-      position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.60)',
+      position: 'fixed', inset: 0, background: 'rgba(10,0,0,0.78)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      zIndex: 1000, backdropFilter: 'blur(4px)',
+      zIndex: 1000, backdropFilter: 'blur(8px)',
+      animation: 'lm-fade-in 0.2s ease',
     }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
       <div style={{
-        background: 'var(--cream)', borderRadius: 14, padding: '28px 28px 22px',
-        border: '1px solid rgba(139,0,0,0.22)', maxWidth: 400, width: '100%',
-        boxShadow: '0 20px 60px rgba(30,0,0,0.44)',
-        animation: 'lm-fade-in 0.22s ease', textAlign: 'center',
+        background: 'var(--cream)', borderRadius: 20, width: '100%', maxWidth: 380,
+        border: '2px solid rgba(201,168,76,0.35)',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+        animation: 'lm-modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1)',
+        overflow: 'hidden',
       }}>
         <div style={{
-          width: 52, height: 52, borderRadius: 14, margin: '0 auto 16px',
-          background: 'rgba(192,86,78,0.10)', border: '1px solid rgba(192,86,78,0.22)',
+          background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+          padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#c0564e',
         }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/>
-            <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/>
-          </svg>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', fontWeight: 700 }}>Delete Book Record</div>
+            <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
+          </div>
         </div>
-        <h3 style={{
-          fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--maroon-deep)',
-          marginBottom: 8,
-        }}>Delete Book Record</h3>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', lineHeight: 1.6 }}>
-          Are you sure you want to delete <strong style={{ color: 'var(--text-primary)' }}>"{book.title}"</strong>?
-          This action cannot be undone.
-        </p>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'center', marginTop: 24 }}>
-          <button onClick={onClose} disabled={loading} style={{
-            padding: '9px 22px', borderRadius: 8, fontSize: 13,
-            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
-            color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
-            transition: 'all 0.18s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.05)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >Cancel</button>
-          <button onClick={onConfirm} disabled={loading} style={{
-            padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-            border: '1px solid rgba(192,86,78,0.35)',
-            background: loading ? 'rgba(192,86,78,0.5)' : 'linear-gradient(135deg,#c0564e,#922)',
-            color: '#fff', fontFamily: 'var(--font-sans)', cursor: loading ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: 7,
+        <div style={{ padding: '20px 24px' }}>
+          <div style={{
+            padding: '12px 14px', borderRadius: 10, marginBottom: 18,
+            background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+            textAlign: 'center',
           }}>
-            {loading
-              ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Deleting…</>
-              : 'Delete Book'}
-          </button>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)', marginBottom: 3 }}>{book.title}</div>
+            <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)' }}>Are you sure you want to delete this book?</div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <button onClick={onClose} disabled={loading} style={{
+              padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+              background: 'transparent', cursor: 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: '#8B0000',
+            }}>Cancel</button>
+            <button onClick={onConfirm} disabled={loading} style={{
+              padding: '12px', borderRadius: 10, border: 'none',
+              background: loading ? 'rgba(139,0,0,0.35)' : 'linear-gradient(135deg, #8B0000, #6B0000)',
+              cursor: loading ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: '#F5E4A8',
+              boxShadow: loading ? 'none' : '0 4px 14px rgba(139,0,0,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            }}>
+              {loading
+                ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Deleting…</>
+                : 'Delete Book'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 export default function Book_Catalog() {
   const [books, setBooks]         = useState([]);
   const [loading, setLoading]     = useState(true);
@@ -1571,18 +1478,15 @@ export default function Book_Catalog() {
     toastRef.current = setTimeout(() => setToast({ msg: '', type: 'success' }), 3200);
   };
 
-  // showSpinner=true only on first load; background refreshes update silently
   const fetchBooks = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
-      // Fetch books and all book_copies in parallel
       const [{ data: booksData, error: booksErr }, { data: copiesData }] = await Promise.all([
         supabase.from('books').select('*').order('created_at', { ascending: false }),
         supabaseAdmin.from('book_copies').select('book_id, status'),
       ]);
       if (booksErr) throw booksErr;
 
-      // Build a map: book_id → { total, available }
       const copiesMap = {};
       (copiesData || []).forEach(c => {
         if (!copiesMap[c.book_id]) copiesMap[c.book_id] = { total: 0, available: 0 };
@@ -1590,7 +1494,6 @@ export default function Book_Catalog() {
         if (c.status === 'Available') copiesMap[c.book_id].available += 1;
       });
 
-      // Merge computed counts into each book record
       const merged = (booksData || []).map(b => {
         const counts = copiesMap[b.id];
         if (!counts) return b; // no copies row yet — keep DB value
@@ -1612,10 +1515,6 @@ export default function Book_Catalog() {
 
   useEffect(() => { fetchBooks(true); }, [fetchBooks]);
 
-  // Subscribe to book_copies, borrowings, AND books.
-  // borrowings is guaranteed to fire on every scan (BookManagement uses it too).
-  // book_copies fires if realtime is enabled on that table in Supabase.
-  // Either event triggers a silent background re-fetch — no loading spinner.
   useEffect(() => {
     const silentRefresh = () => fetchBooks(false);
     const ch = supabase
@@ -1636,7 +1535,6 @@ export default function Book_Catalog() {
     if (!deleteBook) return;
     setDeleting(true);
     try {
-      // supabaseAdmin bypasses RLS — safe to delete without policy restrictions
       const { error } = await supabaseAdmin.from('books').delete().eq('id', deleteBook.id);
       if (error) throw error;
       setBooks(b => b.filter(x => x.id !== deleteBook.id));
@@ -1659,8 +1557,6 @@ export default function Book_Catalog() {
     setShowForm(true);
   };
 
-  // available_copies is always computed fresh from book_copies in fetchBooks,
-  // so status is derived from actual copy availability — never stale.
   const booksWithStatus = books.map(b => {
     const avail = b.available_copies !== null && b.available_copies !== undefined
       ? parseInt(b.available_copies)
@@ -1672,7 +1568,6 @@ export default function Book_Catalog() {
     };
   });
 
-  // Filtering
   const filtered = booksWithStatus.filter(b => {
     const q = search.toLowerCase();
     const matchSearch = !q || [b.title, b.authors, b.isbn, b.publisher].join(' ').toLowerCase().includes(q);
@@ -1682,7 +1577,6 @@ export default function Book_Catalog() {
     return matchSearch && matchGenre && matchStatus && matchShelf;
   });
 
-  // Action button style
   const actionBtn = (variant) => {
     const variants = {
       view:   { color: '#5a7eb5', bg: 'rgba(90,126,181,0.10)', border: 'rgba(90,126,181,0.22)', hover: 'rgba(90,126,181,0.18)' },
@@ -1716,10 +1610,10 @@ export default function Book_Catalog() {
     );
   };
 
-  // Stats for header
-  const totalBooks     = booksWithStatus.length;
-  const totalCopies    = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
-  const availableCount = booksWithStatus.filter(b => b.status === 'Available').length;
+  const totalBooks      = booksWithStatus.length;
+  const totalCopies     = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
+  const availableCount  = booksWithStatus.reduce((s, b) => s + (parseInt(b.available_copies) ?? (b.status === 'Available' ? parseInt(b.copies) || 0 : 0)), 0);
+  const borrowedCount   = totalCopies - availableCount;
 
   const selectStyle = {
     padding: '8px 12px', borderRadius: 8,
@@ -1733,13 +1627,12 @@ export default function Book_Catalog() {
     <div className="lm-module">
       <Toast message={toast.msg} type={toast.type} />
 
-      {/* ── Summary Chips + Header Actions (single row) ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
           { label: 'Total Titles', value: totalBooks },
           { label: 'Total Copies', value: totalCopies },
           { label: 'Available', value: availableCount },
-          { label: 'Borrowed', value: totalBooks - availableCount },
+          { label: 'Borrowed', value: borrowedCount },
         ].map(({ label, value }) => (
           <div key={label} style={{
             padding: '8px 16px', borderRadius: 8,
@@ -1781,14 +1674,12 @@ export default function Book_Catalog() {
         </div>
       </div>
 
-      {/* ── Filters ── */}
       <div style={{
         display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
         padding: '14px 16px', borderRadius: 10,
         background: 'linear-gradient(135deg,rgba(139,0,0,0.04),rgba(201,168,76,0.03))',
         border: '1px solid rgba(139,0,0,0.10)',
       }}>
-        {/* Search */}
         <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
           <span style={{
             position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
@@ -1802,18 +1693,15 @@ export default function Book_Catalog() {
             }}
           />
         </div>
-        {/* Genre filter */}
         <select style={selectStyle} value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
           <option value="all">All Genres</option>
           {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        {/* Status filter */}
         <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All Status</option>
           <option value="Available">Available</option>
           <option value="Borrowed">Borrowed</option>
         </select>
-        {/* Shelf filter */}
         <select style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
           <option value="all">All Shelves</option>
           {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
@@ -1826,7 +1714,6 @@ export default function Book_Catalog() {
         </span>
       </div>
 
-      {/* ── Table ── */}
       {loading ? (
         <div className="lm-loading">
           <div className="lm-spinner" />
@@ -1879,7 +1766,6 @@ export default function Book_Catalog() {
         </div>
       )}
 
-      {/* ── Modals ── */}
       {showForm && (
         <BookFormModal
           book={editBook}
@@ -1906,7 +1792,6 @@ export default function Book_Catalog() {
   );
 }
 
-// ─── Table Row (extracted to allow clean hover state) ─────────────────────────
 function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
   const [hov, setHov] = useState(false);
   return (
@@ -1920,7 +1805,6 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
         cursor: 'pointer', transition: 'background 0.14s',
       }}
     >
-      {/* Title */}
       <td style={{ padding: '11px 16px', maxWidth: 240 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
@@ -1949,7 +1833,6 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           </div>
         </div>
       </td>
-      {/* Authors */}
       <td style={{ padding: '11px 16px' }}>
         <span style={{
           fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
@@ -1957,13 +1840,11 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           display: 'block', maxWidth: 160,
         }}>{book.authors || '—'}</span>
       </td>
-      {/* ISBN */}
       <td style={{ padding: '11px 16px' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
           {book.isbn || '—'}
         </span>
       </td>
-      {/* Copies — shows available/total so borrowing changes are visible */}
       <td style={{ padding: '11px 16px', textAlign: 'center' }}>
         {(() => {
           const total = parseInt(book.copies) ?? 0;
@@ -1978,11 +1859,9 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           );
         })()}
       </td>
-      {/* Status */}
       <td style={{ padding: '11px 16px' }}>
         <StatusBadge status={book.status} />
       </td>
-      {/* Action */}
       <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
           <ActionBtn variant="edit" onClick={onEdit}>{Ic.edit} Edit</ActionBtn>

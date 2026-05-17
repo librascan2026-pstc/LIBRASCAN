@@ -1,4 +1,3 @@
-/* ─── Scroll offset for fixed nav ─────────────────────────────────────────── */
 #features,
 #benefits,
 #process,
@@ -6,10 +5,10 @@
   scroll-margin-top: 80px;
 }
 
-/* ─── Google Fonts ────────────────────────────────────────────────────────── */
+
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Josefin+Sans:wght@300;400;600;700&display=swap');
 
-/* ─── CSS Variables ───────────────────────────────────────────────────────── */
+
 :root {
   --maroon:       #8B0000;
   --maroon-deep:  #6B0000;
@@ -25,7 +24,7 @@
   --font-sans:    'Josefin Sans', sans-serif;
 }
 
-/* ─── Reset & Base ────────────────────────────────────────────────────────── */
+
 *,
 *::before,
 *::after {
@@ -46,12 +45,12 @@ body {
   overflow-x: hidden;
 }
 
-/* ─── Scrollbar ───────────────────────────────────────────────────────────── */
+
 ::-webkit-scrollbar        { width: 6px; }
 ::-webkit-scrollbar-track  { background: var(--cream); }
 ::-webkit-scrollbar-thumb  { background: var(--gold); border-radius: 3px; }
 
-/* ─── Keyframes ───────────────────────────────────────────────────────────── */
+
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(40px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -86,13 +85,13 @@ body {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ─── Hero Entrance Animations ───────────────────────────────────────────── */
+
 .hero-animate   { animation: fadeUp 0.9s ease forwards; }
 .hero-animate-2 { animation: fadeUp 0.9s 0.2s ease forwards; opacity: 0; }
 .hero-animate-3 { animation: fadeUp 0.9s 0.4s ease forwards; opacity: 0; }
 .hero-animate-4 { animation: fadeUp 0.9s 0.6s ease forwards; opacity: 0; }
 
-/* ─── Gold Shimmer Text ───────────────────────────────────────────────────── */
+
 .gold-shimmer {
   display: block;
   background: linear-gradient(
@@ -111,10 +110,10 @@ body {
   animation: fadeUp 0.9s 0.2s ease forwards, shimmer 4s 1.1s linear infinite;
 }
 
-/* ─── Floating ────────────────────────────────────────────────────────────── */
+
 .floating { animation: float 6s ease-in-out infinite; }
 
-/* ─── Section Label ───────────────────────────────────────────────────────── */
+
 .section-label {
   font-family: var(--font-sans);
   font-size: 11px;
@@ -134,7 +133,7 @@ body {
   background: var(--gold);
 }
 
-/* ─── Ornament ────────────────────────────────────────────────────────────── */
+
 .ornament {
   display: inline-block;
   width: 60px;
@@ -144,7 +143,7 @@ body {
   margin: 0 16px;
 }
 
-/* ─── Navigation ──────────────────────────────────────────────────────────── */
+
 .nav {
   position: fixed;
   top: 0;
@@ -209,7 +208,7 @@ body {
 }
 .nav-link:hover { color: var(--gold-light); }
 
-/* ─── Buttons ─────────────────────────────────────────────────────────────── */
+
 .btn-primary {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -253,7 +252,7 @@ body {
   box-shadow: 0 0 30px rgba(201, 168, 76, 0.2);
 }
 
-/* ─── Tab Buttons ─────────────────────────────────────────────────────────── */
+
 .tab-btn {
   font-family: var(--font-sans);
   font-size: 11px;
@@ -273,9 +272,7 @@ body {
   color: var(--maroon-deep);
 }
 
-/* ─── Hero Section ─────────────────────────────────────────────────────────
-   Full viewport width & height, PSTC.jpg background with maroon overlay
-────────────────────────────────────────────────────────────────────────── */
+
 .hero {
   width: 100vw;
   min-height: 100vh;
@@ -355,7 +352,7 @@ body {
   justify-content: flex-start;
 }
 
-/* ─── QR Visual ───────────────────────────────────────────────────────────── */
+
 .qr-visual {
   display: flex;
   justify-content: center;
@@ -398,21 +395,21 @@ body {
 .qr-badge {
   position: absolute;
   background: white;
-  padding: 8px 12px; /* mas compact */
+  padding: 8px 12px; 
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
   border-left: 3px solid var(--gold);
-  min-width: auto; /* alisin yung 180px */
-  border-radius: 4px; /* optional para mas clean */
+  min-width: auto; 
+  border-radius: 4px; 
 }
 .qr-badge--tl { top: -10px; left: -40px; }
 .qr-badge--br { bottom: -10px; right: -40px; }
-/* spacing ng text */
+
 .qr-badge__title {
   font-family: var(--font-sans);
   font-size: 11px;
   font-weight: 700;
   color: var(--maroon);
-  margin-bottom: 2px; /* dikit pero readable */
+  margin-bottom: 2px; 
 }
 
 .qr-badge__sub {
@@ -425,7 +422,7 @@ body {
 
 
 
-/* ─── Stats Section ───────────────────────────────────────────────────────── */
+
 .stats {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
@@ -468,7 +465,7 @@ body {
   text-transform: uppercase;
 }
 
-/* ─── Features Section ────────────────────────────────────────────────────── */
+
 .features {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
@@ -533,7 +530,7 @@ body {
   color: #555;
 }
 
-/* ─── Benefits Section ────────────────────────────────────────────────────── */
+
 .benefits {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
@@ -609,7 +606,7 @@ body {
   margin-top: 3px;
 }
 
-/* ─── Scope Section ───────────────────────────────────────────────────────── */
+
 .scope {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
@@ -632,7 +629,7 @@ body {
   text-align: center;
 }
 
-/* Tags grid */
+
 .scope__tags-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -683,13 +680,13 @@ body {
   margin-bottom: 48px;
 }
 
-/* Clean up old unused classes */
+
 .scope__glow,
 .scope__grid,
 .scope__tags,
 .scope-tag { display: none; }
 
-/* ─── Process Section ─────────────────────────────────────────────────────── */
+
 .process {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
@@ -762,9 +759,7 @@ body {
   color: #666;
 }
 
-/* ─── Team Section ─────────────────────────────────────────────────────────
-   Redesigned: formal, elegant, circular photos
-────────────────────────────────────────────────────────────────────────── */
+
 .team {
   width: 100vw;
   min-height: 100vh;
@@ -820,7 +815,7 @@ body {
   font-style: italic;
 }
 
-/* Ornamental divider */
+
 .team__ornament {
   display: flex;
   align-items: center;
@@ -837,7 +832,7 @@ body {
   background: linear-gradient(90deg, transparent, rgba(201, 168, 76, 0.5), transparent);
 }
 
-/* ─── Team Grid: 5 columns ────────────────────────────────────────────────── */
+
 .team__grid {
   max-width: 1200px;
   margin: 0 auto;
@@ -848,7 +843,7 @@ body {
   z-index: 1;
 }
 
-/* ─── Team Member (circular style) ───────────────────────────────────────── */
+
 .team-member {
   display: flex;
   flex-direction: column;
@@ -857,7 +852,7 @@ body {
   animation: teamCardIn 0.7s ease both;
 }
 
-/* Gold ring around circular photo */
+
 .team-member__photo-ring {
   width: 150px;
   height: 150px;
@@ -948,7 +943,7 @@ body {
   font-weight: 400;
 }
 
-/* ─── Team footer institution line ────────────────────────────────────────── */
+
 .team__footer-line {
   text-align: center;
   margin-top: 60px;
@@ -964,17 +959,17 @@ body {
   font-weight: 600;
 }
 
-/* ─── CTA Section ─────────────────────────────────────────────────────────── */
 
 
-/* ─── Footer ──────────────────────────────────────────────────────────────── */
+
+
 .footer {
   width: 100vw;
   margin-left: calc(-50vw + 50%);
   margin-right: calc(-50vw + 50%);
   background: linear-gradient(135deg, var(--maroon-deep) 0%, #3D0000 100%);
   border-top: 1px solid rgba(201, 168, 76, 0.2);
-  /* Reduced padding to look more like the banner in the image */
+  
   padding: 40px 20px; 
   box-sizing: border-box;
 }
@@ -982,7 +977,7 @@ body {
 .footer__inner {
   max-width: 1280px;
   margin: 0 auto;
-  /* Use column direction to stack the text and center it */
+  
   display: flex;
   flex-direction: column;
   align-items: center; 
@@ -991,7 +986,7 @@ body {
 
 .footer__brand {
   font-family: var(--font-display);
-  /* Slightly increased size for the main title */
+  
   font-size: 22px; 
   font-weight: 700;
   color: var(--gold-light);
@@ -1002,7 +997,7 @@ body {
 
 .footer__sub {
   font-family: var(--font-sans);
-  /* Matches the small, spaced-out subtext in your image */
+  
   font-size: 11px;
   letter-spacing: 2.5px;
   color: rgba(255, 255, 255, 0.4); 
@@ -1017,7 +1012,7 @@ body {
   font-style: italic;
 }
 
-/* ─── Responsive ──────────────────────────────────────────────────────────── */
+
 @media (max-width: 1200px) {
   .team__grid { grid-template-columns: repeat(3, 1fr); gap: 32px; }
 }

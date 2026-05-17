@@ -1,8 +1,3 @@
-// src/Login_SignUp/AuthCaptcha.jsx
-// Self-contained CAPTCHA — no external scripts, no CDN links.
-// Renders a distorted canvas image with random alphanumeric characters.
-// User must type what they see to pass verification.
-
 import { useEffect, useRef, useState, useCallback } from 'react';
 
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -23,14 +18,12 @@ function drawCaptcha(canvas, code) {
 
   ctx.clearRect(0, 0, W, H);
 
-  // Background gradient
   const bg = ctx.createLinearGradient(0, 0, W, H);
   bg.addColorStop(0, '#fdf6e3');
   bg.addColorStop(1, '#f5e8c5');
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // Noise dots
   for (let i = 0; i < 80; i++) {
     ctx.beginPath();
     ctx.arc(
@@ -44,7 +37,6 @@ function drawCaptcha(canvas, code) {
     ctx.fill();
   }
 
-  // Random wavy lines (interference)
   for (let l = 0; l < 5; l++) {
     ctx.beginPath();
     ctx.moveTo(0, Math.random() * H);
@@ -56,7 +48,6 @@ function drawCaptcha(canvas, code) {
     ctx.stroke();
   }
 
-  // Draw each character with random tilt, size, color shift
   const charW = W / (LENGTH + 1);
   const fonts = ["'Georgia', serif", "'Times New Roman', serif", "serif"];
 
@@ -71,13 +62,11 @@ function drawCaptcha(canvas, code) {
     ctx.translate(x, y);
     ctx.rotate(angle);
 
-    // Shadow for depth
     ctx.shadowColor = 'rgba(80,20,0,0.3)';
     ctx.shadowBlur = 2;
     ctx.shadowOffsetX = 1;
     ctx.shadowOffsetY = 1;
 
-    // Alternate dark red / dark brown tones
     const r = 100 + Math.floor(Math.random() * 60);
     const g = Math.floor(Math.random() * 30);
     const b = Math.floor(Math.random() * 20);
@@ -90,7 +79,6 @@ function drawCaptcha(canvas, code) {
     ctx.restore();
   }
 
-  // Overlay sine-wave stripe to blur readability slightly
   for (let x = 0; x < W; x += 2) {
     const y = H / 2 + Math.sin(x * 0.08) * (H * 0.18);
     ctx.beginPath();
@@ -102,12 +90,7 @@ function drawCaptcha(canvas, code) {
   }
 }
 
-/**
- * AuthCaptcha
- * Props:
- *   onVerify(bool)  — called with true when user types correct code, false on mismatch
- *   onReset()       — called when CAPTCHA is refreshed (clears verified state in parent)
- */
+
 export default function AuthCaptcha({ onVerify, onReset }) {
   const canvasRef  = useRef(null);
   const [code, setCode]       = useState('');
@@ -120,16 +103,13 @@ export default function AuthCaptcha({ onVerify, onReset }) {
     setInput('');
     setStatus('idle');
     onReset?.();
-    // Draw after state flush
     setTimeout(() => {
       if (canvasRef.current) drawCaptcha(canvasRef.current, newCode);
     }, 0);
   }, [onReset]);
 
-  // Initial draw
   useEffect(() => {
     refresh();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleChange = (e) => {
@@ -142,7 +122,6 @@ export default function AuthCaptcha({ onVerify, onReset }) {
       } else {
         setStatus('error');
         onVerify?.(false);
-        // Auto-refresh after short delay on wrong answer
         setTimeout(() => {
           refresh();
         }, 900);
@@ -186,7 +165,6 @@ export default function AuthCaptcha({ onVerify, onReset }) {
         {labelText}
       </div>
 
-      {/* Canvas + Refresh button row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
         <canvas
           ref={canvasRef}
@@ -202,7 +180,6 @@ export default function AuthCaptcha({ onVerify, onReset }) {
             flexShrink: 0,
           }}
         />
-        {/* Refresh button */}
         <button
           type="button"
           onClick={refresh}
@@ -230,7 +207,6 @@ export default function AuthCaptcha({ onVerify, onReset }) {
         </button>
       </div>
 
-      {/* Input */}
       <input
         type="text"
         value={input}

@@ -1,8 +1,3 @@
-// src/Login_SignUp/AuthLayout.jsx
-// ── FULLY RESPONSIVE VERSION ───────────────────────────────────────────────────
-// Works on: iPhone SE, iPhone XR, iPad Mini/Air/Pro, Android phones, desktops
-// Card adapts: stacked on mobile, side-by-side on tablet+
-
 import { motion } from 'framer-motion';
 
 const FONT_DISPLAY = "'Playfair Display', Georgia, serif";
@@ -23,9 +18,8 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
       overflow:  'hidden',
       zIndex:    0,
     }}>
-      {/* ── Responsive styles injected ── */}
       <style>{`
-        /* Auth card wrapper */
+        
         .auth-card {
           position: relative;
           z-index: 5;
@@ -38,7 +32,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           flex-direction: row;
         }
 
-        /* Book image panel — hidden on small screens */
+        
         .auth-book-panel {
           width: 42%;
           flex-shrink: 0;
@@ -46,7 +40,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           display: block;
         }
 
-        /* Right parchment panel */
+        
         .auth-form-panel {
           flex: 1;
           background: linear-gradient(160deg, #f8efd4 0%, #eddebb 45%, #e6ce9c 100%);
@@ -58,7 +52,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           min-width: 0;
         }
 
-        /* Scrollable content area */
+        
         .auth-pane {
           flex: 1;
           overflow-y: auto;
@@ -71,7 +65,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
         .auth-pane::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.25); border-radius: 10px; }
         .auth-pane::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.45); }
 
-        /* === TABLET (641px – 900px) === */
+        
         @media (max-width: 900px) {
           .auth-card {
             width: calc(100vw - 24px);
@@ -81,7 +75,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           .auth-form-panel { padding: 20px 24px 14px; }
         }
 
-        /* === MOBILE (≤ 640px) === */
+        
         @media (max-width: 640px) {
           .auth-card {
             flex-direction: column;
@@ -89,7 +83,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
             max-height: calc(100vh - 20px);
             border-radius: 14px;
           }
-          /* On mobile: hide the book panel, show a slim header banner instead */
+          
           .auth-book-panel { display: none; }
           .auth-form-panel {
             padding: 16px 20px 12px;
@@ -100,7 +94,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           }
         }
 
-        /* Default: mobile banner hidden */
+        
         .auth-mobile-banner {
           display: none;
           background: linear-gradient(135deg, #8B0000, #6B0000);
@@ -110,7 +104,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           flex-shrink: 0;
         }
 
-        /* === VERY SMALL (≤ 380px, iPhone SE) === */
+        
         @media (max-width: 380px) {
           .auth-card {
             width: 100vw;
@@ -121,21 +115,18 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
         }
       `}</style>
 
-      {/* ── Background image ── */}
       <div style={{
         position: 'absolute', inset: 0,
         backgroundImage: 'url(/LoginBG.png)',
         backgroundSize: 'cover', backgroundPosition: 'center',
         zIndex: 0,
       }} />
-      {/* ── Dark maroon overlay ── */}
       <div style={{
         position: 'absolute', inset: 0,
         background: 'rgba(68, 0, 0, 0.76)',
         zIndex: 1,
       }} />
 
-      {/* ── PSU Logo — top left ── */}
       <div style={{ position: 'absolute', top: 16, left: 20, zIndex: 10 }}>
         <img src="/LibraryLogo.png" alt="PSU Logo" style={{
           width: 48, height: 48, borderRadius: '50%',
@@ -143,7 +134,6 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
         }} />
       </div>
 
-      {/* ── X Exit Button ── */}
       <button
         type="button"
         onClick={handleExit}
@@ -166,27 +156,23 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
         </svg>
       </button>
 
-      {/* ── Main Card ── */}
       <motion.div
         className="auth-card"
         initial={{ opacity: 0, scale: 0.96, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
       >
-        {/* ── Left: Book image (hidden on mobile) ── */}
         <div className="auth-book-panel">
           <img
             src="/Book.png" alt="Library"
             style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
           />
-          {/* Spine shadow */}
           <div style={{
             position: 'absolute', right: 0, top: 0, bottom: 0, width: 16,
             background: 'linear-gradient(to right, rgba(0,0,0,0.55), transparent)',
           }} />
         </div>
 
-        {/* ── Mobile top banner (replaces book panel on mobile) ── */}
         <div className="auth-mobile-banner">
           
           <div>
@@ -195,9 +181,7 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
           </div>
         </div>
 
-        {/* ── Right: Parchment form panel ── */}
         <div className="auth-form-panel">
-          {/* Corner flourishes */}
           <svg style={{ position:'absolute', top:10, right:10, opacity:0.15 }} width="36" height="36" viewBox="0 0 44 44" fill="none">
             <path d="M44,0 L44,18 M44,0 L26,0" stroke="#8B0000" strokeWidth="2"/>
           </svg>
@@ -205,7 +189,6 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
             <path d="M0,44 L0,26 M0,44 L18,44" stroke="#8B0000" strokeWidth="2"/>
           </svg>
 
-          {/* Ornament */}
           <div style={{ textAlign:'center', marginBottom:4, flexShrink:0 }}>
             <svg width="120" height="14" viewBox="0 0 140 16" fill="none">
               <line x1="0"   y1="8" x2="52"  y2="8" stroke="#8B0000" strokeWidth="1" strokeOpacity="0.3"/>
@@ -214,7 +197,6 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
             </svg>
           </div>
 
-          {/* Title */}
           <h2 style={{
             fontFamily: FONT_DISPLAY,
             fontSize: 'clamp(16px, 3vw, 22px)',
@@ -225,7 +207,6 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
             {title}
           </h2>
 
-          {/* Subtitle */}
           {subtitle && (
             <p style={{
               fontFamily: FONT_BODY,
@@ -238,7 +219,6 @@ export default function AuthLayout({ children, title, subtitle, onExit, onBack }
             </p>
           )}
 
-          {/* ── Scrollable content ── */}
           <div className="auth-pane">
             {children}
           </div>

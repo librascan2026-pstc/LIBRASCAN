@@ -1,17 +1,12 @@
-// src/Admin_Dashboard/AttendanceMonitoring.jsx
-// QR-based Library Attendance System — Teklead T-D4 compatible (HID/keyboard emulation)
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt      = (d, opts) => new Intl.DateTimeFormat('en-PH', opts).format(d);
 const fmtTime  = (d) => fmt(new Date(d), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 const fmtDate  = (d) => fmt(new Date(d), { month: 'short', day: 'numeric', year: 'numeric' });
 const fmtFull  = (d) => `${fmtDate(d)} · ${fmtTime(d)}`;
 const today    = () => new Date().toISOString().split('T')[0];
 
-// Parse QR payload from Teklead T-D4 (flat single-line string, no real newlines).
 function parseQR(raw) {
   if (!raw?.trim()) return null;
   const flat = raw.trim().replace(/\r?\n/g, '');
@@ -25,14 +20,12 @@ function parseQR(raw) {
   return { id_no, full_name, program };
 }
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
 const MAR  = '#8B0000';
 const MAR2 = '#6B0000';
 const G    = '#C9A84C';
 const GP   = '#F5E4A8';
 const CREAM = '#FAF6EE';
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
 const Ic = {
   users:   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
   id:      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>,
@@ -41,7 +34,6 @@ const Ic = {
   warn:    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   search:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
   trash:   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>,
-  // QR icon matching BookManagement style
   qr: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
         <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
         <rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/>
@@ -53,7 +45,6 @@ const Ic = {
            </svg>,
 };
 
-// ─── Tab CSS (scoped with "am-" prefix to avoid collision) ────────────────────
 const TAB_CSS = `
   .am-tabs {
     display: flex;
@@ -140,7 +131,6 @@ const TAB_CSS = `
   }
 `;
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
 function StatCard({ icon, label, value, sub, accentColor = '#C9A84C' }) {
   return (
     <div style={{
@@ -155,7 +145,6 @@ function StatCard({ icon, label, value, sub, accentColor = '#C9A84C' }) {
   );
 }
 
-// ─── useScannerCapture hook ───────────────────────────────────────────────────
 function useScannerCapture(onScan) {
   const inputRef   = useRef(null);
   const bufRef     = useRef('');
@@ -207,7 +196,6 @@ function useScannerCapture(onScan) {
   return { inputEl, receiving, pulse, focused };
 }
 
-// ─── Scanner Panel — styled to match BookManagement QR Scanner panel ──────────
 function ScannerPanel({ onScan, scannerReady }) {
   const { inputEl, receiving, pulse, focused } = useScannerCapture(onScan);
 
@@ -221,7 +209,6 @@ function ScannerPanel({ onScan, scannerReady }) {
         boxShadow: '0 8px 40px rgba(80,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.7)',
         marginBottom: 0, overflow: 'hidden', position: 'relative',
       }}>
-        {/* Animated top bar */}
         <div style={{
           height: 4,
           background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
@@ -229,7 +216,6 @@ function ScannerPanel({ onScan, scannerReady }) {
           animation: 'am-shimmer-bar 3s ease-in-out infinite',
         }} />
 
-        {/* Header row */}
         <div style={{ padding: '20px 28px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
             <div style={{
@@ -237,7 +223,6 @@ function ScannerPanel({ onScan, scannerReady }) {
               color: 'var(--maroon-deep)', letterSpacing: '0.06em',
               display: 'flex', alignItems: 'center', gap: 10,
             }}>
-              {/* QR icon orb — matches BookManagement exactly */}
               <div style={{
                 width: 32, height: 32, borderRadius: 9,
                 background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
@@ -257,7 +242,6 @@ function ScannerPanel({ onScan, scannerReady }) {
             </div>
           </div>
 
-          {/* Focus / status indicator */}
           <div style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
             padding: '6px 14px', borderRadius: 20,
@@ -279,7 +263,6 @@ function ScannerPanel({ onScan, scannerReady }) {
           </div>
         </div>
 
-        {/* Paused warning */}
         {!focused && (
           <div style={{ padding: '12px 28px 0' }}>
             <div style={{
@@ -293,7 +276,6 @@ function ScannerPanel({ onScan, scannerReady }) {
           </div>
         )}
 
-        {/* Footer bar */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           padding: '14px 28px',
@@ -310,7 +292,6 @@ function ScannerPanel({ onScan, scannerReady }) {
   );
 }
 
-// ─── Scan Result Banner ───────────────────────────────────────────────────────
 function ScanResult({ result, onDismiss }) {
   if (!result) return null;
   const isSuccess = result.type === 'success';
@@ -364,7 +345,6 @@ function ScanResult({ result, onDismiss }) {
   );
 }
 
-// ─── Status Badge — matches BookManagement Badge style ────────────────────────
 function StatusBadge({ status }) {
   const cfg = status === 'time-in'
     ? { bg: 'rgba(46,125,50,0.10)', color: '#4a8e4c', border: 'rgba(90,158,92,0.25)', dot: '#5a9e5c', label: 'Time In' }
@@ -382,12 +362,12 @@ function StatusBadge({ status }) {
   );
 }
 
-// ─── Today Attendance Table (Scanner tab) — matches Transaction History style ──
 function TodayTable({ records, loading, onDelete, onFocusChange }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
   const [hovRow, setHovRow] = useState(null);
   const [delHov, setDelHov] = useState(null);
+  const [delConfirm, setDelConfirm] = useState(null);
 
   const filtered = records.filter(r => {
     const q = search.toLowerCase();
@@ -397,9 +377,9 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
   });
 
   return (
+    <>
     <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'visible', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
 
-      {/* Header bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
         padding: '16px 20px',
@@ -445,7 +425,6 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
         </div>
       </div>
 
-      {/* Table */}
       {loading ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '48px 0', background: CREAM }}>
           <div className="lm-spinner" />
@@ -511,7 +490,7 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
                     <button
                       onMouseEnter={() => setDelHov(r.id)}
                       onMouseLeave={() => setDelHov(null)}
-                      onClick={() => onDelete(r.id)}
+                      onClick={() => setDelConfirm(r)}
                       title="Delete record"
                       style={{
                         display: 'inline-flex', alignItems: 'center', gap: 5,
@@ -533,10 +512,61 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
         </div>
       )}
     </div>
+
+      {delConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 3000,
+          background: 'rgba(10,0,0,0.78)', backdropFilter: 'blur(8px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+          animation: 'am-fadeIn 0.2s ease',
+        }}>
+          <div style={{
+            background: CREAM, borderRadius: 20, width: '100%', maxWidth: 380,
+            border: '2px solid rgba(201,168,76,0.35)',
+            boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+            animation: 'am-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+              padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: GP, fontWeight: 700 }}>Delete Record</div>
+                <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
+              </div>
+            </div>
+            <div style={{ padding: '20px 24px' }}>
+              <div style={{
+                padding: '12px 14px', borderRadius: 10, marginBottom: 18,
+                background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)', marginBottom: 3 }}>{delConfirm.full_name || '—'}</div>
+                <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)' }}>{delConfirm.id_no} · {fmtDate(delConfirm.time_in)}</div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                <button onClick={() => setDelConfirm(null)} style={{
+                  padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+                  background: 'transparent', cursor: 'pointer',
+                  fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: MAR,
+                }}>Cancel</button>
+                <button onClick={() => { onDelete(delConfirm.id); setDelConfirm(null); }} style={{
+                  padding: '12px', borderRadius: 10, border: 'none',
+                  background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: GP,
+                  boxShadow: '0 4px 14px rgba(139,0,0,0.3)',
+                }}>Delete</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
-
-// ─── Visitor History Table (History tab) — all-time records ──────────────────
 function VisitorHistoryTable({ onFocusChange }) {
   const [records,  setRecords]  = useState([]);
   const [loading,  setLoading]  = useState(true);
@@ -564,7 +594,6 @@ function VisitorHistoryTable({ onFocusChange }) {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  // Realtime sync
   useEffect(() => {
     const ch = supabase.channel('visitor-history-rt')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
@@ -596,7 +625,6 @@ function VisitorHistoryTable({ onFocusChange }) {
     <>
       <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'visible', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
 
-        {/* Header bar */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
           padding: '16px 20px',
@@ -642,7 +670,6 @@ function VisitorHistoryTable({ onFocusChange }) {
           </div>
         </div>
 
-        {/* Table */}
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '48px 0', background: CREAM }}>
             <div className="lm-spinner" />
@@ -737,7 +764,6 @@ function VisitorHistoryTable({ onFocusChange }) {
         )}
       </div>
 
-      {/* Delete Confirmation Modal */}
       {delConfirm && (
         <div style={{
           position: 'fixed', inset: 0, zIndex: 3000,
@@ -755,10 +781,9 @@ function VisitorHistoryTable({ onFocusChange }) {
             <div style={{
               background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
               padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
-              display: 'flex', alignItems: 'center', gap: 10,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              <span style={{ fontSize: 20 }}>🗑</span>
-              <div>
+              <div style={{ textAlign: 'center' }}>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 15, color: GP, fontWeight: 700 }}>Delete Record</div>
                 <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
               </div>
@@ -767,6 +792,7 @@ function VisitorHistoryTable({ onFocusChange }) {
               <div style={{
                 padding: '12px 14px', borderRadius: 10, marginBottom: 18,
                 background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+                textAlign: 'center',
               }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)', marginBottom: 3 }}>{delConfirm.full_name || '—'}</div>
                 <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)' }}>{delConfirm.id_no} · {fmtDate(delConfirm.time_in)}</div>
@@ -793,7 +819,6 @@ function VisitorHistoryTable({ onFocusChange }) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
 export default function AttendanceMonitoring() {
   const [activeTab,   setActiveTab]   = useState('scanner');
   const [records,     setRecords]     = useState([]);
@@ -802,9 +827,9 @@ export default function AttendanceMonitoring() {
   const [scannerReady]                = useState(true);
   const [stats,       setStats]       = useState({ today: 0, unique: 0, lastHour: 0 });
   const [scannerFocused, setScannerFocused] = useState(true);
+  const [delConfirm,  setDelConfirm]  = useState(null);
   const resultTimer                   = useRef(null);
 
-  // Load today's records
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
@@ -828,7 +853,6 @@ export default function AttendanceMonitoring() {
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
-  // Realtime for today's records
   useEffect(() => {
     const channel = supabase.channel('attendance-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
@@ -844,7 +868,6 @@ export default function AttendanceMonitoring() {
     return () => supabase.removeChannel(channel);
   }, []);
 
-  // Handle scan
   const handleScan = useCallback(async (raw) => {
     const parsed = parseQR(raw);
     if (!parsed) {
@@ -868,9 +891,7 @@ export default function AttendanceMonitoring() {
     resultTimer.current = setTimeout(() => setScanResult(null), 6000);
   }, []);
 
-  // Delete from today's list
   const handleDelete = useCallback(async (id) => {
-    if (!window.confirm('Remove this attendance record?')) return;
     const { error } = await supabase.from('attendance_logs').delete().eq('id', id);
     if (!error) {
       setRecords(prev => prev.filter(r => r.id !== id));
@@ -882,14 +903,12 @@ export default function AttendanceMonitoring() {
     <div className="lm-module">
       <style>{TAB_CSS}</style>
 
-      {/* ── Stat Cards — always visible above tabs ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 24 }}>
         <StatCard label="Today's Visitors" value={stats.today}    sub="Total scans today" />
         <StatCard label="Unique Students"  value={stats.unique}   sub="Distinct IDs scanned" />
         <StatCard label="Last Hour"        value={stats.lastHour} sub="Entries in past 60 min" />
       </div>
 
-      {/* ── Tab bar ── */}
       <div className="am-tabs">
         <button
           className={`am-tab${activeTab === 'scanner' ? ' am-on' : ''}`}
@@ -910,24 +929,19 @@ export default function AttendanceMonitoring() {
         </button>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════
-          SCANNER TAB
-      ══════════════════════════════════════════════════════════ */}
+      
       {activeTab === 'scanner' && <>
 
-        {/* Scanner Panel */}
         <div style={{ marginBottom: 16 }}>
           <ScannerPanel onScan={handleScan} scannerReady={scannerReady} />
         </div>
 
-        {/* Scan Result */}
         {scanResult && (
           <div style={{ marginBottom: 16 }}>
             <ScanResult result={scanResult} onDismiss={() => setScanResult(null)} />
           </div>
         )}
 
-        {/* Today's Attendance Table */}
         <TodayTable
           records={records}
           loading={loading}
@@ -935,16 +949,14 @@ export default function AttendanceMonitoring() {
           onFocusChange={setScannerFocused}
         />
 
-      </>}{/* end scanner tab */}
+      </>}
 
-      {/* ══════════════════════════════════════════════════════════
-          VISITOR HISTORY TAB
-      ══════════════════════════════════════════════════════════ */}
+      
       {activeTab === 'history' && <>
 
         <VisitorHistoryTable onFocusChange={setScannerFocused} />
 
-      </>}{/* end history tab */}
+      </>}
 
     </div>
   );

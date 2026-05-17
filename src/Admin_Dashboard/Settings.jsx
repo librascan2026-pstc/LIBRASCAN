@@ -1,108 +1,9 @@
-// src/Admin_Dashboard/Settings.jsx
-//
-// ═══════════════════════════════════════════════════════════════
-//  MAINTENANCE GUIDE
-// ═══════════════════════════════════════════════════════════════
-//
-//  FILE LOCATION:   src/Admin_Dashboard/Settings.jsx
-//  USED IN:         Dashboard.jsx — case 'settings': return <Settings ... />
-//  PROPS RECEIVED:
-//    • user       — Supabase auth user object  (from Dashboard)
-//    • onSignOut  — function ()                (from Dashboard)
-//
-// ───────────────────────────────────────────────────────────────
-//  STRUCTURE — 3 Tabs
-// ───────────────────────────────────────────────────────────────
-//
-//  [Profile]   AvatarUpload + Account info display + Edit form
-//  [Security]  Change password (old → new) + MFA toggle (TOTP)
-//  [Sessions]  Active sessions list + Sign Out All
-//
-// ───────────────────────────────────────────────────────────────
-//  IMPORTS & DEPENDENCIES
-// ───────────────────────────────────────────────────────────────
-//
-//  supabase        — ../supabaseClient  (anon key client)
-//  useAuth()       — ../Login_SignUp/AuthContext
-//                    exposes: { profile, refreshProfile }
-//  Dashboard.css   — provides all CSS variables and .lm-* classes
-//                    (already loaded globally via Dashboard.jsx)
-//
-// ───────────────────────────────────────────────────────────────
-//  CSS VARIABLES (from Dashboard.css) — do NOT redefine here
-// ───────────────────────────────────────────────────────────────
-//
-//  Content area background : --bg-base       #FDF8F0  (cream)
-//  Card / panel bg         : --panel-bg      #EAD9B4
-//  Primary text            : --text-primary  #3A0000
-//  Secondary text          : --text-secondary #5A1010
-//  Muted text              : --text-muted    #7A3030
-//  Dim text                : --text-dim      rgba(90,16,16,0.55)
-//  Maroon                  : --maroon        #7B0000
-//  Maroon mid              : --maroon-mid    #8B0000
-//  Maroon deep             : --maroon-deep   #5A0000
-//  Gold                    : --gold          #C9A84C
-//  Gold pale               : --gold-pale     #F5E4A8
-//  Border                  : --border        rgba(139,0,0,0.18)
-//  Font display            : --font-display  'Cinzel', serif
-//  Font sans               : --font-sans     'DM Sans', sans-serif
-//
-// ───────────────────────────────────────────────────────────────
-//  AVATAR UPLOAD
-// ───────────────────────────────────────────────────────────────
-//
-//  Supabase Storage bucket : "avatars"  (must be PUBLIC)
-//  File path format        : {userId}/avatar.{ext}
-//  Max upload size         : 2 MB (enforced client-side)
-//  Accepted types          : image/* (JPG, PNG, WebP)
-//
-//  To create the bucket:
-//    Supabase → Storage → New Bucket → name: "avatars" → Public: ON
-//
-// ───────────────────────────────────────────────────────────────
-//  CHANGE PASSWORD FLOW
-// ───────────────────────────────────────────────────────────────
-//
-//  1. User enters Current Password, New Password, Confirm Password
-//  2. On submit → re-authenticate via signInWithPassword(email, oldPw)
-//     • If this fails → show "Incorrect current password" error
-//     • This step prevents unauthorized changes from hijacked sessions
-//  3. On success → updateUser({ password: newPw })
-//
-// ───────────────────────────────────────────────────────────────
-//  MFA — TWO-FACTOR AUTHENTICATION (TOTP)
-// ───────────────────────────────────────────────────────────────
-//
-//  PREREQUISITE — Enable MFA in Supabase:
-//    Dashboard → Authentication → Sign In Methods
-//    → Multi-Factor Authentication → Toggle ON
-//
-//  PHASES:
-//    'idle'   — MFA not set up. Toggle switch begins enrollment.
-//    'setup'  — Enrollment in progress. Steps: scan QR → enter code → save backups.
-//    'active' — MFA verified and active. Toggle or button disables it.
-//
-//  REAL QR CODE (replace placeholder):
-//    1. npm install qrcode.react
-//    2. import { QRCodeSVG } from 'qrcode.react';
-//    3. Replace <QrPlaceholder /> with: <QRCodeSVG value={uri} size={148} />
-//
-//  SUPABASE MFA API CALLS USED:
-//    supabase.auth.mfa.listFactors()          — check if already enrolled
-//    supabase.auth.mfa.enroll({ factorType: 'totp', ... })  — begin setup
-//    supabase.auth.mfa.challenge({ factorId }) — create challenge
-//    supabase.auth.mfa.verify({ factorId, challengeId, code }) — confirm
-//    supabase.auth.mfa.unenroll({ factorId }) — disable / remove
-//
-// ═══════════════════════════════════════════════════════════════
-
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/AuthContext';
 
-// ─── All scoped CSS — prefix "s-" avoids collision with lm-* classes ──────────
 const CSS = `
-  /* ── Tab bar ── */
+  
   .s-tabs {
     display: flex;
     border-bottom: 1px solid var(--border);
@@ -133,7 +34,7 @@ const CSS = `
     border-bottom-color: var(--maroon);
   }
 
-  /* ── Two-column grid ── */
+  
   .s-grid {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -142,7 +43,7 @@ const CSS = `
   }
   @media (max-width: 840px) { .s-grid { grid-template-columns: 1fr; } }
 
-  /* ── Card ── themed cream card consistent with dashboard ── */
+  
   .s-card {
     background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
     border: 1px solid rgba(139,0,0,0.14);
@@ -177,7 +78,7 @@ const CSS = `
     text-align: center;
   }
 
-  /* ── Key-value info rows ── */
+  
   .s-row {
     display: flex;
     justify-content: space-between;
@@ -193,7 +94,7 @@ const CSS = `
   .s-row-k { font-size: 11.5px; color: var(--text-muted); flex-shrink: 0; font-weight: 500; }
   .s-row-v { font-size: 12.5px; font-weight: 600; color: var(--text-primary); text-align: right; word-break: break-all; }
 
-  /* ── Form field ── */
+  
   .s-field { margin-bottom: 14px; }
   .s-label {
     display: block;
@@ -229,7 +130,7 @@ const CSS = `
   .s-err  { display: block; margin-top: 4px; font-size: 11px; color: #C0392B; }
   .s-hint { display: block; margin-top: 4px; font-size: 11px; color: var(--text-dim); font-style: italic; }
 
-  /* ── Password wrapper ── */
+  
   .s-pw-wrap { position: relative; }
   .s-pw-wrap .s-input { padding-right: 40px; }
   .s-eye {
@@ -241,11 +142,11 @@ const CSS = `
   }
   .s-eye:hover { opacity: 1; color: var(--maroon); }
 
-  /* ── Two-column form grid ── */
+  
   .s-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   @media (max-width: 520px) { .s-2 { grid-template-columns: 1fr; } }
 
-  /* ── Tip / hint box ── */
+  
   .s-tip {
     background: rgba(201,168,76,0.08);
     border: 1px solid rgba(201,168,76,0.26);
@@ -257,7 +158,7 @@ const CSS = `
     margin-bottom: 16px;
   }
 
-  /* ── Buttons ── */
+  
   .s-btn {
     display: inline-flex; align-items: center; justify-content: center;
     gap: 7px; padding: 9px 20px; border-radius: 8px; border: none;
@@ -291,7 +192,7 @@ const CSS = `
   .s-btn.d:disabled { opacity: 0.38; cursor: not-allowed; }
   .s-btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 
-  /* ── Avatar ── */
+  
   .s-av-wrap {
     display: flex;
     flex-direction: column;
@@ -325,14 +226,14 @@ const CSS = `
   .s-av-name { font-size: 15px; font-weight: 700; color: var(--text-primary); margin-bottom: 3px; text-align: center; }
   .s-av-role { font-size: 12px; color: var(--text-muted); text-align: center; margin-bottom: 0; }
 
-  /* ── Role badge ── */
+  
   .s-badge {
     display: inline-block;
     padding: 2px 10px; border-radius: 20px;
     font-family: var(--font-sans); font-size: 11px; font-weight: 700;
   }
 
-  /* ── MFA status bar (toggle row) ── */
+  
   .s-mfa-bar {
     display: flex;
     align-items: center;
@@ -348,7 +249,7 @@ const CSS = `
   .s-mfa-desc  { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
   .s-mfa-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 
-  /* ── Status pill (Enabled / Disabled) ── */
+  
   .s-pill {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 3px 10px; border-radius: 20px;
@@ -358,7 +259,7 @@ const CSS = `
   .s-pill.off { background: rgba(139,0,0,0.08); color: #8B0000; border: 1px solid rgba(139,0,0,0.20); }
   .s-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 
-  /* ── Toggle switch ── */
+  
   .s-toggle { position: relative; width: 44px; height: 24px; cursor: pointer; display: inline-block; }
   .s-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
   .s-track {
@@ -380,7 +281,7 @@ const CSS = `
   }
   .s-toggle input:checked ~ .s-track .s-thumb { transform: translateX(20px); }
 
-  /* ── MFA setup step blocks ── */
+  
   .s-step {
     background: rgba(201,168,76,0.05);
     border: 1px solid rgba(201,168,76,0.18);
@@ -405,7 +306,7 @@ const CSS = `
     line-height: 1.65; padding-left: 31px;
   }
 
-  /* ── QR placeholder box ── */
+  
   .s-qr {
     width: 148px; height: 148px;
     border-radius: 10px;
@@ -418,7 +319,7 @@ const CSS = `
     text-align: center; line-height: 1.5;
   }
 
-  /* ── OTP code input ── */
+  
   .s-otp {
     width: 100%;
     padding: 11px;
@@ -436,7 +337,7 @@ const CSS = `
   .s-otp:focus { border-color: rgba(123,0,0,0.48); box-shadow: 0 0 0 3px rgba(123,0,0,0.08); }
   .s-otp.e { border-color: #C0392B; }
 
-  /* ── Backup codes grid ── */
+  
   .s-codes { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 10px 0; }
   .s-code {
     background: rgba(255,248,240,0.90);
@@ -449,7 +350,7 @@ const CSS = `
     user-select: all;
   }
 
-  /* ── Alert banners ── */
+  
   .s-alert {
     display: flex; align-items: flex-start; gap: 10px;
     padding: 11px 14px; border-radius: 8px;
@@ -460,7 +361,7 @@ const CSS = `
   .s-alert.info    { background: rgba(201,168,76,0.08); border: 1px solid rgba(201,168,76,0.24); color: var(--text-secondary); }
   .s-alert.success { background: rgba(46,125,50,0.07);  border: 1px solid rgba(46,125,50,0.20);  color: #1B5E20; }
 
-  /* ── Sessions ── */
+  
   .s-session {
     display: flex; align-items: center; gap: 13px;
     padding: 11px 0;
@@ -491,7 +392,7 @@ const CSS = `
 
   
 
-  /* ── Toast ── */
+  
   .s-toast {
     position: fixed; bottom: 28px; right: 28px; z-index: 9999;
     display: flex; align-items: center; gap: 10px;
@@ -510,14 +411,12 @@ const CSS = `
   }
 `;
 
-// ─── Static config ─────────────────────────────────────────────────────────────
 const ROLES = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.09)',  color: '#1565C0', border: 'rgba(33,150,243,0.22)' },
   library_manager: { label: 'Library Manager', bg: 'rgba(123,0,0,0.09)',    color: '#7B0000', border: 'rgba(123,0,0,0.22)'   },
   admin:           { label: 'Administrator',   bg: 'rgba(201,168,76,0.11)', color: '#5C3A00', border: 'rgba(201,168,76,0.28)' },
 };
 
-// ─── Tiny shared atoms ────────────────────────────────────────────────────────
 function Toast({ msg, ok }) {
   if (!msg) return null;
   return (
@@ -590,7 +489,6 @@ function Toggle({ id, checked, onChange, disabled }) {
   );
 }
 
-// ─── Avatar Upload ────────────────────────────────────────────────────────────
 function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToast, onRefresh }) {
   const [busy,    setBusy]    = useState(false);
   const [preview, setPreview] = useState(avatarUrl || null);
@@ -636,7 +534,6 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
 
   return (
     <div className="s-av-wrap">
-      {/* Avatar ring — centered, larger */}
       <div style={{ position: 'relative', display: 'inline-block' }}>
         <div className="s-av-ring">
           {preview ? <img src={preview} alt="avatar" /> : <span className="s-av-init">{initials}</span>}
@@ -650,11 +547,9 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
         <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
       </div>
 
-      {/* Name + role */}
       <div className="s-av-name" style={{ marginTop: 12, fontSize: 16 }}>{displayName}</div>
       <div className="s-av-role" style={{ marginBottom: 14 }}>{roleLabel}</div>
 
-      {/* Action buttons */}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
         <button className="s-btn o" style={{ padding: '6px 16px', fontSize: 12 }} onClick={() => ref.current?.click()} disabled={busy}>
           {busy ? 'Uploading…' : 'Upload Photo'}
@@ -666,7 +561,6 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
         )}
       </div>
 
-      {/* Hint */}
       <span className="s-hint" style={{ marginTop: 8, display: 'block', textAlign: 'center' }}>
         JPG, PNG or WebP · Max 2 MB
       </span>
@@ -674,9 +568,6 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  TAB 1 — Profile
-// ═══════════════════════════════════════════════════════════════
 function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
@@ -743,7 +634,6 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
 
   return (
     <div className="s-grid">
-      {/* ── Left: Account Info ── */}
       <div className="s-card">
         <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Account Information</p>
         <p className="s-card-sub" style={{ marginBottom: 20 }}>Your current profile at a glance.</p>
@@ -775,7 +665,6 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         ))}
       </div>
 
-      {/* ── Right: Edit Form ── */}
       <div className="s-card">
         <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Edit Profile</p>
         <p className="s-card-sub" style={{ marginBottom: 20 }}>
@@ -816,7 +705,6 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
             onChange={e => set('username', e.target.value)} placeholder="e.g. librarian_psu" />
         </div>
 
-        {/* Email — editable for admin, read-only for everyone else */}
         <div className="s-field">
           <label className="s-label">
             Email Address
@@ -859,12 +747,8 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  TAB 2 — Security
-// ═══════════════════════════════════════════════════════════════
 function SecurityTab({ onToast }) {
 
-  // ── Password ──────────────────────────────────────────────────
   const [pw,     setPw]     = useState({ old: '', newPw: '', confirm: '' });
   const [pwErr,  setPwErr]  = useState({});
   const [pwBusy, setPwBusy] = useState(false);
@@ -887,7 +771,6 @@ function SecurityTab({ onToast }) {
     setPwBusy(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      // Re-authenticate with old password first
       const { error: reErr } = await supabase.auth.signInWithPassword({
         email: user.email, password: pw.old,
       });
@@ -903,90 +786,9 @@ function SecurityTab({ onToast }) {
     finally { setPwBusy(false); }
   };
 
-  // ── MFA ───────────────────────────────────────────────────────
-  // phase: 'idle' | 'setup' | 'active'
-  const [phase,   setPhase]   = useState('idle');
-  const [enabled, setEnabled] = useState(false);
-  const [busy,    setBusy]    = useState(false);
-  const [fid,     setFid]     = useState('');     // factor id
-  const [uri,     setUri]     = useState('');     // totp URI for QR
-  const [code,    setCode]    = useState('');
-  const [codeErr, setCodeErr] = useState('');
-  const [backups, setBackups] = useState([]);
-  const [showBak, setShowBak] = useState(false);
-
-  // Check if already enrolled
-  useEffect(() => {
-    supabase.auth.mfa.listFactors()
-      .then(({ data }) => {
-        const v = data?.totp?.find(f => f.status === 'verified');
-        if (v) { setEnabled(true); setFid(v.id); setPhase('active'); }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handleToggle = () => {
-    if (phase === 'setup') return;     // cannot toggle while setup is open
-    if (enabled) handleDisable();
-    else         handleBegin();
-  };
-
-  const handleBegin = async () => {
-    setBusy(true); setCodeErr('');
-    try {
-      const { data, error } = await supabase.auth.mfa.enroll({
-        factorType: 'totp', issuer: 'LIBRASCAN', friendlyName: 'Authenticator App',
-      });
-      if (error) throw error;
-      setFid(data.id);
-      setUri(data.totp.uri);
-      setBackups(Array.from({ length: 8 }, () => `${rs(5)}-${rs(5)}`));
-      setCode(''); setPhase('setup');
-    } catch (err) { onToast(err.message, false); }
-    finally { setBusy(false); }
-  };
-
-  const handleVerify = async () => {
-    const clean = code.replace(/\D/g, '');
-    if (clean.length < 6) { setCodeErr('Enter the 6-digit code from your authenticator app.'); return; }
-    setBusy(true); setCodeErr('');
-    try {
-      const { data: ch, error: chErr } = await supabase.auth.mfa.challenge({ factorId: fid });
-      if (chErr) throw chErr;
-      const { error: vErr } = await supabase.auth.mfa.verify({
-        factorId: fid, challengeId: ch.id, code: clean,
-      });
-      if (vErr) throw vErr;
-      setEnabled(true); setPhase('active');
-      setCode(''); setShowBak(true);
-      onToast('Two-factor authentication enabled.', true);
-    } catch {
-      setCodeErr('Incorrect code. Please check your app and try again.');
-    } finally { setBusy(false); }
-  };
-
-  const handleCancelSetup = async () => {
-    if (fid) { try { await supabase.auth.mfa.unenroll({ factorId: fid }); } catch {} }
-    setPhase('idle'); setFid(''); setUri(''); setCode(''); setCodeErr(''); setBackups([]);
-  };
-
-  const handleDisable = async () => {
-    if (!window.confirm('Disable two-factor authentication? This will reduce your account security.')) return;
-    setBusy(true);
-    try {
-      const { error } = await supabase.auth.mfa.unenroll({ factorId: fid });
-      if (error) throw error;
-      setEnabled(false); setPhase('idle');
-      setFid(''); setUri(''); setCode(''); setBackups([]); setShowBak(false);
-      onToast('Two-factor authentication disabled.', true);
-    } catch (err) { onToast(err.message, false); }
-    finally { setBusy(false); }
-  };
-
   return (
     <div className="s-grid">
 
-      {/* ── Change Password ── */}
       <div className="s-card">
         <p className="s-card-h">Change Password</p>
         <p className="s-card-sub">Confirm your current password before setting a new one.</p>
@@ -1024,204 +826,44 @@ function SecurityTab({ onToast }) {
         </div>
       </div>
 
-      {/* ── MFA ── */}
       <div className="s-card">
         <p className="s-card-h">Two-Factor Authentication</p>
         <p className="s-card-sub">Require a one-time code from your phone in addition to your password at every sign-in.</p>
 
-        {/* Toggle row */}
         <div className="s-mfa-bar">
           <div>
             <div className="s-mfa-label">Authenticator App (TOTP)</div>
-            <div className="s-mfa-desc">
-              {phase === 'active' && 'Active — your account requires a code to sign in.'}
-              {phase === 'setup'  && 'Setup in progress — complete the steps below.'}
-              {phase === 'idle'   && 'Disabled — toggle to begin setup.'}
-            </div>
+            <div className="s-mfa-desc">Disabled — toggle to begin setup.</div>
           </div>
           <div className="s-mfa-right">
-            <span className={`s-pill ${enabled ? 'on' : 'off'}`}>
+            <span className="s-pill off">
               <span className="s-dot" />
-              {enabled ? 'Enabled' : 'Disabled'}
+              Disabled
             </span>
             <Toggle
               id="mfa-toggle"
-              checked={enabled}
-              onChange={handleToggle}
-              disabled={busy || phase === 'setup'}
+              checked={false}
+              onChange={() => {}}
+              disabled={true}
             />
           </div>
         </div>
 
-        {/* IDLE */}
-        {phase === 'idle' && (
-          <div className="s-alert info">
+        <div className="s-alert info">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="10"/>
               <line x1="12" y1="8" x2="12" y2="12"/>
               <line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
             <span>
-              Toggle the switch above to set up two-factor authentication.
-              You will need an authenticator app such as Google Authenticator or Authy installed on your phone.
+              Two-factor authentication is coming soon. This feature is currently unavailable.
             </span>
           </div>
-        )}
-
-        {/* SETUP */}
-        {phase === 'setup' && (
-          <>
-            {/* Step 1 — Scan QR */}
-            <div className="s-step">
-              <div className="s-step-head">
-                <span className="s-step-num">1</span>
-                Scan the QR code with your authenticator app
-              </div>
-              <div className="s-step-body">
-                Open Google Authenticator, Authy, or any TOTP app and scan the code below to link your account.
-
-                {/* QR code box
-                    ── TO RENDER A REAL QR CODE ──────────────────────────
-                    1. Run:   npm install qrcode.react
-                    2. Add:   import { QRCodeSVG } from 'qrcode.react';
-                    3. Replace the <div className="s-qr"> block below with:
-                               <div style={{ margin: '12px auto 14px', width: 'fit-content' }}>
-                                 <QRCodeSVG value={uri} size={148} />
-                               </div>
-                    ──────────────────────────────────────────────────── */}
-                <div className="s-qr">
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(123,0,0,0.40)" strokeWidth="1.4">
-                    <rect x="3" y="3" width="7" height="7"/>
-                    <rect x="14" y="3" width="7" height="7"/>
-                    <rect x="3" y="14" width="7" height="7"/>
-                    <rect x="17" y="17" width="3" height="3"/>
-                    <rect x="14" y="14" width="3" height="3"/>
-                  </svg>
-                  <span>Install qrcode.react<br />to render QR code<br />(see code comments)</span>
-                </div>
-
-                {uri && (
-                  <div>
-                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5 }}>
-                      Cannot scan? Copy this setup key manually into your app:
-                    </div>
-                    <div style={{
-                      background: '#FAFAF8', border: '1px solid rgba(139,0,0,0.12)', borderRadius: 7,
-                      padding: '8px 10px', fontFamily: 'Courier New, monospace',
-                      fontSize: 10.5, color: 'var(--text-secondary)',
-                      wordBreak: 'break-all', lineHeight: 1.6, userSelect: 'all',
-                    }}>
-                      {uri}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Step 2 — Enter code */}
-            <div className="s-step">
-              <div className="s-step-head">
-                <span className="s-step-num">2</span>
-                Enter the 6-digit code shown in your app
-              </div>
-              <div className="s-step-body">
-                Type the code exactly as shown. It changes every 30 seconds.
-                <input
-                  className={`s-otp${codeErr ? ' e' : ''}`}
-                  value={code}
-                  onChange={e => { setCode(e.target.value.replace(/\D/g, '').slice(0, 6)); setCodeErr(''); }}
-                  placeholder="000000"
-                  maxLength={6}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                />
-                {codeErr && <span className="s-err">{codeErr}</span>}
-              </div>
-            </div>
-
-            {/* Step 3 — Backup codes */}
-            <div className="s-step">
-              <div className="s-step-head">
-                <span className="s-step-num">3</span>
-                Save your backup codes
-              </div>
-              <div className="s-step-body">
-                Store these codes somewhere safe. Each can be used once if you lose access to your authenticator device.
-                <div className="s-codes">
-                  {backups.map((c, i) => <div key={i} className="s-code">{c}</div>)}
-                </div>
-              </div>
-            </div>
-
-            <div className="s-btn-row">
-              <button className="s-btn p" onClick={handleVerify}
-                disabled={busy || code.replace(/\D/g, '').length < 6}>
-                {busy ? 'Verifying…' : 'Verify and Enable'}
-              </button>
-              <button className="s-btn o" onClick={handleCancelSetup} disabled={busy}>
-                Cancel
-              </button>
-            </div>
-          </>
-        )}
-
-        {/* ACTIVE */}
-        {phase === 'active' && (
-          <>
-            <div className="s-alert success">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth="2.5">
-                <polyline points="20 6 9 17 4 12"/>
-              </svg>
-              <span>
-                Two-factor authentication is active. Every sign-in now requires a code from your authenticator app.
-              </span>
-            </div>
-
-            {[
-              { k: 'Method',          v: 'Time-based OTP (TOTP)' },
-              { k: 'Compatible apps', v: 'Google Authenticator, Authy, any TOTP app' },
-              { k: 'Code interval',   v: 'Refreshes every 30 seconds' },
-            ].map(({ k, v }) => (
-              <div key={k} className="s-row">
-                <span className="s-row-k">{k}</span>
-                <span className="s-row-v">{v}</span>
-              </div>
-            ))}
-
-            {showBak && backups.length > 0 && (
-              <>
-                <div className="s-line" />
-                <div className="s-micro">Backup Codes</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
-                  Save these codes. Each can only be used once if you lose access to your device.
-                </div>
-                <div className="s-codes">
-                  {backups.map((c, i) => <div key={i} className="s-code">{c}</div>)}
-                </div>
-              </>
-            )}
-
-            <div className="s-line" />
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12, lineHeight: 1.6 }}>
-              To disable two-factor authentication, toggle the switch above or use the button below.
-            </div>
-            <button className="s-btn d" style={{ width: '100%' }} onClick={handleDisable} disabled={busy}>
-              {busy ? 'Disabling…' : 'Disable Two-Factor Authentication'}
-            </button>
-          </>
-        )}
       </div>
     </div>
   );
 }
-
-// ═══════════════════════════════════════════════════════════════
-//  TAB 3 — Sessions
-// ═══════════════════════════════════════════════════════════════
 function SessionsTab({ onSignOut }) {
-  // In production, fetch real sessions via supabase.auth.admin.listUserSessions()
-  // using a server-side function or Edge Function (service-role key required).
-  // These are placeholder entries for display purposes.
   const SESSIONS = [
     { device: 'This Device',        browser: 'Chrome on Windows 11',  location: 'Pampanga, PH', time: 'Active now',  current: true  },
     { device: 'Mobile Phone',       browser: 'Safari on iPhone',      location: 'Pampanga, PH', time: '2 hours ago', current: false },
@@ -1270,14 +912,10 @@ function SessionsTab({ onSignOut }) {
   );
 }
 
-// ─── Utility ──────────────────────────────────────────────────────────────────
 function rs(n) {
   return Math.random().toString(36).slice(2, 2 + n).toUpperCase().padEnd(n, '0');
 }
 
-// ═══════════════════════════════════════════════════════════════
-//  MAIN EXPORT
-// ═══════════════════════════════════════════════════════════════
 export default function Settings({ user, onSignOut }) {
   const { profile, refreshProfile } = useAuth();
   const [tab,   setTab]   = useState('profile');
@@ -1303,7 +941,6 @@ export default function Settings({ user, onSignOut }) {
 
 
 
-      {/* Tabs */}
       <div className="s-tabs">
         {TABS.map(t => (
           <button key={t.id} className={`s-tab${tab === t.id ? ' on' : ''}`} onClick={() => setTab(t.id)}>
@@ -1312,7 +949,6 @@ export default function Settings({ user, onSignOut }) {
         ))}
       </div>
 
-      {/* Content */}
       {tab === 'profile'  && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
       {tab === 'security' && <SecurityTab onToast={toast} />}
     </div>
