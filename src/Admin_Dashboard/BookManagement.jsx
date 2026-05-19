@@ -54,6 +54,26 @@ function playErrorSound() {
   } catch { /* silent fail */ }
 }
 
+function playBellSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const beep = (freq, start, dur) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0.2, ctx.currentTime + start);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+      osc.start(ctx.currentTime + start);
+      osc.stop(ctx.currentTime + start + dur);
+    };
+    beep(880, 0,    0.15);
+    beep(1100, 0.18, 0.2);
+    beep(880, 0.40, 0.25);
+  } catch { /* silent fail */ }
+}
+
 // ─── Safe books sync helper ───────────────────────────────────────────────────
 // Updates books.copies, books.status (and books.available_copies if the column exists).
 // Always uses book_copies rows as the source of truth so the catalog stays in sync.
@@ -928,6 +948,13 @@ const TAB_CSS = `
 export default function BookManagement() {
   const [activeTab,    setActiveTab]    = useState('scanner');
 
+  // ── Pending Requests state ───────────────────────────────────────────────
+  const [pendingRequests,    setPendingRequests]    = useState([]);
+  const [loadingPending,     setLoadingPending]     = useState(false);
+  const [processingPendingId, setProcessingPendingId] = useState(null);
+  const [newPendingAlert,    setNewPendingAlert]    = useState(null);
+  const [pendingError,       setPendingError]       = useState(null);
+
   const [step,         setStep]         = useState(0);
   const [student,      setStudent]      = useState(null);
   const [scanning,     setScanning]     = useState(false);
@@ -1003,6 +1030,179 @@ export default function BookManagement() {
     setLoadingTx(false);
   }, []);
 
+  // ── Load pending borrow requests (from mobile scanner) ──────────────────
+  const loadPendingRequests = useCallback(async () => {
+    setLoadingPending(true);
+    const { data, error } = await supabaseAdmin
+      .from('borrow_requests')
+      .select('*')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(200);
+    if (error) console.error('[BookManagement] pending load error:', error.message);
+    if (data) setPendingRequests(data);
+    setLoadingPending(false);
+  }, []);
+
+  // ── Approve Pending Request ──────────────────────────────────────────────
+  const confirmPendingRequest = useCallback(async (pendingReq) => {
+    try {
+      setProcessingPendingId(pendingReq.id);
+      setPendingError(null);
+
+      // Use ONLY the core columns that have always existed in borrowings.
+      // student_number / student_program / student_email / book_id were added
+      // later and are not yet in PostgREST's schema cache → PGRST204 errors.
+      // Those columns can be added back after running: Supabase → API → Reload schema.
+      const txPayload = {
+        student_id:   pendingReq.student_id   || null,
+        student_name: pendingReq.student_name  || null,
+        book_title:   pendingReq.book_title    || null,
+        copy_label:   pendingReq.copy_label    || null,
+        status:       'Borrowed',
+        borrowed_at:  new Date().toISOString(),
+        returned_at:  null,
+        date:         new Date().toISOString().split('T')[0],
+      };
+      console.log('[Approve] payload:', txPayload);
+
+      const { data: inserted, error: insertErr } = await supabaseAdmin
+        .from('borrowings')
+        .insert([txPayload])
+        .select();
+
+      if (insertErr) {
+        console.error('[Approve] insert error:', insertErr);
+        throw new Error(`Insert failed: ${insertErr.message} (${insertErr.code})`);
+      }
+      console.log('[Approve] success:', inserted);
+
+      // ── Update book_copies → resolve copy and mark Borrowed ─────────────
+      // borrow_requests may store: copy_id in copy_label, book UUID in book_id,
+      // or even a copy UUID as the book_title (depends on mobile app version).
+      // We try every possible field to find the right book_copies row.
+      console.log('[Approve] pendingReq fields:', {
+        book_id: pendingReq.book_id,
+        copy_label: pendingReq.copy_label,
+        book_title: pendingReq.book_title,
+      });
+
+      let resolvedBookId = null;
+      let usedCopyId     = null;
+
+      // Step 1: Try copy_label as a copy_id directly
+      if (pendingReq.copy_label) {
+        const { data: byCopyLabel } = await supabaseAdmin
+          .from('book_copies').select('copy_id, book_id, status')
+          .eq('copy_id', pendingReq.copy_label).maybeSingle();
+        if (byCopyLabel) {
+          resolvedBookId = byCopyLabel.book_id;
+          if (byCopyLabel.status === 'Available') usedCopyId = byCopyLabel.copy_id;
+          console.log('[Approve] Step1 copy_label match:', byCopyLabel);
+        }
+      }
+
+      // Step 2: Try book_id field as book UUID → find first available copy
+      if (!resolvedBookId && pendingReq.book_id) {
+        const { data: byBookId } = await supabaseAdmin
+          .from('book_copies').select('copy_id, book_id, status')
+          .eq('book_id', pendingReq.book_id)
+          .eq('status', 'Available').limit(1).maybeSingle();
+        if (byBookId) {
+          resolvedBookId = byBookId.book_id;
+          usedCopyId     = byBookId.copy_id;
+          console.log('[Approve] Step2 book_id match:', byBookId);
+        }
+      }
+
+      // Step 3: Try book_title as a copy_id (mobile stores copy UUID in title field)
+      if (!resolvedBookId && pendingReq.book_title) {
+        const UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (UUID_RE2.test(pendingReq.book_title)) {
+          const { data: byTitle } = await supabaseAdmin
+            .from('book_copies').select('copy_id, book_id, status')
+            .eq('copy_id', pendingReq.book_title).maybeSingle();
+          if (byTitle) {
+            resolvedBookId = byTitle.book_id;
+            if (byTitle.status === 'Available') usedCopyId = byTitle.copy_id;
+            console.log('[Approve] Step3 book_title-as-copy_id match:', byTitle);
+          }
+          // Also try as book_id
+          if (!resolvedBookId) {
+            const { data: byTitleAsBook } = await supabaseAdmin
+              .from('book_copies').select('copy_id, book_id, status')
+              .eq('book_id', pendingReq.book_title)
+              .eq('status', 'Available').limit(1).maybeSingle();
+            if (byTitleAsBook) {
+              resolvedBookId = byTitleAsBook.book_id;
+              usedCopyId     = byTitleAsBook.copy_id;
+              console.log('[Approve] Step3b book_title-as-book_id match:', byTitleAsBook);
+            }
+          }
+        }
+      }
+
+      console.log('[Approve] resolved → bookId:', resolvedBookId, '| copyId:', usedCopyId);
+
+      // Step 4: Mark the copy as Borrowed
+      if (usedCopyId) {
+        const { error: copyErr } = await supabaseAdmin
+          .from('book_copies').update({ status: 'Borrowed' }).eq('copy_id', usedCopyId);
+        if (copyErr) console.warn('[Approve] book_copies update error:', copyErr.message);
+        else console.log('[Approve] ✅ book_copies marked Borrowed:', usedCopyId);
+      } else {
+        console.warn('[Approve] ⚠️ Could not find an available copy to mark Borrowed');
+      }
+
+      // Step 5: Sync books table so catalog count updates
+      if (resolvedBookId) {
+        await syncBooksFromCopies(resolvedBookId);
+        console.log('[Approve] ✅ books table synced for bookId:', resolvedBookId);
+      }
+
+      // Mark request approved (non-fatal if it fails)
+      const { error: updateErr } = await supabaseAdmin
+        .from('borrow_requests')
+        .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+        .eq('id', pendingReq.id);
+      if (updateErr) console.warn('[Approve] could not mark approved:', updateErr.message);
+
+      playSuccessSound();
+      await loadPendingRequests();
+      loadTransactions();
+      setProcessingPendingId(null);
+    } catch (err) {
+      console.error('[Approve] caught error:', err);
+      setPendingError(`Approve failed: ${err.message}`);
+      setProcessingPendingId(null);
+    }
+  }, [loadPendingRequests, loadTransactions]);
+
+  // ── Reject Pending Request ───────────────────────────────────────────────
+  const rejectPendingRequest = useCallback(async (pendingReq) => {
+    try {
+      setProcessingPendingId(pendingReq.id);
+
+      const { error } = await supabaseAdmin
+        .from('borrow_requests')
+        .update({ status: 'rejected', reviewed_at: new Date().toISOString() })
+        .eq('id', pendingReq.id);
+
+      if (error) throw error;
+
+      showToast(`❌ Rejected: "${pendingReq.book_title}" request from ${pendingReq.student_name}`, 'success');
+      playErrorSound();
+
+      await loadPendingRequests();
+
+      setProcessingPendingId(null);
+    } catch (err) {
+      console.error('Error rejecting request:', err);
+      showToast(`Error: ${err.message}`, 'error');
+      setProcessingPendingId(null);
+    }
+  }, [loadPendingRequests, showToast]);
+
   // ── Sync copy statuses from active borrowings (repair stale data) ──────────
   // Runs once on mount. Fixes copies that show "Borrowed" in book_copies but
   // have no active borrowing row — e.g. after a failed scan or manual DB edit.
@@ -1036,14 +1236,28 @@ export default function BookManagement() {
     }
   }, []);
 
-  useEffect(() => { loadTransactions(); syncCopyStatuses(); }, [loadTransactions, syncCopyStatuses]);
+  useEffect(() => { loadTransactions(); loadPendingRequests(); syncCopyStatuses(); }, [loadTransactions, loadPendingRequests, syncCopyStatuses]);
 
   useEffect(() => {
-    const ch = supabase.channel('borrowings-rt')
-      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, loadTransactions)
+    const ch = supabase.channel('borrow-requests-rt')
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrow_requests' }, (payload) => {
+        if (payload.new?.status === 'pending') {
+          playBellSound();
+          setNewPendingAlert(prev => ({
+            count: (prev?.count || 0) + 1,
+            latest: payload.new,
+          }));
+          setTimeout(() => setNewPendingAlert(null), 12000);
+          loadPendingRequests();
+        }
+      })
+      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => {
+        loadTransactions();
+        loadPendingRequests();
+      })
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [loadTransactions]);
+  }, [loadTransactions, loadPendingRequests]);
 
   // ── Scanner focus management ─────────────────────────────────────────────
   const refocusIfSafe = useCallback(() => {
@@ -1582,6 +1796,18 @@ export default function BookManagement() {
           )}
         </button>
         <button
+          className={`bm-tab${activeTab === 'pending' ? ' bm-on' : ''}`}
+          onClick={() => setActiveTab('pending')}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          Pending Requests
+          {pendingRequests.length > 0 && (
+            <span className="bm-tab-badge">{pendingRequests.length}</span>
+          )}
+        </button>
+        <button
           className={`bm-tab${activeTab === 'history' ? ' bm-on' : ''}`}
           onClick={() => setActiveTab('history')}
         >
@@ -1826,6 +2052,318 @@ export default function BookManagement() {
       </div>
 
       </>}{/* end scanner tab */}
+
+
+      {/* ══════════════════════════════════════════════════════════
+          PENDING REQUESTS TAB
+      ══════════════════════════════════════════════════════════ */}
+      {activeTab === 'pending' && <>
+
+        {/* ── Section header ── */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          marginBottom: 20, flexWrap: 'wrap', gap: 12,
+        }}>
+          <div>
+            <div style={{
+              fontFamily: "'Cinzel', serif", fontSize: 16, fontWeight: 700,
+              color: 'var(--maroon-deep)', letterSpacing: '0.05em',
+              display: 'flex', alignItems: 'center', gap: 10,
+            }}>
+              <div style={{
+                width: 34, height: 34, borderRadius: 10,
+                background: `linear-gradient(135deg,${MAR},${MAR2})`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 3px 12px rgba(139,0,0,0.3)', flexShrink: 0,
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={GP} strokeWidth="2">
+                  <circle cx="12" cy="12" r="10"/>
+                  <line x1="12" y1="8" x2="12" y2="12"/>
+                  <line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+              Pending Borrow Requests
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 3, marginLeft: 44 }}>
+              {pendingRequests.length > 0
+                ? `${pendingRequests.length} request${pendingRequests.length > 1 ? 's' : ''} awaiting your review`
+                : 'No pending requests at this time'}
+            </div>
+          </div>
+          {pendingRequests.length > 0 && (
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+              padding: '6px 14px', borderRadius: 20,
+              background: 'rgba(201,168,76,0.10)',
+              border: '1.5px solid rgba(201,168,76,0.3)',
+              fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-sans)',
+              color: '#8B6914', letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>
+              <span style={{
+                width: 7, height: 7, borderRadius: '50%',
+                background: G, boxShadow: `0 0 0 3px rgba(201,168,76,0.25)`,
+                animation: 'bm-blink 2s ease-in-out infinite',
+              }}/>
+              Live
+            </div>
+          )}
+        </div>
+
+        {/* ── New request alert banner ── */}
+        {newPendingAlert && (
+          <div style={{
+            marginBottom: 18,
+            background: `linear-gradient(135deg, rgba(201,168,76,0.12), rgba(201,168,76,0.06))`,
+            border: `1.5px solid rgba(201,168,76,0.4)`,
+            borderRadius: 14, padding: '14px 18px',
+            display: 'flex', alignItems: 'center', gap: 12,
+            boxShadow: '0 4px 20px rgba(201,168,76,0.12)',
+          }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+              background: `linear-gradient(135deg, ${G}, #a87c2a)`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              boxShadow: '0 3px 10px rgba(201,168,76,0.35)',
+              animation: 'bm-pulse 1.5s ease-in-out infinite',
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#6B4E00', fontFamily: 'var(--font-sans)' }}>
+                New Request Incoming
+              </div>
+              <div style={{ fontSize: 11.5, color: '#8B6914', fontFamily: 'var(--font-sans)', marginTop: 2 }}>
+                {newPendingAlert.latest?.student_name} wants to borrow <em>{newPendingAlert.latest?.book_title}</em>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Error banner ── */}
+        {pendingError && (
+          <div style={{
+            marginBottom: 16, padding: '13px 16px',
+            background: 'rgba(139,0,0,0.06)',
+            border: `1.5px solid rgba(139,0,0,0.25)`,
+            borderRadius: 12, fontSize: 12.5,
+            color: MAR, fontFamily: 'var(--font-sans)',
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+          }}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={MAR} strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <div style={{ flex: 1 }}>
+              <span style={{ fontWeight: 700 }}>Approve failed</span> — {pendingError}
+              <div style={{ marginTop: 3, fontSize: 11, opacity: 0.7 }}>Open F12 → Console for full details.</div>
+            </div>
+            <button onClick={() => setPendingError(null)} style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: MAR, fontSize: 16, lineHeight: 1, padding: 2, flexShrink: 0,
+            }}>✕</button>
+          </div>
+        )}
+
+        {/* ── Loading ── */}
+        {loadingPending ? (
+          <div style={{
+            borderRadius: 16, border: `1.5px solid rgba(139,0,0,0.12)`,
+            background: CREAM, padding: '56px 24px',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14,
+          }}>
+            <div className="lm-spinner" />
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+              Loading pending requests…
+            </div>
+          </div>
+
+        ) : pendingRequests.length === 0 ? (
+          /* ── Empty state ── */
+          <div style={{
+            borderRadius: 16, overflow: 'hidden',
+            border: `1.5px solid rgba(139,0,0,0.12)`,
+            background: CREAM,
+          }}>
+            <div style={{
+              height: 4,
+              background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
+              backgroundSize: '200% 100%',
+              animation: 'bm-shimmer-bar 3s ease-in-out infinite',
+            }}/>
+            <div style={{ padding: '56px 24px', textAlign: 'center' }}>
+              <div style={{
+                width: 60, height: 60, borderRadius: 18, margin: '0 auto 16px',
+                background: `linear-gradient(135deg, rgba(46,125,50,0.12), rgba(46,125,50,0.06))`,
+                border: '1.5px solid rgba(46,125,50,0.25)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3d8c40" strokeWidth="1.8">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+              <div style={{ fontFamily: "'Cinzel', serif", fontSize: 15, color: 'var(--text-primary)', fontWeight: 700, marginBottom: 6 }}>
+                All Caught Up!
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', maxWidth: 280, margin: '0 auto' }}>
+                No pending borrow requests right now. New requests from the mobile app will appear here automatically.
+              </div>
+            </div>
+          </div>
+
+        ) : (
+          /* ── Request cards ── */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {pendingRequests.map((req, idx) => {
+              const isProcessing = processingPendingId === req.id;
+              const reqTime = req.created_at ? new Date(req.created_at) : null;
+              const timeAgo = reqTime ? (() => {
+                const diff = Math.floor((Date.now() - reqTime.getTime()) / 1000);
+                if (diff < 60)  return `${diff}s ago`;
+                if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+                if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+                return reqTime.toLocaleDateString('en-PH', { month:'short', day:'numeric' });
+              })() : '—';
+
+              return (
+                <div key={req.id} style={{
+                  borderRadius: 14, overflow: 'hidden',
+                  border: `1.5px solid rgba(139,0,0,0.14)`,
+                  background: isProcessing
+                    ? `linear-gradient(135deg, rgba(201,168,76,0.07), rgba(201,168,76,0.03))`
+                    : 'linear-gradient(160deg, rgba(253,248,240,0.95) 0%, rgba(250,244,232,0.98) 100%)',
+                  boxShadow: '0 2px 12px rgba(80,0,0,0.06)',
+                  transition: 'all 0.2s ease',
+                  opacity: isProcessing ? 0.85 : 1,
+                }}>
+                  {/* Card top accent */}
+                  <div style={{
+                    height: 3,
+                    background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G})`,
+                  }}/>
+
+                  <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+
+                    {/* Index badge */}
+                    <div style={{
+                      width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+                      background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: '0 3px 10px rgba(139,0,0,0.25)',
+                    }}>
+                      <span style={{ fontFamily: "'Cinzel', serif", fontSize: 13, color: GP, fontWeight: 700 }}>
+                        {String(idx + 1).padStart(2, '0')}
+                      </span>
+                    </div>
+
+                    {/* Student info */}
+                    <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                      <div style={{
+                        fontFamily: "'Cinzel', serif", fontSize: 13.5, fontWeight: 700,
+                        color: 'var(--maroon-deep)', letterSpacing: '0.03em',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {req.student_name || 'Unknown Student'}
+                      </div>
+                      {req.student_number && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', marginTop: 2, fontWeight: 600, letterSpacing: '0.04em' }}>
+                          ID: {req.student_number}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Divider */}
+                    <div style={{ width: 1, height: 36, background: 'rgba(139,0,0,0.12)', flexShrink: 0, display: 'none' }} className="pr-divider"/>
+
+                    {/* Book info */}
+                    <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
+                        fontFamily: 'var(--font-sans)',
+                        display: 'flex', alignItems: 'flex-start', gap: 6,
+                      }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={MAR} strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
+                          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                        </svg>
+                        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                          {req.book_title || 'Unknown Book'}
+                        </span>
+                      </div>
+                      {req.copy_label && (
+                        <div style={{ fontSize: 10.5, color: 'var(--text-muted)', fontFamily: 'monospace', marginTop: 3, letterSpacing: '0.04em' }}>
+                          Copy: {String(req.copy_label).slice(0, 12)}…
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Timestamp */}
+                    <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 64 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
+                        {timeAgo}
+                      </div>
+                      {reqTime && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', marginTop: 2, opacity: 0.7 }}>
+                          {reqTime.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+                      <button
+                        onClick={() => confirmPendingRequest(req)}
+                        disabled={isProcessing}
+                        style={{
+                          padding: '9px 16px', borderRadius: 9,
+                          background: isProcessing ? 'rgba(46,125,50,0.15)' : 'linear-gradient(135deg, #2e7d32, #1b5e20)',
+                          color: isProcessing ? '#3d8c40' : 'white',
+                          border: `1.5px solid ${isProcessing ? 'rgba(46,125,50,0.3)' : 'transparent'}`,
+                          cursor: isProcessing ? 'not-allowed' : 'pointer',
+                          fontSize: 12, fontWeight: 700,
+                          fontFamily: 'var(--font-sans)',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          boxShadow: isProcessing ? 'none' : '0 3px 10px rgba(46,125,50,0.3)',
+                          transition: 'all 0.15s',
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        {isProcessing ? (
+                          <><div className="lm-spinner" style={{ width: 11, height: 11, borderWidth: 2 }}/> Processing…</>
+                        ) : (
+                          <><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg> Approve</>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => rejectPendingRequest(req)}
+                        disabled={isProcessing}
+                        style={{
+                          padding: '9px 14px', borderRadius: 9,
+                          background: 'transparent',
+                          color: isProcessing ? 'var(--text-muted)' : MAR,
+                          border: `1.5px solid ${isProcessing ? 'rgba(139,0,0,0.1)' : 'rgba(139,0,0,0.3)'}`,
+                          cursor: isProcessing ? 'not-allowed' : 'pointer',
+                          fontSize: 12, fontWeight: 700,
+                          fontFamily: 'var(--font-sans)',
+                          display: 'flex', alignItems: 'center', gap: 5,
+                          transition: 'all 0.15s',
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        Reject
+                      </button>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </>}{/* end pending tab */}
+
 
       {/* ══════════════════════════════════════════════════════════
           TRANSACTION HISTORY TAB

@@ -1,49 +1,3 @@
-/**
- * BorrowRequests.jsx
- * ─────────────────────────────────────────────────────────────────────────────
- * Drop-in tab panel for BookManagement.jsx.
- * Renders inside the existing tab system as a new "Requests" tab.
- *
- * HOW TO WIRE IT IN (3 steps — nothing else changes):
- *
- *  1. Import at the top of BookManagement.jsx:
- *       import BorrowRequests from './BorrowRequests';
- *
- *  2. Add a tab button alongside the existing ones:
- *       <button className={`bm-tab${activeTab==='requests' ? ' bm-on' : ''}`}
- *               onClick={() => setActiveTab('requests')}>
- *         Borrow Requests
- *         {pendingCount > 0 && <span className="bm-tab-badge">{pendingCount}</span>}
- *       </button>
- *
- *  3. Render the panel inside the tab-content area:
- *       {activeTab === 'requests' && (
- *         <BorrowRequests onBadgeCount={setPendingCount} />
- *       )}
- *
- *  pendingCount is a new useState(0) you add in BookManagement.
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * WORKFLOW ENFORCED BY THIS COMPONENT
- * ────────────────────────────────────
- *  Mobile app  →  INSERT borrow_requests  (status = 'pending')
- *                          ↓
- *  This panel  →  Admin sees pending list
- *                          ↓
- *           APPROVE                    REJECT
- *              ↓                          ↓
- *  UPDATE borrow_requests            UPDATE borrow_requests
- *    status = 'approved'               status = 'rejected'
- *  UPDATE book_copies                (book stays Available)
- *    status = 'Borrowed'
- *  INSERT borrowings row
- *    status = 'Borrowed'
- *  syncBooksFromCopies()
- *
- * NOTE: books.status is NEVER touched on mobile-app request creation.
- *       It is only changed here, after explicit admin approval.
- */
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
@@ -332,16 +286,39 @@ export default function BorrowRequests({ onBadgeCount }) {
     setBusy(true);
 
     try {
-      // ── 1. Resolve copy to mark as Borrowed ─────────────────────────────
-      //    copy_id may be stored in borrow_requests.copy_id or copy_label.
-      //    Adjust the column name below to match your actual schema.
-      const copyId   = req.copy_id   || req.copy_label || null;
-      const bookId   = req.book_id;
+      const bookId = req.book_id;
+      if (!bookId) throw new Error('No book_id on this request. Cannot approve.');
 
-      // ── 2. Guard: make sure the copy is still Available ─────────────────
-      if (copyId) {
+      // ── 1. Resolve which copy to mark as Borrowed ───────────────────────
+      //    Prefer a UUID copy_id stored directly on the request.
+      //    If absent, find any Available copy of this book.
+      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let resolvedCopyId = UUID_RE.test(req.copy_id) ? req.copy_id : null;
+
+      if (!resolvedCopyId) {
+        // Find the first Available copy for this book
+        const { data: availCopies, error: findErr } = await supabaseAdmin
+          .from('book_copies')
+          .select('copy_id, status')
+          .eq('book_id', bookId)
+          .eq('status', 'Available')
+          .limit(1);
+
+        if (findErr) throw new Error(`Could not fetch copies: ${findErr.message}`);
+        if (!availCopies || availCopies.length === 0) {
+          showBanner('No available copies left for this book. Approval cancelled.', false);
+          setConfirm(null);
+          setBusy(false);
+          return;
+        }
+        resolvedCopyId = availCopies[0].copy_id;
+      } else {
+        // We have a specific copy_id — verify it's still Available
         const { data: copyRow } = await supabaseAdmin
-          .from('book_copies').select('status').eq('copy_id', copyId).maybeSingle();
+          .from('book_copies')
+          .select('status')
+          .eq('copy_id', resolvedCopyId)
+          .maybeSingle();
         if (copyRow?.status === 'Borrowed') {
           showBanner('This copy was already borrowed. Approval cancelled.', false);
           setConfirm(null);
@@ -350,60 +327,61 @@ export default function BorrowRequests({ onBadgeCount }) {
         }
       }
 
-      // ── 3. Update borrow_requests.status = 'approved' ───────────────────
+      // ── 2. Update borrow_requests.status = 'approved' ───────────────────
       const { error: reqErr } = await supabaseAdmin
         .from('borrow_requests')
         .update({ status: 'approved', reviewed_at: nowISO() })
         .eq('id', req.id);
       if (reqErr) throw new Error(`Request update failed: ${reqErr.message}`);
 
-      // ── 4. Mark the specific copy as Borrowed in book_copies ────────────
-      if (copyId) {
-        const { error: copyErr } = await supabaseAdmin
-          .from('book_copies')
-          .update({ status: 'Borrowed' })
-          .eq('copy_id', copyId);
-        if (copyErr) throw new Error(`Copy update failed: ${copyErr.message}`);
-      }
+      // ── 3. Mark the resolved copy as Borrowed in book_copies ────────────
+      const { error: copyErr } = await supabaseAdmin
+        .from('book_copies')
+        .update({ status: 'Borrowed' })
+        .eq('copy_id', resolvedCopyId);
+      if (copyErr) throw new Error(`Copy update failed: ${copyErr.message}`);
 
-      // ── 5. Recompute books.status + books.available_copies ──────────────
-      if (bookId) {
-        await syncBooksFromCopies(bookId);
-      }
+      // ── 4. Recompute books.copies + books.available_copies + books.status ─
+      await syncBooksFromCopies(bookId);
 
-      // ── 6. Insert a borrowings row so it appears in the History tab ──────
-      const borrowedAt = nowISO();
-      const borrowingPayload = {
-        student_id:      req.student_id      || null,
-        student_name:    req.student_name     || null,
-        student_program: req.student_program  || '',
-        student_email:   req.student_email    || null,
-        book_id:         bookId               || null,
-        book_title:      req.book_title       || null,
-        copy_label:      copyId               || null,
-        status:          'Borrowed',
-        borrowed_at:     borrowedAt,
-        returned_at:     null,
-        date:            today(),
-        // Link back to the source request so you can trace it:
-        borrow_request_id: req.id,
-      };
-      // Remove keys with null values that might violate NOT NULL constraints:
-      Object.keys(borrowingPayload).forEach(k => {
-        if (borrowingPayload[k] === null || borrowingPayload[k] === undefined) {
-          // Keep nulls for nullable columns; only strip undefined
-          if (borrowingPayload[k] === undefined) delete borrowingPayload[k];
-        }
-      });
-
-      const { error: borrowErr } = await supabaseAdmin
+      // ── 5. Insert ONE borrowings row so it appears in Transaction History ─
+      //    Guard: skip if a non-returned row already exists for this request
+      //    to prevent duplicate history entries on double-click.
+      const { data: existing } = await supabaseAdmin
         .from('borrowings')
-        .insert([borrowingPayload]);
+        .select('id')
+        .eq('borrow_request_id', req.id)
+        .is('returned_at', null)
+        .maybeSingle();
 
-      // Non-fatal: if the borrowings insert fails, log it but don't roll back —
-      // the approval and book status are already correct.
-      if (borrowErr) {
-        console.warn('[BorrowRequests] borrowings insert failed (non-fatal):', borrowErr.message);
+      if (!existing) {
+        const borrowingPayload = {
+          student_id:        req.student_id      || null,
+          student_number:    req.student_number  || req.student_id || null,
+          student_name:      req.student_name    || null,
+          student_program:   req.student_program || '',
+          student_email:     req.student_email   || null,
+          book_id:           bookId,
+          book_title:        req.book_title      || null,
+          copy_label:        resolvedCopyId,
+          status:            'Borrowed',
+          borrowed_at:       nowISO(),
+          returned_at:       null,
+          date:              today(),
+          borrow_request_id: req.id,
+        };
+        // Strip undefined values only (keep nulls for nullable columns)
+        Object.keys(borrowingPayload).forEach(k => {
+          if (borrowingPayload[k] === undefined) delete borrowingPayload[k];
+        });
+
+        const { error: borrowErr } = await supabaseAdmin
+          .from('borrowings')
+          .insert([borrowingPayload]);
+
+        if (borrowErr) {
+          console.warn('[BorrowRequests] borrowings insert failed (non-fatal):', borrowErr.message);
+        }
       }
 
       showBanner(`✅ Approved — "${req.book_title}" is now marked as borrowed.`);
