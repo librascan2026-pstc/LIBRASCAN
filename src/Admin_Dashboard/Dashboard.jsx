@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../Login_SignUp/AuthContext';
+import { supabase } from '../supabaseClient';
 import './Dashboard.css';
 
 import Overview            from './Overview';
@@ -58,6 +59,100 @@ export default function Dashboard({ user, onSignOut }) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen]     = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [bookManageTab, setBookManageTab] = useState('scanner');
+
+  const [notifications, setNotifications] = useState([]);   // { id, text, time, dot, req_id, isNew }
+  const [unreadCount,   setUnreadCount]   = useState(0);
+  const seenIdsRef  = useRef(new Set());  
+  const isFirstLoad = useRef(true);       
+
+  
+  const playNotifSound = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const beep = (freq, start, dur, vol = 0.18) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(vol, ctx.currentTime + start);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + dur + 0.05);
+      };
+      beep(880,  0,    0.12);
+      beep(1100, 0.14, 0.12);
+      beep(1320, 0.28, 0.22);
+    } catch {  }
+  }, []);
+
+  const fmtAgo = (iso) => {
+    if (!iso) return '';
+    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (diff <  60)  return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+    return new Date(iso).toLocaleDateString('en-PH', { month:'short', day:'numeric' });
+  };
+
+
+  const fetchPendingRequests = useCallback(async (isRealtime = false) => {
+    const { data, error } = await supabase
+      .from('borrow_requests')
+      .select('id, student_name, book_title, created_at, status')
+      .eq('status', 'pending')
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    if (error) { console.error('[Dashboard] notif fetch error:', error.message); return; }
+
+    const rows = data || [];
+    const newOnes = rows.filter(r => !seenIdsRef.current.has(r.id));
+
+ 
+    if (isRealtime && !isFirstLoad.current && newOnes.length > 0) {
+      playNotifSound();
+    }
+    isFirstLoad.current = false;
+
+
+    rows.forEach(r => seenIdsRef.current.add(r.id));
+
+    setNotifications(rows.map(r => ({
+      id:     r.id,
+      text:   `${r.student_name || 'A student'} wants to borrow "${r.book_title || 'a book'}"`,
+      time:   fmtAgo(r.created_at),
+      dot:    '#C9A84C',
+      isNew:  newOnes.some(n => n.id === r.id),
+    })));
+    setUnreadCount(rows.length);
+  }, [playNotifSound]);
+
+  
+  useEffect(() => {
+    fetchPendingRequests(false);
+
+    const ch = supabase
+      .channel('dashboard-borrow-notif')
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'borrow_requests',
+      }, () => fetchPendingRequests(true))
+      .on('postgres_changes', {
+        event: 'UPDATE', schema: 'public', table: 'borrow_requests',
+      }, () => fetchPendingRequests(false))
+      .subscribe();
+
+    return () => supabase.removeChannel(ch);
+  }, [fetchPendingRequests]);
+
+
+  const dismissAll = () => {
+    setNotifications([]);
+    setUnreadCount(0);
+    setNotifOpen(false);
+  };
 
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name  || '';
@@ -69,6 +164,7 @@ export default function Dashboard({ user, onSignOut }) {
   const avatarUrl   = profile?.avatar_url || null;
 
   const navigate = (tab) => {
+    if (tab === 'bookmanage') setBookManageTab('scanner');
     setActiveTab(tab);
     setMobileOpen(false);
   };
@@ -82,7 +178,7 @@ export default function Dashboard({ user, onSignOut }) {
     switch (activeTab) {
       case 'overview':   return <Overview onNavigate={navigateFromOverview} />;
       case 'attendance': return <AttendanceMonitoring />;
-      case 'bookmanage': return <BookManagement />;
+      case 'bookmanage': return <BookManagement initialTab={bookManageTab} />;
       case 'catalog':    return <OnlineCatalog />;
       case 'users':      return <UserManagement />;
       case 'reports':    return <ReportsAnalytics />;
@@ -303,64 +399,147 @@ export default function Dashboard({ user, onSignOut }) {
             <div style={{ position: 'relative' }}>
               <button
                 className="lm-notif-btn"
-                onClick={() => setNotifOpen(o => !o)}
+                onClick={() => { setNotifOpen(o => !o); }}
                 aria-label="Notifications"
+                style={{ position: 'relative' }}
               >
                 {NavIcons.bell}
-                <span className="lm-notif-dot" />
+                {unreadCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    minWidth: 17, height: 17,
+                    background: '#C9A84C',
+                    color: '#3a0000',
+                    borderRadius: 10,
+                    fontSize: 10, fontWeight: 800,
+                    fontFamily: 'var(--font-sans)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    padding: '0 4px',
+                    border: '1.5px solid var(--cream, #FAF6EE)',
+                    lineHeight: 1,
+                    animation: 'lm-fade-in 0.2s ease',
+                  }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </button>
 
               {notifOpen && (
                 <div style={{
-                  position: 'absolute', top: 44, right: 0,
-                  width: 280,
+                  position: 'absolute', top: 48, right: 0,
+                  width: 320,
                   background: 'var(--bg-card)',
                   border: '1px solid var(--border)',
-                  borderRadius: 12,
-                  boxShadow: '0 8px 28px rgba(0,0,0,0.4)',
+                  borderRadius: 14,
+                  boxShadow: '0 12px 36px rgba(0,0,0,0.45)',
                   zIndex: 200,
                   overflow: 'hidden',
                   animation: 'lm-fade-in 0.22s ease',
                 }}>
+            
                   <div style={{
-                    padding: '12px 16px',
+                    padding: '13px 16px',
                     borderBottom: '1px solid var(--border)',
-                    fontFamily: 'var(--font-display)',
-                    fontSize: 13,
-                    color: 'var(--gold-pale)',
-                    letterSpacing: '0.04em',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   }}>
-                    Notifications
-                  </div>
-                  {[
-                    { text: '3 books are overdue', time: 'Now',       dot: '#ef9a9a' },
-                    { text: 'New user registered', time: '10 min ago', dot: '#81c784' },
-                    { text: 'Book return pending', time: '1 hr ago',   dot: '#64b5f6' },
-                  ].map((n, i) => (
-                    <div key={i} style={{
-                      display: 'flex', alignItems: 'center', gap: 12,
-                      padding: '11px 16px',
-                      borderBottom: '1px solid rgba(201,168,76,0.06)',
-                      cursor: 'pointer',
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.1)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <div style={{ width: 7, height: 7, borderRadius: '50%', background: n.dot, flexShrink: 0 }} />
-                      <div style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>{n.text}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{n.time}</div>
+                    <div style={{
+                      fontFamily: 'var(--font-display)',
+                      fontSize: 13, fontWeight: 700,
+                      color: 'var(--gold-pale)', letterSpacing: '0.04em',
+                      display: 'flex', alignItems: 'center', gap: 8,
+                    }}>
+                      Borrow Requests
+                      {unreadCount > 0 && (
+                        <span style={{
+                          padding: '1px 7px', borderRadius: 10,
+                          background: 'rgba(201,168,76,0.18)', color: '#C9A84C',
+                          border: '1px solid rgba(201,168,76,0.30)',
+                          fontSize: 10, fontWeight: 800,
+                        }}>{unreadCount} pending</span>
+                      )}
                     </div>
-                  ))}
-                  <div style={{ padding: '10px 16px', textAlign: 'center' }}>
-                    <button style={{
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      fontSize: 11, color: 'var(--gold)', fontFamily: 'var(--font-sans)',
-                    }}
-                    onClick={() => setNotifOpen(false)}>
-                      Dismiss all
+                    <button
+                      onClick={() => { setBookManageTab('pending'); setActiveTab('bookmanage'); setNotifOpen(false); }}
+                      style={{
+                        background: 'none', border: 'none', cursor: 'pointer',
+                        fontSize: 10.5, color: 'var(--gold)',
+                        fontFamily: 'var(--font-sans)', fontWeight: 600,
+                        padding: '3px 8px', borderRadius: 6,
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,168,76,0.12)'}
+                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    >
+                      View All →
                     </button>
                   </div>
+
+                  {/* List */}
+                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                    {notifications.length === 0 ? (
+                      <div style={{
+                        padding: '28px 16px', textAlign: 'center',
+                        color: 'var(--text-dim)', fontSize: 12,
+                        fontFamily: 'var(--font-sans)',
+                      }}>
+                        <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
+                        No pending borrow requests
+                      </div>
+                    ) : notifications.map((n, i) => (
+                      <div
+                        key={n.id || i}
+                        onClick={() => { setBookManageTab('pending'); setActiveTab('bookmanage'); setNotifOpen(false); }}
+                        style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 10,
+                          padding: '11px 16px',
+                          borderBottom: '1px solid rgba(201,168,76,0.06)',
+                          cursor: 'pointer', transition: 'background 0.15s',
+                          background: n.isNew ? 'rgba(201,168,76,0.06)' : 'transparent',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.1)'}
+                        onMouseLeave={e => e.currentTarget.style.background = n.isNew ? 'rgba(201,168,76,0.06)' : 'transparent'}
+                      >
+                        <div style={{
+                          width: 8, height: 8, borderRadius: '50%',
+                          background: n.dot, flexShrink: 0, marginTop: 4,
+                          boxShadow: n.isNew ? `0 0 6px ${n.dot}` : 'none',
+                        }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
+                            {n.text}
+                          </div>
+                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>
+                            {n.time}
+                          </div>
+                        </div>
+                        {n.isNew && (
+                          <div style={{
+                            width: 6, height: 6, borderRadius: '50%',
+                            background: '#C9A84C', flexShrink: 0, marginTop: 5,
+                          }} />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                
+                  {notifications.length > 0 && (
+                    <div style={{
+                      padding: '9px 16px', textAlign: 'center',
+                      borderTop: '1px solid var(--border)',
+                    }}>
+                      <button
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          fontSize: 11, color: 'var(--gold)',
+                          fontFamily: 'var(--font-sans)',
+                        }}
+                        onClick={dismissAll}
+                      >
+                        Dismiss all
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

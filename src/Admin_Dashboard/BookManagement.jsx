@@ -945,8 +945,8 @@ const TAB_CSS = `
 `;
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-export default function BookManagement() {
-  const [activeTab,    setActiveTab]    = useState('scanner');
+export default function BookManagement({ initialTab }) {
+  const [activeTab,    setActiveTab]    = useState(initialTab || 'scanner');
 
   // ── Pending Requests state ───────────────────────────────────────────────
   const [pendingRequests,    setPendingRequests]    = useState([]);
@@ -1936,7 +1936,7 @@ export default function BookManagement() {
             stepNum={1}
             active={step === 0} scanning={step === 0 && scanning} focused={step === 0 && focused}
             onFocus={() => inputRef.current?.focus({ preventScroll:true })}
-            title="Scan Student Number" hint="Point the scanner at your school ID QR code"
+            title="Scan Student ID" hint="Point the scanner at your school ID QR code"
             icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>}
           />
           <ScanZone
@@ -2458,7 +2458,7 @@ export default function BookManagement() {
 
       {selectedTx && <DetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
 
-      {/* ── Delete Confirmation Modal ── */}
+      
       {deleteConfirm && (
         <div style={{
           position:'fixed', inset:0, zIndex:3000,
@@ -2479,7 +2479,6 @@ export default function BookManagement() {
               borderBottom:`2px solid rgba(201,168,76,0.3)`,
               display:'flex', alignItems:'center', gap:10,
             }}>
-              <span style={{ fontSize:20 }}>🗑</span>
               <div>
                 <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:GP, fontWeight:700 }}>Delete Transaction</div>
                 <div style={{ fontSize:11.5, color:'rgba(245,228,168,0.6)', fontFamily:'var(--font-sans)', marginTop:2 }}>This action cannot be undone</div>
@@ -2512,9 +2511,7 @@ export default function BookManagement() {
         </div>
       )}
 
-      </>}{/* end history tab */}
-
-      {/* ── Global: Toast + Modals (position:fixed — always rendered outside tabs) ── */}
+      </>}
       <Toast msg={toast.msg} type={toast.type} />
 
       <style>{`
