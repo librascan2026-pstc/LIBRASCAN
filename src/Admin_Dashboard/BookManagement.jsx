@@ -1240,7 +1240,8 @@ export default function BookManagement({ initialTab }) {
   useEffect(() => { loadTransactions(); loadPendingRequests(); syncCopyStatuses(); }, [loadTransactions, loadPendingRequests, syncCopyStatuses]);
 
   useEffect(() => {
-    const ch = supabaseAdmin.channel('borrow-requests-rt')
+    // Channel 1: borrow_requests — uses anon client so it receives student inserts
+    const chReq = supabase.channel('borrow-requests-rt')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrow_requests' }, (payload) => {
         if (payload.new?.status === 'pending') {
           playBellSound();
@@ -1252,12 +1253,20 @@ export default function BookManagement({ initialTab }) {
           loadPendingRequests();
         }
       })
+      .subscribe();
+
+    // Channel 2: borrowings — uses admin client to catch mobile app updates
+    const chBorrow = supabaseAdmin.channel('borrowings-rt')
       .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => {
         loadTransactions();
         loadPendingRequests();
       })
       .subscribe();
-    return () => supabaseAdmin.removeChannel(ch);
+
+    return () => {
+      supabase.removeChannel(chReq);
+      supabaseAdmin.removeChannel(chBorrow);
+    };
   }, [loadTransactions, loadPendingRequests]);
 
   // ── Scanner focus management ─────────────────────────────────────────────
