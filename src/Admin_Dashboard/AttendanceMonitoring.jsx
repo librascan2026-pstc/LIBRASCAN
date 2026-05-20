@@ -858,8 +858,18 @@ export default function AttendanceMonitoring() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
         const rec = payload.new;
         if (rec.date !== today()) return;
-        setRecords(prev => prev.some(r => r.id === rec.id) ? prev : [rec, ...prev]);
-        setStats(s => ({ today: s.today + 1, unique: s.unique + (rec.id_no ? 1 : 0), lastHour: s.lastHour + 1 }));
+        setRecords(prev => {
+          if (prev.some(r => r.id === rec.id)) return prev;
+          const isNewUniqueStudent = rec.id_no
+            ? !prev.some(r => r.id_no === rec.id_no)
+            : false;
+          setStats(s => ({
+            today: s.today + 1,
+            unique: isNewUniqueStudent ? s.unique + 1 : s.unique,
+            lastHour: s.lastHour + 1,
+          }));
+          return [rec, ...prev];
+        });
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'attendance_logs' }, (payload) => {
         setRecords(prev => prev.filter(r => r.id !== payload.old.id));
@@ -881,8 +891,15 @@ export default function AttendanceMonitoring() {
     try {
       const { data, error } = await supabase.from('attendance_logs').insert([record]).select().single();
       if (error) throw error;
-      setRecords(prev => [data, ...prev]);
-      setStats(s => ({ today: s.today + 1, unique: s.unique + (data.id_no ? 1 : 0), lastHour: s.lastHour + 1 }));
+      setRecords(prev => {
+        const isNewUnique = data.id_no ? !prev.some(r => r.id_no === data.id_no) : false;
+        setStats(s => ({
+          today: s.today + 1,
+          unique: isNewUnique ? s.unique + 1 : s.unique,
+          lastHour: s.lastHour + 1,
+        }));
+        return [data, ...prev];
+      });
       setScanResult({ type: 'success', title: `Attendance Logged — ${fmtTime(now)}`, student: parsed, message: `Time-in recorded at ${fmtTime(now)}` });
     } catch (err) {
       setScanResult({ type: 'error', title: 'Database Error', message: `Could not save record. ${err.message || ''}`, student: parsed });
