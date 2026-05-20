@@ -1052,15 +1052,18 @@ export default function BookManagement({ initialTab }) {
       // later and are not yet in PostgREST's schema cache → PGRST204 errors.
       // Those columns can be added back after running: Supabase → API → Reload schema.
       const txPayload = {
-        student_id:   pendingReq.student_id   || null,
-        student_name: pendingReq.student_name  || null,
-        book_id:      pendingReq.book_id       || null,  // ← ADD THIS LINE
-        book_title:   pendingReq.book_title    || null,
-        copy_label:   pendingReq.copy_label    || null,
-        status:       'Borrowed',
-        borrowed_at:  new Date().toISOString(),
-        returned_at:  null,
-        date:         new Date().toISOString().split('T')[0],
+        student_id:      pendingReq.student_id      || null,
+        student_name:    pendingReq.student_number
+          ? `${pendingReq.student_name} [${pendingReq.student_number}]`
+          : (pendingReq.student_name || null),
+        student_program: pendingReq.student_program  || null,
+        book_id:         pendingReq.book_id          || null,
+        book_title:      pendingReq.book_title       || null,
+        copy_label:      pendingReq.copy_label       || null,
+        status:          'Borrowed',
+        borrowed_at:     new Date().toISOString(),
+        returned_at:     null,
+        date:            new Date().toISOString().split('T')[0],
       };
       console.log('[Approve] payload:', txPayload);
 
@@ -1237,7 +1240,7 @@ export default function BookManagement({ initialTab }) {
   useEffect(() => { loadTransactions(); loadPendingRequests(); syncCopyStatuses(); }, [loadTransactions, loadPendingRequests, syncCopyStatuses]);
 
   useEffect(() => {
-    const ch = supabase.channel('borrow-requests-rt')
+    const ch = supabaseAdmin.channel('borrow-requests-rt')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrow_requests' }, (payload) => {
         if (payload.new?.status === 'pending') {
           playBellSound();
@@ -1254,7 +1257,7 @@ export default function BookManagement({ initialTab }) {
         loadPendingRequests();
       })
       .subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => supabaseAdmin.removeChannel(ch);
   }, [loadTransactions, loadPendingRequests]);
 
   // ── Scanner focus management ─────────────────────────────────────────────

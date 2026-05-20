@@ -44,6 +44,7 @@ export const supabaseAdmin = createClient(url, supabaseServiceRole || anon, {
 export const ADMIN_EMAILS = [
   'admin@pampangastateu.edu.ph',
   'librarian@pampangastateu.edu.ph',
+  
 ];
 
 export function isAdminEmail(email) {

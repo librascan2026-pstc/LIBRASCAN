@@ -18,7 +18,6 @@ const Icon = {
 
 const ROLE_CONFIG = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.12)',  color: '#64b5f6',  border: 'rgba(100,181,246,0.28)' },
-  library_manager: { label: 'Library Manager', bg: 'rgba(239,154,154,0.12)', color: '#ef9a9a',  border: 'rgba(239,154,154,0.28)' },
   admin:           { label: 'Administrator',   bg: 'rgba(201,168,76,0.14)',  color: '#C9A84C',  border: 'rgba(201,168,76,0.30)' },
 };
 
@@ -242,7 +241,6 @@ function UserModal({ user, onClose, onSave }) {
               ...inputStyle(false), appearance: 'none', cursor: 'pointer',
             }}>
               <option value="student">Student</option>
-              <option value="library_manager">Library Manager</option>
               <option value="admin">Administrator</option>
             </select>
             {(form.role === 'library_manager' || form.role === 'admin') && (
