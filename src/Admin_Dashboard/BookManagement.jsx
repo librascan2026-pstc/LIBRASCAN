@@ -725,20 +725,17 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
       // Update books table from book_copies
       await syncBooksFromCopies(bookData.id);
 
-      const txPayload = {
-        student_id:       studentData.id_no,
-        student_name:     studentData.full_name,
-        student_program:  studentData.program || '',
-        student_email:    studentData.email || null,
-        student_profile_id: studentData.id || null,
-        book_id:          String(bookData.id),
-        book_title:       bookData.title,
-        copy_label:       copyLabel,
-        status:           confirmData.action,
-        borrowed_at:      isBorrow ? now : (bookData._borrow_time || now),
-        returned_at:      isBorrow ? null : now,
-        date:             today(),
-      };
+const txPayload = {
+  student_id:   pendingReq.student_id   || null,
+  student_name: pendingReq.student_name  || null,
+  book_id:      pendingReq.book_id       || null,  // ← ADD THIS LINE
+  book_title:   pendingReq.book_title    || null,
+  copy_label:   pendingReq.copy_label    || null,
+  status:       'Borrowed',
+  borrowed_at:  new Date().toISOString(),
+  returned_at:  null,
+  date:         new Date().toISOString().split('T')[0],
+};
 
       const { error: txErr } = await supabaseAdmin.from('borrowings').insert([txPayload]);
       if (txErr) throw new Error(txErr.message);
@@ -1057,6 +1054,7 @@ export default function BookManagement({ initialTab }) {
       const txPayload = {
         student_id:   pendingReq.student_id   || null,
         student_name: pendingReq.student_name  || null,
+        book_id:      pendingReq.book_id       || null,  // ← ADD THIS LINE
         book_title:   pendingReq.book_title    || null,
         copy_label:   pendingReq.copy_label    || null,
         status:       'Borrowed',
