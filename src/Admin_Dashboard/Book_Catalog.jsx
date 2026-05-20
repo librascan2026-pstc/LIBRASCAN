@@ -670,6 +670,53 @@ function parseAbstractData(raw) {
   try { return JSON.parse(raw); } catch { return { heading: '', paragraphs: [raw], keywords: [] }; }
 }
 
+/**
+ * Merges paragraph fragments that were split mid-sentence by OCR.
+ * A fragment is considered "incomplete" if it does not end with
+ * sentence-terminating punctuation (. ! ? :) — those get joined
+ * with the next fragment using a single space.
+ */
+function mergeFragmentedParagraphs(paragraphs = [], subheadings = []) {
+  const merged = [];
+  let buffer = '';
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i];
+    const isSubhead = subheadings?.includes(para);
+
+    if (isSubhead) {
+      
+      if (buffer.trim()) { merged.push(buffer.trim()); buffer = ''; }
+      merged.push(para);
+      continue;
+    }
+
+    const trimmed = para.trim();
+    if (!trimmed) continue;
+
+    if (buffer) {
+     
+      buffer = buffer + ' ' + trimmed;
+    } else {
+      buffer = trimmed;
+    }
+
+  
+    const lastChar = buffer.trimEnd().slice(-1);
+    const isComplete = /[.!?:]/.test(lastChar);
+
+    if (isComplete) {
+      merged.push(buffer.trim());
+      buffer = '';
+    }
+
+  }
+
+  if (buffer.trim()) merged.push(buffer.trim());
+
+  return merged;
+}
+
 function ViewModal({ book, onClose, onEdit }) {
   const [qrModalOpen, setQrModalOpen]           = useState(false);
   const [abstractModalOpen, setAbstractModalOpen] = useState(false);
@@ -1158,7 +1205,7 @@ function ViewModal({ book, onClose, onEdit }) {
                     }} />
 
                     <div>
-                      {(abstractData.paragraphs || []).map((para, i) => {
+                      {mergeFragmentedParagraphs(abstractData.paragraphs, abstractData.subheadings).map((para, i) => {
                         const isSubhead = abstractData.subheadings?.includes(para);
                         if (isSubhead) {
                           return (
