@@ -350,7 +350,8 @@ export default function BorrowRequests({ onBadgeCount }) {
       const { data: existing } = await supabaseAdmin
         .from('borrowings')
         .select('id')
-        .eq('borrow_request_id', req.id)
+        .eq('student_id', req.student_id)
+        .eq('book_id', req.book_id)
         .is('returned_at', null)
         .maybeSingle();
 
@@ -368,7 +369,6 @@ export default function BorrowRequests({ onBadgeCount }) {
           borrowed_at:       nowISO(),
           returned_at:       null,
           date:              today(),
-          borrow_request_id: req.id,
         };
         // Strip undefined values only (keep nulls for nullable columns)
         Object.keys(borrowingPayload).forEach(k => {

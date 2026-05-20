@@ -10,9 +10,9 @@ const FONT_SANS    = "'Josefin Sans', sans-serif";
 
 const PSU_PROGRAMS = [
 
-  'BS Information Technology',
-  'BS Business Administration',
-  'BS Hospitality Management',
+  'Bachelor Of Science in  Information Technology',
+  'Bachelor Of Science in Business Administration',
+  'Bachelor Of Science in Hospitality Management',
   'Bachelor of Elementary Education',  
 ];
 
@@ -104,7 +104,7 @@ const validators = {
   },
   studentNumber: (v) => {
     if (!v.trim())                       return 'Student number is required.';
-    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYY-NNNNNNN (e.g. 2023-9293210).';
+    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYY-NNNNNNN (e.g. 20239293210).';
     return '';
   },
 
@@ -478,7 +478,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           value={form.studentNumber}
           onChange={handleChange('studentNumber')}
           onBlur={handleBlur('studentNumber')}
-          placeholder="e.g. 2023-9293210"
+          placeholder="e.g. 20239293210"
           error={fieldErrors.studentNumber}
           disabled={loading}
         />
