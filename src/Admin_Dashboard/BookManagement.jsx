@@ -951,6 +951,7 @@ export default function BookManagement({ initialTab }) {
   const [processingPendingId, setProcessingPendingId] = useState(null);
   const [newPendingAlert,    setNewPendingAlert]    = useState(null);
   const [pendingError,       setPendingError]       = useState(null);
+  const [rejectConfirm,      setRejectConfirm]      = useState(null);
 
   const [step,         setStep]         = useState(0);
   const [student,      setStudent]      = useState(null);
@@ -1240,26 +1241,53 @@ export default function BookManagement({ initialTab }) {
   useEffect(() => { loadTransactions(); loadPendingRequests(); syncCopyStatuses(); }, [loadTransactions, loadPendingRequests, syncCopyStatuses]);
 
   useEffect(() => {
-    // Channel 1: borrow_requests — uses anon client so it receives student inserts
+    // Channel 1: borrow_requests — instant updates without full refetch
     const chReq = supabase.channel('borrow-requests-rt')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrow_requests' }, (payload) => {
-        if (payload.new?.status === 'pending') {
+        const newRow = payload.new;
+        if (newRow?.status === 'pending') {
+          // Add new request to top of list instantly
+          setPendingRequests(prev =>
+            prev.some(r => r.id === newRow.id) ? prev : [newRow, ...prev]
+          );
           playBellSound();
           setNewPendingAlert(prev => ({
             count: (prev?.count || 0) + 1,
-            latest: payload.new,
+            latest: newRow,
           }));
           setTimeout(() => setNewPendingAlert(null), 12000);
-          loadPendingRequests();
         }
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'borrow_requests' }, (payload) => {
+        const updated = payload.new;
+        // Remove from pending list if no longer pending (approved/rejected)
+        setPendingRequests(prev =>
+          updated.status === 'pending'
+            ? prev.map(r => r.id === updated.id ? updated : r)
+            : prev.filter(r => r.id !== updated.id)
+        );
+      })
+      .on('postgres_changes', { event:'DELETE', schema:'public', table:'borrow_requests' }, (payload) => {
+        const deletedId = payload.old?.id;
+        setPendingRequests(prev => prev.filter(r => r.id !== deletedId));
       })
       .subscribe();
 
-    // Channel 2: borrowings — uses admin client to catch mobile app updates
+    // Channel 2: borrowings — smart incremental update, no loading flash
     const chBorrow = supabaseAdmin.channel('borrowings-rt')
-      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => {
-        loadTransactions();
-        loadPendingRequests();
+      .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrowings' }, (payload) => {
+        const newRow = payload.new;
+        setTransactions(prev =>
+          prev.some(t => t.id === newRow.id) ? prev : [newRow, ...prev]
+        );
+      })
+      .on('postgres_changes', { event:'UPDATE', schema:'public', table:'borrowings' }, (payload) => {
+        const updated = payload.new;
+        setTransactions(prev => prev.map(t => t.id === updated.id ? updated : t));
+      })
+      .on('postgres_changes', { event:'DELETE', schema:'public', table:'borrowings' }, (payload) => {
+        const deletedId = payload.old?.id;
+        setTransactions(prev => prev.filter(t => t.id !== deletedId));
       })
       .subscribe();
 
@@ -1267,7 +1295,7 @@ export default function BookManagement({ initialTab }) {
       supabase.removeChannel(chReq);
       supabaseAdmin.removeChannel(chBorrow);
     };
-  }, [loadTransactions, loadPendingRequests]);
+  }, []);
 
   // ── Scanner focus management ─────────────────────────────────────────────
   const refocusIfSafe = useCallback(() => {
@@ -2072,51 +2100,38 @@ export default function BookManagement({ initialTab }) {
         {/* ── Section header ── */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          marginBottom: 20, flexWrap: 'wrap', gap: 12,
+          marginBottom: 24, flexWrap: 'wrap', gap: 10,
+          paddingBottom: 16,
+          borderBottom: '1.5px solid rgba(139,0,0,0.08)',
         }}>
-          <div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <div style={{
-              fontFamily: "'Cinzel', serif", fontSize: 16, fontWeight: 700,
-              color: 'var(--maroon-deep)', letterSpacing: '0.05em',
-              display: 'flex', alignItems: 'center', gap: 10,
+              fontFamily: "'Cinzel', serif", fontSize: 17, fontWeight: 700,
+              color: 'var(--maroon-deep)', letterSpacing: '0.04em',
             }}>
-              <div style={{
-                width: 34, height: 34, borderRadius: 10,
-                background: `linear-gradient(135deg,${MAR},${MAR2})`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                boxShadow: '0 3px 12px rgba(139,0,0,0.3)', flexShrink: 0,
-              }}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={GP} strokeWidth="2">
-                  <circle cx="12" cy="12" r="10"/>
-                  <line x1="12" y1="8" x2="12" y2="12"/>
-                  <line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-              </div>
               Pending Borrow Requests
             </div>
-            <div style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 3, marginLeft: 44 }}>
+            <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign:'left' }}>
               {pendingRequests.length > 0
                 ? `${pendingRequests.length} request${pendingRequests.length > 1 ? 's' : ''} awaiting your review`
                 : 'No pending requests at this time'}
             </div>
           </div>
-          {pendingRequests.length > 0 && (
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 6,
-              padding: '6px 14px', borderRadius: 20,
-              background: 'rgba(201,168,76,0.10)',
-              border: '1.5px solid rgba(201,168,76,0.3)',
-              fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-sans)',
-              color: '#8B6914', letterSpacing: '0.06em', textTransform: 'uppercase',
-            }}>
-              <span style={{
-                width: 7, height: 7, borderRadius: '50%',
-                background: G, boxShadow: `0 0 0 3px rgba(201,168,76,0.25)`,
-                animation: 'bm-blink 2s ease-in-out infinite',
-              }}/>
-              Live
-            </div>
-          )}
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            padding: '6px 14px', borderRadius: 20,
+            background: 'rgba(201,168,76,0.10)',
+            border: '1.5px solid rgba(201,168,76,0.3)',
+            fontSize: 11.5, fontWeight: 700, fontFamily: 'var(--font-sans)',
+            color: '#8B6914', letterSpacing: '0.06em', textTransform: 'uppercase',
+          }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: '50%',
+              background: G, boxShadow: `0 0 0 3px rgba(201,168,76,0.25)`,
+              animation: 'bm-blink 2s ease-in-out infinite',
+            }}/>
+            Live
+          </div>
         </div>
 
         {/* ── New request alert banner ── */}
@@ -2346,7 +2361,7 @@ export default function BookManagement({ initialTab }) {
                         )}
                       </button>
                       <button
-                        onClick={() => rejectPendingRequest(req)}
+                        onClick={() => setRejectConfirm(req)}
                         disabled={isProcessing}
                         style={{
                           padding: '9px 14px', borderRadius: 9,
@@ -2522,6 +2537,76 @@ export default function BookManagement({ initialTab }) {
       )}
 
       </>}
+      {rejectConfirm && (
+        <div style={{
+          position:'fixed', inset:0, zIndex:4000,
+          background:'rgba(10,0,0,0.82)', backdropFilter:'blur(8px)',
+          display:'flex', alignItems:'center', justifyContent:'center', padding:20,
+          animation:'bm-fadeIn 0.2s ease',
+        }}>
+          <div style={{
+            background: CREAM, borderRadius:20, width:'100%', maxWidth:400,
+            border:'2px solid rgba(201,168,76,0.35)',
+            boxShadow:'0 24px 64px rgba(0,0,0,0.55)',
+            animation:'bm-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+            overflow:'hidden',
+          }}>
+            <div style={{
+              background:`linear-gradient(135deg,${MAR},${MAR2})`,
+              padding:'18px 24px',
+              borderBottom:'2px solid rgba(201,168,76,0.25)',
+              textAlign:'center',
+            }}>
+              <div style={{ fontFamily:"'Cinzel',serif", fontSize:15, color:GP, fontWeight:700 }}>Reject Request</div>
+              <div style={{ fontSize:11.5, color:'rgba(245,228,168,0.6)', fontFamily:'var(--font-sans)', marginTop:2 }}>Book availability will not change.</div>
+            </div>
+            <div style={{ padding:'20px 24px' }}>
+              <div style={{
+                padding:'12px 14px', borderRadius:10, marginBottom:14,
+                background:'rgba(139,0,0,0.05)', border:'1px solid rgba(139,0,0,0.12)',
+              }}>
+                <div style={{ fontSize:13.5, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)', marginBottom:3 }}>{rejectConfirm.book_title}</div>
+                <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>{rejectConfirm.student_name}</div>
+              </div>
+              <div style={{
+                padding:'10px 13px', borderRadius:9, marginBottom:16,
+                background:'rgba(139,0,0,0.07)', border:'1.5px dashed rgba(139,0,0,0.25)',
+                textAlign:'center',
+              }}>
+                <span style={{ fontSize:12, color:'#7a2020', fontFamily:'var(--font-sans)', lineHeight:1.5 }}>
+                  This will permanently reject this borrow request. The student will need to submit a new request. This action cannot be undone.
+                </span>
+              </div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <button
+                  onClick={() => setRejectConfirm(null)}
+                  disabled={processingPendingId === rejectConfirm.id}
+                  style={{
+                    padding:'12px', borderRadius:10, cursor:'pointer',
+                    border:'1.5px solid rgba(139,0,0,0.2)', background:'transparent',
+                    fontFamily:'var(--font-sans)', fontSize:13.5, fontWeight:600, color:MAR,
+                    opacity: processingPendingId === rejectConfirm.id ? 0.5 : 1,
+                  }}
+                >Cancel</button>
+                <button
+                  onClick={() => { rejectPendingRequest(rejectConfirm); setRejectConfirm(null); }}
+                  disabled={processingPendingId === rejectConfirm.id}
+                  style={{
+                    padding:'12px', borderRadius:10, border:'none', cursor:'pointer',
+                    background:`linear-gradient(135deg,${MAR},${MAR2})`,
+                    fontFamily:'var(--font-sans)', fontSize:13.5, fontWeight:700, color:GP,
+                    boxShadow:'0 4px 14px rgba(139,0,0,0.3)',
+                    opacity: processingPendingId === rejectConfirm.id ? 0.7 : 1,
+                  }}
+                >
+                  {processingPendingId === rejectConfirm.id ? 'Processing…' : 'Yes, Reject'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <Toast msg={toast.msg} type={toast.type} />
 
       <style>{`

@@ -341,7 +341,7 @@ function BookFormModal({ book, onClose, onSaved }) {
       } else if (newCopiesCount < existingCount) {
         const surplus = existingCount - newCopiesCount;
         const deletable = [...existingCopies]
-          .reverse()                          // highest copy_number first
+          .reverse()                        
           .filter(c => c.status === 'Available')
           .slice(0, surplus);
 
@@ -417,7 +417,7 @@ function BookFormModal({ book, onClose, onSaved }) {
           <div>
             <h2 style={{
               fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600,
-              color: '#F5E4A8', letterSpacing: '0.05em',
+              color: '#F5E4A8', letterSpacing: '0.05em', 
             }}>
               {isEdit ? 'Edit Book Record' : 'Add New Book'}
             </h2>
@@ -724,7 +724,7 @@ function ViewModal({ book, onClose, onEdit }) {
         const results = await Promise.all(allCopies.map(async (c) => {
           const { dataUrl } = await generateCopyQR(c.copy_id, c.copy_number);
           return {
-            dataUrl,                  // freshly generated from copy_id — always works
+            dataUrl,                 
             label:       c.copy_id,
             copyNum:     c.copy_number,
             copy_id:     c.copy_id,
@@ -1496,7 +1496,7 @@ export default function Book_Catalog() {
 
       const merged = (booksData || []).map(b => {
         const counts = copiesMap[b.id];
-        if (!counts) return b; // no copies row yet — keep DB value
+        if (!counts) return b; 
         return {
           ...b,
           copies:           counts.total,

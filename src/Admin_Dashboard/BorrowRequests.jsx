@@ -102,6 +102,20 @@ function ConfirmDialog({ req, action, onConfirm, onCancel, busy }) {
             </div>
           </div>
 
+          {/* Warning note for reject */}
+          {!isApprove && (
+            <div style={{
+              padding:'10px 13px', borderRadius:9, marginBottom:14,
+              background:'rgba(139,0,0,0.07)', border:'1.5px dashed rgba(139,0,0,0.25)',
+              display:'flex', alignItems:'flex-start', gap:8,
+            }}>
+              <span style={{ fontSize:15, flexShrink:0 }}>⚠️</span>
+              <span style={{ fontSize:12, color:'#7a2020', fontFamily:'var(--font-sans)', lineHeight:1.5 }}>
+                This will permanently reject this borrow request. The student will need to submit a new request. This action cannot be undone.
+              </span>
+            </div>
+          )}
+
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
             <button
               onClick={onCancel}
@@ -126,7 +140,7 @@ function ConfirmDialog({ req, action, onConfirm, onCancel, busy }) {
                 opacity: busy ? 0.7 : 1,
               }}
             >
-              {busy ? 'Processing…' : isApprove ? 'Approve' : 'Reject'}
+              {busy ? 'Processing…' : isApprove ? 'Approve' : 'Yes, Reject'}
             </button>
           </div>
         </div>
@@ -263,12 +277,48 @@ export default function BorrowRequests({ onBadgeCount }) {
   // ── Real-time subscription ─────────────────────────────────────────────────
   useEffect(() => {
     loadRequests();
+
     const ch = supabase
       .channel('borrow-requests-rt')
-      .on('postgres_changes', { event:'*', schema:'public', table:'borrow_requests' }, loadRequests)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'borrow_requests' },
+        (payload) => {
+          const newRow = payload.new;
+          setRequests(prev => {
+            // Avoid duplicates
+            if (prev.some(r => r.id === newRow.id)) return prev;
+            const updated = [newRow, ...prev];
+            const pendingCount = updated.filter(r => r.status === 'pending').length;
+            onBadgeCount?.(pendingCount);
+            return updated;
+          });
+        }
+      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrow_requests' },
+        (payload) => {
+          const updatedRow = payload.new;
+          setRequests(prev => {
+            const updated = prev.map(r => r.id === updatedRow.id ? updatedRow : r);
+            const pendingCount = updated.filter(r => r.status === 'pending').length;
+            onBadgeCount?.(pendingCount);
+            return updated;
+          });
+        }
+      )
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'borrow_requests' },
+        (payload) => {
+          const deletedId = payload.old?.id;
+          setRequests(prev => {
+            const updated = prev.filter(r => r.id !== deletedId);
+            const pendingCount = updated.filter(r => r.status === 'pending').length;
+            onBadgeCount?.(pendingCount);
+            return updated;
+          });
+        }
+      )
       .subscribe();
+
     return () => supabase.removeChannel(ch);
-  }, [loadRequests]);
+  }, [loadRequests, onBadgeCount]);
 
   // ── Show feedback banner ───────────────────────────────────────────────────
   const showBanner = (msg, ok = true) => {
