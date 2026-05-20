@@ -588,7 +588,8 @@ a { text-decoration: none; }
   top: 0;
   z-index: 90;
   box-shadow: 0 2px 16px rgba(80,0,0,0.18);
-  overflow: hidden;
+  /* overflow: hidden was clipping the notification dropdown — changed to visible */
+  overflow: visible;
 }
 
 
@@ -598,6 +599,10 @@ a { text-decoration: none; }
   inset: 0;
   background: #FDF8F0;
   z-index: 0;
+  /* clip to topbar bounds so background doesn't bleed when overflow:visible */
+  border-radius: inherit;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 
@@ -643,6 +648,10 @@ a { text-decoration: none; }
   display: flex;
   align-items: center;
   gap: 14px;
+  /* ensure dropdown is not clipped */
+  overflow: visible;
+  position: relative;
+  z-index: 100;
 }
 
 
@@ -1635,6 +1644,15 @@ a { text-decoration: none; }
   border-radius: 10px;
 }
 .lm-content::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.30); }
+
+/* Notification panel scrollbar */
+.lm-notif-list::-webkit-scrollbar { width: 4px; }
+.lm-notif-list::-webkit-scrollbar-track { background: rgba(0,0,0,0.15); }
+.lm-notif-list::-webkit-scrollbar-thumb {
+  background: rgba(201,168,76,0.30);
+  border-radius: 10px;
+}
+.lm-notif-list::-webkit-scrollbar-thumb:hover { background: rgba(201,168,76,0.55); }
 
 
 

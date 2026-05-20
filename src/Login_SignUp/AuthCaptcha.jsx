@@ -95,7 +95,7 @@ export default function AuthCaptcha({ onVerify, onReset }) {
   const canvasRef  = useRef(null);
   const [code, setCode]       = useState('');
   const [input, setInput]     = useState('');
-  const [status, setStatus]   = useState('idle'); // 'idle' | 'error' | 'ok'
+  const [status, setStatus]   = useState('idle'); 
 
   const refresh = useCallback(() => {
     const newCode = generateCode();

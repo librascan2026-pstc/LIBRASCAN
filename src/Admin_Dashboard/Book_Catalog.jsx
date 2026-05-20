@@ -809,12 +809,22 @@ function ViewModal({ book, onClose, onEdit }) {
         setDeletingCopyId(null);
         return;
       }
+
+     
+      const { error: brErr } = await supabaseAdmin
+        .from('borrow_requests')
+        .delete()
+        .eq('copy_id', qr.copy_id);
+      if (brErr) throw brErr;
+
+   
       const { error } = await supabaseAdmin
         .from('book_copies')
         .delete()
         .eq('copy_id', qr.copy_id);
       if (error) throw error;
 
+   
       const { data: freshCopies } = await supabaseAdmin
         .from('book_copies').select('status').eq('book_id', book.id);
       const totalAfter     = (freshCopies || []).length;
@@ -1535,8 +1545,37 @@ export default function Book_Catalog() {
     if (!deleteBook) return;
     setDeleting(true);
     try {
+      
+      const { data: copies, error: copiesErr } = await supabaseAdmin
+        .from('book_copies')
+        .select('copy_id')
+        .eq('book_id', deleteBook.id);
+      if (copiesErr) throw copiesErr;
+
+      const copyIds = (copies || []).map(c => c.copy_id);
+
+      
+      if (copyIds.length > 0) {
+        const { error: brErr } = await supabaseAdmin
+          .from('borrow_requests')
+          .delete()
+          .in('copy_id', copyIds);
+        if (brErr) throw brErr;
+      }
+
+ 
+      if (copyIds.length > 0) {
+        const { error: bcErr } = await supabaseAdmin
+          .from('book_copies')
+          .delete()
+          .in('copy_id', copyIds);
+        if (bcErr) throw bcErr;
+      }
+
+     
       const { error } = await supabaseAdmin.from('books').delete().eq('id', deleteBook.id);
       if (error) throw error;
+
       setBooks(b => b.filter(x => x.id !== deleteBook.id));
       setDeleteBook(null);
       showToast('Book deleted successfully.');

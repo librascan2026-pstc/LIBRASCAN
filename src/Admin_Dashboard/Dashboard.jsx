@@ -3,6 +3,35 @@ import { useAuth } from '../Login_SignUp/AuthContext';
 import { supabase } from '../supabaseClient';
 import './Dashboard.css';
 
+
+const NOTIF_MAX = 15; 
+
+
+const NOTIF_TYPES = {
+  BORROW_REQUEST:  { label: 'Borrow Request',  color: '#C9A84C',  icon: 'book'   },
+  BORROW_APPROVED: { label: 'Approved',         color: '#4CAF50',  icon: 'check'  },
+  BORROW_CANCELLED:{ label: 'Cancelled',        color: '#EF5350',  icon: 'cancel' },
+  BOOK_RETURNED:   { label: 'Returned',         color: '#42A5F5',  icon: 'return' },
+  SCANNER_ACTIVITY:{ label: 'Scanner',          color: '#AB47BC',  icon: 'scan'   },
+  SYSTEM_ALERT:    { label: 'System',           color: '#FF7043',  icon: 'alert'  },
+};
+
+
+function buildNotification({ id, type, title, message, createdAt, extra = {} }) {
+  return { id, type, title, message, createdAt, extra, read: false };
+}
+
+
+function fmtAgo(iso) {
+  if (!iso) return '';
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60)    return 'Just now';
+  if (diff < 3600)  return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+}
+
+
 import Overview            from './Overview';
 import AttendanceMonitoring from './AttendanceMonitoring';
 import BookManagement      from './BookManagement';
@@ -61,10 +90,12 @@ export default function Dashboard({ user, onSignOut }) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [bookManageTab, setBookManageTab] = useState('scanner');
 
-  const [notifications, setNotifications] = useState([]);   // { id, text, time, dot, req_id, isNew }
+
+  const [notifications, setNotifications] = useState([]);
   const [unreadCount,   setUnreadCount]   = useState(0);
-  const seenIdsRef  = useRef(new Set());  
-  const isFirstLoad = useRef(true);       
+  const seenIdsRef  = useRef(new Set());
+  const isFirstLoad = useRef(true);
+
 
   
   const playNotifSound = useCallback(() => {
@@ -85,52 +116,76 @@ export default function Dashboard({ user, onSignOut }) {
       beep(880,  0,    0.12);
       beep(1100, 0.14, 0.12);
       beep(1320, 0.28, 0.22);
-    } catch {  }
+    } catch { }
   }, []);
 
-  const fmtAgo = (iso) => {
-    if (!iso) return '';
-    const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (diff <  60)  return 'Just now';
-    if (diff < 3600) return `${Math.floor(diff / 60)} min ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
-    return new Date(iso).toLocaleDateString('en-PH', { month:'short', day:'numeric' });
-  };
 
+  const addNotifications = useCallback((incoming, isRealtime = false) => {
+    if (!incoming.length) return;
 
+    setNotifications(prev => {
+      
+      const existingIds = new Set(prev.map(n => n.id));
+      const fresh = incoming.filter(n => !existingIds.has(n.id));
+      const merged = [...fresh, ...prev].slice(0, NOTIF_MAX);
+      return merged;
+    });
+
+    if (isRealtime && !isFirstLoad.current) {
+      playNotifSound();
+      setUnreadCount(c => Math.min(c + incoming.filter(n => !seenIdsRef.current.has(n.id)).length, NOTIF_MAX));
+    }
+
+    incoming.forEach(n => seenIdsRef.current.add(n.id));
+    isFirstLoad.current = false;
+  }, [playNotifSound]);
+
+  
   const fetchPendingRequests = useCallback(async (isRealtime = false) => {
     const { data, error } = await supabase
       .from('borrow_requests')
       .select('id, student_name, book_title, created_at, status')
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
-      .limit(20);
+      .limit(NOTIF_MAX);
 
     if (error) { console.error('[Dashboard] notif fetch error:', error.message); return; }
 
     const rows = data || [];
-    const newOnes = rows.filter(r => !seenIdsRef.current.has(r.id));
 
- 
-    if (isRealtime && !isFirstLoad.current && newOnes.length > 0) {
-      playNotifSound();
+    if (!isRealtime && isFirstLoad.current) {
+      const notifs = rows.map(r => buildNotification({
+        id:        `borrow_req_${r.id}`,
+        type:      'BORROW_REQUEST',
+        title:     'Borrow Request',
+        message:   `${r.student_name || 'A student'} wants to borrow "${r.book_title || 'a book'}"`,
+        createdAt: r.created_at,
+        extra:     { borrowId: r.id },
+      }));
+      notifs.forEach(n => seenIdsRef.current.add(n.id));
+      setNotifications(notifs.slice(0, NOTIF_MAX));
+      setUnreadCount(notifs.length);
+      isFirstLoad.current = false;
+      return;
     }
-    isFirstLoad.current = false;
 
 
-    rows.forEach(r => seenIdsRef.current.add(r.id));
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`borrow_req_${r.id}`));
+    if (!newRows.length) return;
 
-    setNotifications(rows.map(r => ({
-      id:     r.id,
-      text:   `${r.student_name || 'A student'} wants to borrow "${r.book_title || 'a book'}"`,
-      time:   fmtAgo(r.created_at),
-      dot:    '#C9A84C',
-      isNew:  newOnes.some(n => n.id === r.id),
-    })));
-    setUnreadCount(rows.length);
-  }, [playNotifSound]);
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `borrow_req_${r.id}`,
+      type:      'BORROW_REQUEST',
+      title:     'Borrow Request',
+      message:   `${r.student_name || 'A student'} wants to borrow "${r.book_title || 'a book'}"`,
+      createdAt: r.created_at,
+      extra:     { borrowId: r.id },
+    }));
 
-  
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications]);
+
+
   useEffect(() => {
     fetchPendingRequests(false);
 
@@ -147,12 +202,38 @@ export default function Dashboard({ user, onSignOut }) {
     return () => supabase.removeChannel(ch);
   }, [fetchPendingRequests]);
 
+  const markAllRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    setUnreadCount(0);
+  };
 
+  
+  const markRead = (id) => {
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    setUnreadCount(c => Math.max(0, c - 1));
+  };
+
+ 
   const dismissAll = () => {
     setNotifications([]);
     setUnreadCount(0);
     setNotifOpen(false);
   };
+
+ 
+  const handleBellClick = () => {
+    setNotifOpen(o => {
+      if (!o) {
+        
+        setTimeout(() => {
+          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          setUnreadCount(0);
+        }, 600);
+      }
+      return !o;
+    });
+  };
+ 
 
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name  || '';
@@ -399,7 +480,7 @@ export default function Dashboard({ user, onSignOut }) {
             <div style={{ position: 'relative' }}>
               <button
                 className="lm-notif-btn"
-                onClick={() => { setNotifOpen(o => !o); }}
+                onClick={handleBellClick}
                 aria-label="Notifications"
                 style={{ position: 'relative' }}
               >
@@ -426,117 +507,292 @@ export default function Dashboard({ user, onSignOut }) {
 
               {notifOpen && (
                 <div style={{
-                  position: 'absolute', top: 48, right: 0,
-                  width: 320,
-                  background: 'var(--bg-card)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 14,
-                  boxShadow: '0 12px 36px rgba(0,0,0,0.45)',
+                  position: 'absolute', top: 52, right: 0,
+                  width: 360,
+                  background: 'linear-gradient(160deg, #6B0000 0%, #5A0000 100%)',
+                  border: '1px solid rgba(201,168,76,0.35)',
+                  borderRadius: 16,
+                  boxShadow: '0 20px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.10)',
                   zIndex: 200,
                   overflow: 'hidden',
                   animation: 'lm-fade-in 0.22s ease',
                 }}>
-            
+
+              
                   <div style={{
-                    padding: '13px 16px',
-                    borderBottom: '1px solid var(--border)',
+                    padding: '14px 18px 12px',
+                    borderBottom: '1px solid rgba(201,168,76,0.20)',
+                    background: 'rgba(0,0,0,0.18)',
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   }}>
-                    <div style={{
-                      fontFamily: 'var(--font-display)',
-                      fontSize: 13, fontWeight: 700,
-                      color: 'var(--gold-pale)', letterSpacing: '0.04em',
-                      display: 'flex', alignItems: 'center', gap: 8,
-                    }}>
-                      Borrow Requests
-                      {unreadCount > 0 && (
-                        <span style={{
-                          padding: '1px 7px', borderRadius: 10,
-                          background: 'rgba(201,168,76,0.18)', color: '#C9A84C',
-                          border: '1px solid rgba(201,168,76,0.30)',
-                          fontSize: 10, fontWeight: 800,
-                        }}>{unreadCount} pending</span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => { setBookManageTab('pending'); setActiveTab('bookmanage'); setNotifOpen(false); }}
-                      style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        fontSize: 10.5, color: 'var(--gold)',
-                        fontFamily: 'var(--font-sans)', fontWeight: 600,
-                        padding: '3px 8px', borderRadius: 6,
-                        transition: 'background 0.15s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,168,76,0.12)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                    >
-                      View All →
-                    </button>
-                  </div>
-
-                  {/* List */}
-                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-                    {notifications.length === 0 ? (
-                      <div style={{
-                        padding: '28px 16px', textAlign: 'center',
-                        color: 'var(--text-dim)', fontSize: 12,
-                        fontFamily: 'var(--font-sans)',
-                      }}>
-                        <div style={{ fontSize: 28, marginBottom: 8 }}>📭</div>
-                        No pending borrow requests
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                      
+                      <div>
+                        <div style={{
+                          fontFamily: 'var(--font-display)',
+                          fontSize: 12, fontWeight: 700,
+                          color: 'var(--gold-pale)', letterSpacing: '0.06em',
+                          textTransform: 'uppercase',
+                        }}>
+                          Notifications
+                        </div>
+                        <div style={{
+                          fontSize: 10.5, color: 'rgba(245,228,168,0.55)',
+                          fontFamily: 'var(--font-sans)', marginTop: 1,
+                        }}>
+                         
+                        </div>
                       </div>
-                    ) : notifications.map((n, i) => (
-                      <div
-                        key={n.id || i}
+                    </div>
+
+                    
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {unreadCount > 0 && (
+                        <button
+                          onClick={markAllRead}
+                          style={{
+                            background: 'rgba(201,168,76,0.12)',
+                            border: '1px solid rgba(201,168,76,0.25)',
+                            borderRadius: 8,
+                            cursor: 'pointer',
+                            fontSize: 10, color: '#C9A84C',
+                            fontFamily: 'var(--font-sans)', fontWeight: 600,
+                            padding: '4px 9px',
+                            transition: 'all 0.15s',
+                            whiteSpace: 'nowrap',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.22)'; }}
+                          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)'; }}
+                          title="Mark all as read"
+                        >
+                          Mark read
+                        </button>
+                      )}
+                      <button
                         onClick={() => { setBookManageTab('pending'); setActiveTab('bookmanage'); setNotifOpen(false); }}
                         style={{
-                          display: 'flex', alignItems: 'flex-start', gap: 10,
-                          padding: '11px 16px',
-                          borderBottom: '1px solid rgba(201,168,76,0.06)',
-                          cursor: 'pointer', transition: 'background 0.15s',
-                          background: n.isNew ? 'rgba(201,168,76,0.06)' : 'transparent',
+                          background: 'rgba(201,168,76,0.12)',
+                          border: '1px solid rgba(201,168,76,0.25)',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          fontSize: 10, color: '#C9A84C',
+                          fontFamily: 'var(--font-sans)', fontWeight: 600,
+                          padding: '4px 9px',
+                          transition: 'all 0.15s',
+                          whiteSpace: 'nowrap',
                         }}
-                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.1)'}
-                        onMouseLeave={e => e.currentTarget.style.background = n.isNew ? 'rgba(201,168,76,0.06)' : 'transparent'}
+                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.22)'; }}
+                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)'; }}
                       >
-                        <div style={{
-                          width: 8, height: 8, borderRadius: '50%',
-                          background: n.dot, flexShrink: 0, marginTop: 4,
-                          boxShadow: n.isNew ? `0 0 6px ${n.dot}` : 'none',
-                        }} />
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                            {n.text}
-                          </div>
-                          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 3 }}>
-                            {n.time}
-                          </div>
-                        </div>
-                        {n.isNew && (
-                          <div style={{
-                            width: 6, height: 6, borderRadius: '50%',
-                            background: '#C9A84C', flexShrink: 0, marginTop: 5,
-                          }} />
-                        )}
-                      </div>
-                    ))}
+                        View All →
+                      </button>
+                    </div>
                   </div>
 
-                
+           
+                  <div style={{
+                    maxHeight: 380,
+                    overflowY: 'auto',
+                    overflowX: 'hidden',
+                    scrollbarWidth: 'thin',
+                    scrollbarColor: 'rgba(201,168,76,0.30) rgba(0,0,0,0.15)',
+                  }}>
+                    {notifications.length === 0 ? (
+                   
+                      <div style={{
+                        padding: '40px 20px', textAlign: 'center',
+                        fontFamily: 'var(--font-sans)',
+                      }}>
+                        <div style={{
+                          width: 44, height: 44, borderRadius: '50%',
+                          background: 'rgba(201,168,76,0.10)',
+                          border: '1px solid rgba(201,168,76,0.20)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          margin: '0 auto 12px',
+                        }}>
+                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.55)" strokeWidth="1.5">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                          </svg>
+                        </div>
+                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'rgba(245,228,168,0.70)', marginBottom: 4 }}>
+                          No notifications yet
+                        </div>
+                        <div style={{ fontSize: 11, color: 'rgba(245,228,168,0.38)' }}>
+                          Activity will appear here in real time
+                        </div>
+                      </div>
+                    ) : (
+                      notifications.map((n, i) => {
+                        const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
+                        const isUnread = !n.read;
+
+                        
+                        const iconSvg = {
+                          book: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="1.8">
+                              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+                            </svg>
+                          ),
+                          check: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
+                              <polyline points="20 6 9 17 4 12"/>
+                            </svg>
+                          ),
+                          cancel: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
+                              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                          ),
+                          return: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
+                              <polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
+                            </svg>
+                          ),
+                          scan: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
+                              <rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/>
+                              <path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/>
+                              <path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/>
+                            </svg>
+                          ),
+                          alert: (
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
+                              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                            </svg>
+                          ),
+                        }[typeInfo.icon] || iconSvg?.book;
+
+                        return (
+                          <div
+                            key={n.id || i}
+                            onClick={() => {
+                              markRead(n.id);
+                              
+                              if (n.type === 'BORROW_REQUEST' || n.type === 'BORROW_APPROVED' || n.type === 'BORROW_CANCELLED' || n.type === 'BOOK_RETURNED') {
+                                setBookManageTab('pending');
+                                setActiveTab('bookmanage');
+                              } else if (n.type === 'SCANNER_ACTIVITY') {
+                                setActiveTab('bookmanage');
+                              }
+                              setNotifOpen(false);
+                            }}
+                            style={{
+                              display: 'flex', alignItems: 'flex-start', gap: 11,
+                              padding: '11px 16px',
+                              borderBottom: '1px solid rgba(255,255,255,0.05)',
+                              cursor: 'pointer',
+                              transition: 'background 0.15s',
+                              background: isUnread ? 'rgba(201,168,76,0.07)' : 'transparent',
+                              position: 'relative',
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,168,76,0.12)'}
+                            onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(201,168,76,0.07)' : 'transparent'}
+                          >
+                     
+                            {isUnread && (
+                              <div style={{
+                                position: 'absolute', left: 0, top: 0, bottom: 0,
+                                width: 3, background: `linear-gradient(180deg, ${typeInfo.color}, ${typeInfo.color}44)`,
+                                borderRadius: '0 2px 2px 0',
+                              }} />
+                            )}
+
+                     
+                            <div style={{
+                              width: 34, height: 34, borderRadius: 10, flexShrink: 0,
+                              background: isUnread ? `${typeInfo.color}22` : 'rgba(255,255,255,0.08)',
+                              border: `1px solid ${isUnread ? `${typeInfo.color}44` : 'rgba(255,255,255,0.10)'}`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              {iconSvg}
+                            </div>
+
+                   
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              
+                              <div style={{
+                                display: 'flex', alignItems: 'center',
+                                justifyContent: 'space-between', marginBottom: 2,
+                              }}>
+                                <span style={{
+                                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em',
+                                  textTransform: 'uppercase',
+                                  color: isUnread ? typeInfo.color : 'rgba(245,228,168,0.38)',
+                                  fontFamily: 'var(--font-sans)',
+                                }}>
+                                  {typeInfo.label}
+                                </span>
+                                <span style={{
+                                  fontSize: 9.5, color: 'rgba(245,228,168,0.38)',
+                                  fontFamily: 'var(--font-sans)',
+                                  display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0,
+                                }}>
+                                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                                  </svg>
+                                  {fmtAgo(n.createdAt)}
+                                </span>
+                              </div>
+
+                    
+                              <div style={{
+                                fontSize: 11.5,
+                                fontFamily: 'var(--font-sans)',
+                                color: isUnread ? 'rgba(245,228,168,0.90)' : 'rgba(245,228,168,0.58)',
+                                lineHeight: 1.45,
+                                fontWeight: isUnread ? 500 : 400,
+                                overflow: 'hidden',
+                                display: '-webkit-box',
+                                WebkitLineClamp: 2,
+                                WebkitBoxOrient: 'vertical',
+                              }}>
+                                {n.message}
+                              </div>
+                            </div>
+
+                      
+                            {isUnread && (
+                              <div style={{
+                                width: 7, height: 7, borderRadius: '50%',
+                                background: typeInfo.color,
+                                boxShadow: `0 0 8px ${typeInfo.color}99`,
+                                flexShrink: 0, marginTop: 5,
+                              }} />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  
                   {notifications.length > 0 && (
                     <div style={{
-                      padding: '9px 16px', textAlign: 'center',
-                      borderTop: '1px solid var(--border)',
+                      padding: '9px 16px',
+                      borderTop: '1px solid rgba(201,168,76,0.20)',
+                      background: 'rgba(0,0,0,0.18)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     }}>
+                      <span style={{
+                        fontSize: 10, color: 'rgba(245,228,168,0.35)',
+                        fontFamily: 'var(--font-sans)',
+                      }}>
+                        {notifications.length} of {NOTIF_MAX} max
+                      </span>
                       <button
                         style={{
                           background: 'none', border: 'none', cursor: 'pointer',
-                          fontSize: 11, color: 'var(--gold)',
-                          fontFamily: 'var(--font-sans)',
+                          fontSize: 10.5, color: 'rgba(245,228,168,0.45)',
+                          fontFamily: 'var(--font-sans)', fontWeight: 500,
+                          padding: '3px 6px', borderRadius: 6,
+                          transition: 'color 0.15s',
                         }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#C9A84C'}
+                        onMouseLeave={e => e.currentTarget.style.color = 'rgba(245,228,168,0.45)'}
                         onClick={dismissAll}
                       >
-                        Dismiss all
+                        Clear all
                       </button>
                     </div>
                   )}

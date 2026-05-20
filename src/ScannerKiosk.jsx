@@ -33,7 +33,7 @@ export default function ScannerKiosk() {
   const [scanning, setScanning] = useState(false); 
   const [focused,  setFocused]  = useState(true);
 
-  // Live clock
+ 
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);

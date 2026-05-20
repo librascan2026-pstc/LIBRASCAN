@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
-// ─── Config ───────────────────────────────────────────────────────────────────
-const BORROW_LIMIT = 3; // max books a student can borrow at a time
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
+const BORROW_LIMIT = 3; 
+
+
 const G   = '#C9A84C';
 const GP  = '#F5E4A8';
 const MAR = '#8B0000';
@@ -12,14 +12,14 @@ const MAR2 = '#6B0000';
 const CREAM = '#FAF6EE';
 const CREAM2 = '#F3EBD8';
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 const today   = () => new Date().toISOString().split('T')[0];
 const nowISO  = () => new Date().toISOString();
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—';
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', hour12:true }) : '—';
 const fmtFull = (iso) => iso ? `${fmtDate(iso)} · ${fmtTime(iso)}` : '—';
 
-// ─── Sound helpers (Web Audio API) ───────────────────────────────────────────
+
 function playSuccessSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -36,7 +36,7 @@ function playSuccessSound() {
     };
     beep(660, 0,    0.12);
     beep(880, 0.13, 0.18);
-  } catch { /* silent fail */ }
+  } catch { }
 }
 
 function playErrorSound() {
@@ -51,7 +51,7 @@ function playErrorSound() {
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.35);
-  } catch { /* silent fail */ }
+  } catch { }
 }
 
 function playBellSound() {
@@ -71,12 +71,10 @@ function playBellSound() {
     beep(880, 0,    0.15);
     beep(1100, 0.18, 0.2);
     beep(880, 0.40, 0.25);
-  } catch { /* silent fail */ }
+  } catch {  }
 }
 
-// ─── Safe books sync helper ───────────────────────────────────────────────────
-// Updates books.copies, books.status (and books.available_copies if the column exists).
-// Always uses book_copies rows as the source of truth so the catalog stays in sync.
+
 async function syncBooksFromCopies(bookId) {
   const { data: allCopies } = await supabaseAdmin
     .from('book_copies').select('status').eq('book_id', bookId);
@@ -84,14 +82,14 @@ async function syncBooksFromCopies(bookId) {
   const available = (allCopies || []).filter(c => c.status === 'Available').length;
   const newStatus = available === 0 ? 'Borrowed' : 'Available';
 
-  // Try full update (with available_copies column)
+  
   const { error: fullErr } = await supabaseAdmin.from('books').update({
     copies:           total,
     available_copies: available,
     status:           newStatus,
   }).eq('id', bookId);
 
-  // If available_copies column doesn't exist, retry without it
+  
   if (fullErr && (fullErr.code === '42703' || fullErr.message?.includes('available_copies') || fullErr.message?.includes('column'))) {
     console.warn('[syncBooksFromCopies] available_copies column missing — syncing without it');
     await supabaseAdmin.from('books').update({
@@ -105,7 +103,7 @@ async function syncBooksFromCopies(bookId) {
   return { total, available };
 }
 
-// ─── QR Parsers ───────────────────────────────────────────────────────────────
+
 function parseStudentQR(raw) {
   const flat = (raw || '').trim().replace(/\r?\n/g, '');
   const id_no     = flat.match(/IDNo\s*:\s*([^|]+?)(?=Full Name|Program|$)/i)?.[1]?.trim();
@@ -121,12 +119,12 @@ function parseBookQR(raw) {
   const s = (raw || '').trim();
   if (!s) return null;
 
-  // New format: raw UUID = copy_id from book_copies table
+ 
   if (UUID_RE.test(s)) {
     return { isCopyId: true, copy_id: s, base: s, copyNum: null, copyLabel: null, raw: s };
   }
 
-  // Legacy format: ISBN-COPY001
+
   const copyMatch = s.match(/^(.+)-COPY(\d+)$/i);
   if (copyMatch) return {
     isCopyId: false,
@@ -137,7 +135,7 @@ function parseBookQR(raw) {
   return { isCopyId: false, base: s, copyNum: null, copyLabel: null, raw: s };
 }
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
+
 const Ic = {
   qr:     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="currentColor"/><rect x="16" y="5" width="3" height="3" fill="currentColor"/><rect x="16" y="16" width="3" height="3" fill="currentColor"/><rect x="5" y="16" width="3" height="3" fill="currentColor"/></svg>,
   user:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>,
@@ -150,7 +148,7 @@ const Ic = {
   limit:  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
 };
 
-// ─── Status Badge ─────────────────────────────────────────────────────────────
+
 function Badge({ status }) {
   const key = (status || '').toLowerCase();
   const cfg = {
@@ -171,12 +169,10 @@ function Badge({ status }) {
   );
 }
 
-// ─── Toast ────────────────────────────────────────────────────────────────────
-// Removed — confirmation is shown inline via ScanResultCard only.
+
 function Toast({ msg, type }) { return null; }
 
-// ─── Confirmation Popup (Mobile) ──────────────────────────────────────────────
-// ─── Step Dot ─────────────────────────────────────────────────────────────────
+
 function StepDot({ n, active, done, label }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:8 }}>
@@ -220,7 +216,7 @@ function StepDot({ n, active, done, label }) {
   );
 }
 
-// ─── Scan Zone ────────────────────────────────────────────────────────────────
+
 function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepNum }) {
   return (
     <div onClick={onFocus} style={{
@@ -238,7 +234,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
         ? '0 12px 40px rgba(80,0,0,0.30), inset 0 1px 0 rgba(245,228,168,0.12)'
         : 'none',
     }}>
-      {/* Decorative shimmer stripe at top when active */}
+      
       {active && (
         <div style={{
           position:'absolute', top:0, left:0, right:0, height:3,
@@ -248,7 +244,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
         }}/>
       )}
 
-      {/* Corner accent */}
+    
       {active && <>
         <div style={{ position:'absolute', top:0, left:0, width:50, height:50,
           background:'linear-gradient(135deg, rgba(201,168,76,0.15), transparent)',
@@ -258,7 +254,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
           borderRadius:'50px 0 18px 0', pointerEvents:'none' }} />
       </>}
 
-      {/* Step badge */}
+      
       <div style={{
         position:'absolute', top:12, right:14,
         fontSize:9, fontWeight:800, letterSpacing:'0.12em',
@@ -266,7 +262,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
         fontFamily:'var(--font-sans)', textTransform:'uppercase',
       }}>STEP {stepNum}</div>
 
-      {/* Icon orb */}
+      
       <div style={{
         width:72, height:72, borderRadius:'50%', margin:'0 auto 18px',
         background: active
@@ -293,7 +289,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
         )}
       </div>
 
-      {/* Status row */}
+     
       <div style={{ display:'inline-flex', alignItems:'center', gap:7, marginBottom:8 }}>
         {scanning && (
           <span style={{
@@ -320,7 +316,7 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
         fontWeight: active ? 500 : 400,
       }}>{hint}</div>
 
-      {/* Active bottom glow bar */}
+      
       {active && (
         <div style={{
           position:'absolute', bottom:0, left:'15%', right:'15%', height:2,
@@ -332,13 +328,13 @@ function ScanZone({ scanning, focused, onFocus, hint, title, icon, active, stepN
   );
 }
 
-// ─── Scan Result Card ─────────────────────────────────────────────────────────
+
 function ScanResultCard({ result }) {
   if (!result) return null;
   const ok = result.type === 'success';
   const isBorrow = result.action === 'borrowed';
 
-  // Muted teal/cream palette — matches Attendance Log card style
+
   const cfg = ok
     ? isBorrow
       ? {
@@ -445,7 +441,7 @@ function ScanResultCard({ result }) {
   );
 }
 
-// ─── Detail Row ───────────────────────────────────────────────────────────────
+
 function DRow({ label, value, mono, highlight }) {
   return (
     <div style={{
@@ -458,7 +454,7 @@ function DRow({ label, value, mono, highlight }) {
   );
 }
 
-// ─── Detail Modal ─────────────────────────────────────────────────────────────
+
 function DetailModal({ tx, onClose }) {
   if (!tx) return null;
   const isBorrowed = tx.status?.toLowerCase() === 'borrowed';
@@ -495,7 +491,7 @@ function DetailModal({ tx, onClose }) {
         </div>
 
         <div style={{ padding:'20px 24px', display:'flex', flexDirection:'column', gap:20 }}>
-          {/* Status banner */}
+    
           <div style={{
             padding:'10px 16px', borderRadius:10,
             background: isBorrowed ? 'rgba(139,0,0,0.08)' : 'rgba(46,125,50,0.08)',
@@ -547,7 +543,7 @@ function DetailModal({ tx, onClose }) {
   );
 }
 
-// ─── Transaction Row ──────────────────────────────────────────────────────────
+
 function TxRow({ tx, onClick, onDelete }) {
   const [hov, setHov] = useState(false);
   const [delHov, setDelHov] = useState(false);
@@ -567,8 +563,7 @@ function TxRow({ tx, onClick, onDelete }) {
     >
       <td style={{ padding:'11px 14px' }}>
         {(() => {
-          // student_number is embedded in student_name as "NAME [2023-12345]"
-          // Also check student_id in case it's a readable number (not UUID)
+      
           const nameField = String(tx.student_name || '');
           const embedded = nameField.match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
           const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim())
@@ -633,9 +628,7 @@ function TxRow({ tx, onClick, onDelete }) {
   );
 }
 
-// ─── [Mobile borrow is handled through the student's own app account] ─────────
-// No admin-side manual entry — students borrow via their mobile account directly.
-// Those transactions appear in the table automatically via realtime subscription.
+
 
 function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
   const [studentIdInput, setStudentIdInput] = useState('');
@@ -700,7 +693,7 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
     const isBorrow = confirmData.action === 'Borrowed';
     const now = nowISO();
     try {
-      // Check borrow limit
+  
       if (isBorrow) {
         const { count } = await supabase
           .from('borrowings').select('*', { count:'exact', head:true })
@@ -722,13 +715,13 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
           .eq('status', 'Borrowed');
       }
 
-      // Update books table from book_copies
+      
       await syncBooksFromCopies(bookData.id);
 
 const txPayload = {
   student_id:   pendingReq.student_id   || null,
   student_name: pendingReq.student_name  || null,
-  book_id:      pendingReq.book_id       || null,  // ← ADD THIS LINE
+  book_id:      pendingReq.book_id       || null,
   book_title:   pendingReq.book_title    || null,
   copy_label:   pendingReq.copy_label    || null,
   status:       'Borrowed',
@@ -743,7 +736,7 @@ const txPayload = {
       playSuccessSound();
       showToast(`${confirmData.action}: "${bookData.title}"`, 'success');
       onTransactionComplete?.();
-      // reset
+
       setStudentIdInput(''); setBookIdInput(''); setStudentData(null); setBookData(null);
     } catch (err) {
       playErrorSound();
@@ -786,7 +779,7 @@ const txPayload = {
           </div>
         </div>
 
-        {/* Student lookup */}
+   
         <div style={{ marginBottom:14 }}>
           <div style={{ fontSize:10.5, fontWeight:700, color:G, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Student Number</div>
           <div style={{ display:'flex', gap:8 }}>
@@ -817,7 +810,7 @@ const txPayload = {
           )}
         </div>
 
-        {/* Book lookup */}
+   
         <div style={{ marginBottom:16 }}>
           <div style={{ fontSize:10.5, fontWeight:700, color:G, letterSpacing:'0.09em', textTransform:'uppercase', fontFamily:'var(--font-sans)', marginBottom:6 }}>Book ISBN or Title</div>
           <div style={{ display:'flex', gap:8 }}>
@@ -850,7 +843,7 @@ const txPayload = {
           )}
         </div>
 
-        {/* Action button */}
+       
         <button
           onClick={initiate}
           disabled={!studentData || !bookData || loading}
@@ -874,7 +867,7 @@ const txPayload = {
   );
 }
 
-// ─── Tab CSS (scoped with "bm-tab-" prefix) ───────────────────────────────────
+
 const TAB_CSS = `
   .bm-tabs {
     display: flex;
@@ -941,11 +934,11 @@ const TAB_CSS = `
   }
 `;
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function BookManagement({ initialTab }) {
   const [activeTab,    setActiveTab]    = useState(initialTab || 'scanner');
 
-  // ── Pending Requests state ───────────────────────────────────────────────
+
   const [pendingRequests,    setPendingRequests]    = useState([]);
   const [loadingPending,     setLoadingPending]     = useState(false);
   const [processingPendingId, setProcessingPendingId] = useState(null);
@@ -966,20 +959,17 @@ export default function BookManagement({ initialTab }) {
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTx,   setSelectedTx]  = useState(null);
 
-  // Scanner hardware state — updated by Web USB connect/disconnect events
+  
   const [scannerConnected, setScannerConnected] = useState(false);
 
-  // ── Real USB scanner plug/unplug detection ───────────────────────────────
-  // Uses the Web USB API's connect/disconnect events. QR scanners enumerate as
-  // USB HID devices. When one connects the badge goes green; when it disconnects
-  // it goes red. Falls back gracefully if the API is unavailable (Firefox, etc.).
+
   useEffect(() => {
-    if (!navigator.usb) return; // API not supported — badge stays "Unplugged"
+    if (!navigator.usb) return; 
 
     const handleConnect    = () => setScannerConnected(true);
     const handleDisconnect = () => setScannerConnected(false);
 
-    // Check if any USB device is already connected on mount
+  
     navigator.usb.getDevices().then(devices => {
       if (devices.length > 0) setScannerConnected(true);
     }).catch(() => {});
@@ -999,8 +989,8 @@ export default function BookManagement({ initialTab }) {
   const bufRef      = useRef('');
   const timerRef    = useRef(null);
   const refocusRef  = useRef(null);
-  const processingRef = useRef(false); // lock to prevent double-scan
-  const resultTimerRef = useRef(null); // auto-dismiss timer for ScanResultCard
+  const processingRef = useRef(false);
+  const resultTimerRef = useRef(null); 
 
   const showToast = useCallback((msg, type='success') => {
     setToast({ msg, type });
@@ -1017,7 +1007,7 @@ export default function BookManagement({ initialTab }) {
     }, 3400);
   }, []);
 
-  // ── Load transactions ────────────────────────────────────────────────────
+
   const loadTransactions = useCallback(async () => {
     setLoadingTx(true);
     const { data, error } = await supabaseAdmin
@@ -1028,7 +1018,7 @@ export default function BookManagement({ initialTab }) {
     setLoadingTx(false);
   }, []);
 
-  // ── Load pending borrow requests (from mobile scanner) ──────────────────
+  
   const loadPendingRequests = useCallback(async () => {
     setLoadingPending(true);
     const { data, error } = await supabaseAdmin
@@ -1042,16 +1032,13 @@ export default function BookManagement({ initialTab }) {
     setLoadingPending(false);
   }, []);
 
-  // ── Approve Pending Request ──────────────────────────────────────────────
+ 
   const confirmPendingRequest = useCallback(async (pendingReq) => {
     try {
       setProcessingPendingId(pendingReq.id);
       setPendingError(null);
 
-      // Use ONLY the core columns that have always existed in borrowings.
-      // student_number / student_program / student_email / book_id were added
-      // later and are not yet in PostgREST's schema cache → PGRST204 errors.
-      // Those columns can be added back after running: Supabase → API → Reload schema.
+   
       const txPayload = {
         student_id:      pendingReq.student_id      || null,
         student_name:    pendingReq.student_number
@@ -1079,10 +1066,7 @@ export default function BookManagement({ initialTab }) {
       }
       console.log('[Approve] success:', inserted);
 
-      // ── Update book_copies → resolve copy and mark Borrowed ─────────────
-      // borrow_requests may store: copy_id in copy_label, book UUID in book_id,
-      // or even a copy UUID as the book_title (depends on mobile app version).
-      // We try every possible field to find the right book_copies row.
+   
       console.log('[Approve] pendingReq fields:', {
         book_id: pendingReq.book_id,
         copy_label: pendingReq.copy_label,
@@ -1092,7 +1076,7 @@ export default function BookManagement({ initialTab }) {
       let resolvedBookId = null;
       let usedCopyId     = null;
 
-      // Step 1: Try copy_label as a copy_id directly
+  
       if (pendingReq.copy_label) {
         const { data: byCopyLabel } = await supabaseAdmin
           .from('book_copies').select('copy_id, book_id, status')
@@ -1104,7 +1088,7 @@ export default function BookManagement({ initialTab }) {
         }
       }
 
-      // Step 2: Try book_id field as book UUID → find first available copy
+     
       if (!resolvedBookId && pendingReq.book_id) {
         const { data: byBookId } = await supabaseAdmin
           .from('book_copies').select('copy_id, book_id, status')
@@ -1117,7 +1101,7 @@ export default function BookManagement({ initialTab }) {
         }
       }
 
-      // Step 3: Try book_title as a copy_id (mobile stores copy UUID in title field)
+
       if (!resolvedBookId && pendingReq.book_title) {
         const UUID_RE2 = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         if (UUID_RE2.test(pendingReq.book_title)) {
@@ -1129,7 +1113,7 @@ export default function BookManagement({ initialTab }) {
             if (byTitle.status === 'Available') usedCopyId = byTitle.copy_id;
             console.log('[Approve] Step3 book_title-as-copy_id match:', byTitle);
           }
-          // Also try as book_id
+    
           if (!resolvedBookId) {
             const { data: byTitleAsBook } = await supabaseAdmin
               .from('book_copies').select('copy_id, book_id, status')
@@ -1146,7 +1130,7 @@ export default function BookManagement({ initialTab }) {
 
       console.log('[Approve] resolved → bookId:', resolvedBookId, '| copyId:', usedCopyId);
 
-      // Step 4: Mark the copy as Borrowed
+      
       if (usedCopyId) {
         const { error: copyErr } = await supabaseAdmin
           .from('book_copies').update({ status: 'Borrowed' }).eq('copy_id', usedCopyId);
@@ -1156,13 +1140,13 @@ export default function BookManagement({ initialTab }) {
         console.warn('[Approve] ⚠️ Could not find an available copy to mark Borrowed');
       }
 
-      // Step 5: Sync books table so catalog count updates
+      
       if (resolvedBookId) {
         await syncBooksFromCopies(resolvedBookId);
         console.log('[Approve] ✅ books table synced for bookId:', resolvedBookId);
       }
 
-      // Mark request approved (non-fatal if it fails)
+     
       const { error: updateErr } = await supabaseAdmin
         .from('borrow_requests')
         .update({ status: 'approved', reviewed_at: new Date().toISOString() })
@@ -1180,7 +1164,7 @@ export default function BookManagement({ initialTab }) {
     }
   }, [loadPendingRequests, loadTransactions]);
 
-  // ── Reject Pending Request ───────────────────────────────────────────────
+
   const rejectPendingRequest = useCallback(async (pendingReq) => {
     try {
       setProcessingPendingId(pendingReq.id);
@@ -1205,22 +1189,20 @@ export default function BookManagement({ initialTab }) {
     }
   }, [loadPendingRequests, showToast]);
 
-  // ── Sync copy statuses from active borrowings (repair stale data) ──────────
-  // Runs once on mount. Fixes copies that show "Borrowed" in book_copies but
-  // have no active borrowing row — e.g. after a failed scan or manual DB edit.
+
   const syncCopyStatuses = useCallback(async () => {
     try {
-      // Get all book_copies rows
+     
       const { data: allCopies } = await supabaseAdmin
         .from('book_copies').select('copy_id, book_id, status');
       if (!allCopies?.length) return;
 
-      // Get all currently active borrowings (status = 'Borrowed')
+
       const { data: activeBorrowings } = await supabaseAdmin
         .from('borrowings').select('copy_label').eq('status', 'Borrowed');
       const activeCopyIds = new Set((activeBorrowings || []).map(b => b.copy_label).filter(Boolean));
 
-      // Find copies marked Borrowed but with no active borrowing — reset them
+
       const stale = allCopies.filter(c => c.status === 'Borrowed' && !activeCopyIds.has(c.copy_id));
       for (const copy of stale) {
         await supabaseAdmin.from('book_copies')
@@ -1228,7 +1210,7 @@ export default function BookManagement({ initialTab }) {
         console.log('[sync] Reset stale copy to Available:', copy.copy_id);
       }
 
-      // Also resync books.copies (total) and books.status for all affected books
+
       const affectedBookIds = [...new Set([...allCopies.map(c => c.book_id)])];
       for (const bookId of affectedBookIds) {
         await syncBooksFromCopies(bookId);
@@ -1241,12 +1223,12 @@ export default function BookManagement({ initialTab }) {
   useEffect(() => { loadTransactions(); loadPendingRequests(); syncCopyStatuses(); }, [loadTransactions, loadPendingRequests, syncCopyStatuses]);
 
   useEffect(() => {
-    // Channel 1: borrow_requests — instant updates without full refetch
+   
     const chReq = supabase.channel('borrow-requests-rt')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrow_requests' }, (payload) => {
         const newRow = payload.new;
         if (newRow?.status === 'pending') {
-          // Add new request to top of list instantly
+
           setPendingRequests(prev =>
             prev.some(r => r.id === newRow.id) ? prev : [newRow, ...prev]
           );
@@ -1260,7 +1242,7 @@ export default function BookManagement({ initialTab }) {
       })
       .on('postgres_changes', { event:'UPDATE', schema:'public', table:'borrow_requests' }, (payload) => {
         const updated = payload.new;
-        // Remove from pending list if no longer pending (approved/rejected)
+        
         setPendingRequests(prev =>
           updated.status === 'pending'
             ? prev.map(r => r.id === updated.id ? updated : r)
@@ -1273,7 +1255,7 @@ export default function BookManagement({ initialTab }) {
       })
       .subscribe();
 
-    // Channel 2: borrowings — smart incremental update, no loading flash
+
     const chBorrow = supabaseAdmin.channel('borrowings-rt')
       .on('postgres_changes', { event:'INSERT', schema:'public', table:'borrowings' }, (payload) => {
         const newRow = payload.new;
@@ -1297,7 +1279,7 @@ export default function BookManagement({ initialTab }) {
     };
   }, []);
 
-  // ── Scanner focus management ─────────────────────────────────────────────
+
   const refocusIfSafe = useCallback(() => {
     clearTimeout(refocusRef.current);
     refocusRef.current = setTimeout(() => {
@@ -1314,7 +1296,7 @@ export default function BookManagement({ initialTab }) {
     return () => { clearInterval(poll); clearTimeout(refocusRef.current); clearTimeout(timerRef.current); };
   }, [refocusIfSafe]);
 
-  // ── Process student scan ─────────────────────────────────────────────────
+  
   const processStudentScan = useCallback(async (raw) => {
     const parsed = parseStudentQR(raw);
     if (!parsed) {
@@ -1324,17 +1306,15 @@ export default function BookManagement({ initialTab }) {
       return;
     }
 
-    // profiles schema: first_name, last_name, middle_name, username, student_number, program
-    // Try to match by student_number first, then username, then name fallback
     let profile = null;
     if (parsed.id_no) {
-      // 1. Try student_number column (the dedicated human-readable ID field)
+   
       const { data: byStudentNo } = await supabaseAdmin
         .from('profiles').select('*')
         .eq('student_number', parsed.id_no).maybeSingle();
       profile = byStudentNo;
 
-      // 2. Fallback: try username column (some setups store student ID there)
+     
       if (!profile) {
         const { data: byUsername } = await supabaseAdmin
           .from('profiles').select('*')
@@ -1354,31 +1334,29 @@ export default function BookManagement({ initialTab }) {
       profile = byName;
     }
 
-    // Normalise: always expose id_no and full_name regardless of source
-    // id_no must be the human-readable student number (never a UUID)
+    
     const studentData = profile
       ? {
           ...profile,
-          // Priority: student_number column → username (if not UUID) → QR-parsed id_no
+          
           id_no: (() => {
             if (profile.student_number && !UUID_RE.test(String(profile.student_number))) return String(profile.student_number).trim();
             if (profile.username && !UUID_RE.test(String(profile.username))) return String(profile.username).trim();
             if (parsed.id_no && !UUID_RE.test(String(parsed.id_no))) return String(parsed.id_no).trim();
-            return ''; // no readable number available
+            return ''; 
           })(),
           full_name: [profile.first_name, profile.middle_name, profile.last_name]
                        .filter(Boolean).join(' ').trim() || parsed.full_name,
           program:   profile.program || parsed.program || '',
         }
-      : { ...parsed, id_no: parsed.id_no || '' }; // fallback: use QR-parsed values directly
+      : { ...parsed, id_no: parsed.id_no || '' }; 
 
     setStudent(studentData);
     setStep(1);
     showToast(`Student: ${studentData.full_name}`, 'success');
   }, [showToast]);
 
-  // ── Process book scan ────────────────────────────────────────────────────
-  // FIX: Complete rewrite of borrow/return detection and student_number saving
+ 
   const processBookScan = useCallback(async (raw) => {
     if (!student) { setStep(0); return; }
     const parsed = parseBookQR(raw);
@@ -1389,13 +1367,13 @@ export default function BookManagement({ initialTab }) {
       setStep(0); setStudent(null); return;
     }
 
-    // ── Prevent double-scan / re-entrant processing ────────────────────────
+   
     if (processingRef.current) return;
     processingRef.current = true;
     setStep(2);
 
     try {
-      // ── Book lookup cascade ──────────────────────────────────────────────
+   
       let bookRecord = null;
       let resolvedCopyId  = null;
       let resolvedCopyNum = null;
@@ -1440,9 +1418,7 @@ export default function BookManagement({ initialTab }) {
       const bookTitle = bookRecord.title;
       const copyLabel = resolvedCopyId ? resolvedCopyId : (parsed.copyLabel || parsed.base);
 
-      // ── FIX #1: Resolve the readable student number ─────────────────────
-      // Priority: profiles.student_number → QR-parsed id_no → profiles.username
-      // NEVER store a UUID as student_number.
+
       const readableStudentNo = (() => {
         const candidates = [
           student.student_number,
@@ -1456,7 +1432,7 @@ export default function BookManagement({ initialTab }) {
         return '';
       })();
 
-      // The profile UUID — used as the foreign key in borrowings.student_id_no
+   
       const studentUUID = (student.id && UUID_RE.test(String(student.id)))
         ? String(student.id).trim()
         : null;
@@ -1464,9 +1440,7 @@ export default function BookManagement({ initialTab }) {
       console.log('[BookScan] copy_label:', copyLabel);
       console.log('[BookScan] studentUUID:', studentUUID, '| studentNumber:', readableStudentNo, '| name:', student.full_name);
 
-      // ── FIX #2: Find open borrows for this EXACT copy ──────────────────
-      // DB column is student_id (uuid FK to profiles.id), NOT student_id_no.
-      // student_number is stored inside student_name as a prefix — see insert payload.
+    
       const { data: openBorrowRows, error: openBorrowErr } = await supabaseAdmin
         .from('borrowings')
         .select('id, borrowed_at, book_id, copy_label, student_id, student_name, student_program')
@@ -1482,22 +1456,20 @@ export default function BookManagement({ initialTab }) {
       const allOpenRows = openBorrowRows || [];
       console.log('[BookScan] open borrows for this copy:', allOpenRows.length, allOpenRows);
 
-      // ── FIX #3: Multi-strategy student matching ─────────────────────────
-      // Tries every possible identifier so return always triggers correctly.
+  
       const studentNameNorm = (student.full_name || '').trim().toLowerCase();
 
       const existingBorrow = allOpenRows.find(row => {
-        // Strategy 1: Match by profile UUID in student_id column (most reliable)
+
         if (studentUUID && UUID_RE.test(studentUUID)) {
           const rowId = String(row.student_id || '').trim();
           if (rowId === studentUUID) return true;
         }
-        // Strategy 2: Match by readable student number embedded in student_name
-        // Format saved: "JUAN DELA CRUZ [2023-12345]"
+
         if (readableStudentNo && row.student_name) {
           if (row.student_name.includes(`[${readableStudentNo}]`)) return true;
         }
-        // Strategy 3: Match by full name (unregistered students / QR-only)
+
         if (studentNameNorm && row.student_name) {
           const rowNameBase = row.student_name.replace(/\s*\[.*?\]\s*$/, '').trim().toLowerCase();
           if (rowNameBase === studentNameNorm) return true;
@@ -1507,7 +1479,7 @@ export default function BookManagement({ initialTab }) {
 
       console.log('[BookScan] existingBorrow:', existingBorrow);
 
-      // Guard: copy borrowed by a DIFFERENT student
+
       if (!existingBorrow && allOpenRows.length > 0) {
         const other = allOpenRows[0];
         playErrorSound();
@@ -1516,7 +1488,7 @@ export default function BookManagement({ initialTab }) {
         setStep(0); setStudent(null); processingRef.current = false; return;
       }
 
-      // Decision: no open record → Borrow; has open record → Return
+
       const isBorrow = !existingBorrow;
       console.log('[BookScan] action:', isBorrow ? 'BORROW' : 'RETURN');
 
@@ -1524,17 +1496,17 @@ export default function BookManagement({ initialTab }) {
         showToast(`Returning: "${bookTitle}" — processing…`, 'success');
       }
 
-      // ── Borrow limit check ───────────────────────────────────────────────
+
       if (isBorrow) {
         let borrowedRows = [];
-        // Check by UUID using correct column name: student_id
+     
         if (studentUUID) {
           const { data: byId } = await supabaseAdmin
             .from('borrowings').select('id')
             .eq('student_id', studentUUID).eq('status', 'Borrowed');
           borrowedRows = byId || [];
         }
-        // Also check by name match (catches unregistered students or UUID mismatch)
+
         if (student.full_name) {
           const { data: byName } = await supabaseAdmin
             .from('borrowings').select('id')
@@ -1551,7 +1523,7 @@ export default function BookManagement({ initialTab }) {
           setStep(0); setStudent(null); processingRef.current = false; return;
         }
 
-        // Check this specific copy is actually Available (skip check if returning)
+
         if (resolvedCopyId) {
           const { data: thisCopy } = await supabaseAdmin
             .from('book_copies').select('status').eq('copy_id', resolvedCopyId).maybeSingle();
@@ -1564,7 +1536,7 @@ export default function BookManagement({ initialTab }) {
         }
       }
 
-      // ── FIX #4: Update the specific book_copies row status ──────────────
+
       if (resolvedCopyId) {
         const { error: copyUpdateErr } = await supabaseAdmin
           .from('book_copies')
@@ -1578,19 +1550,17 @@ export default function BookManagement({ initialTab }) {
         console.log('[BookScan] Updated book_copies status to:', isBorrow ? 'Borrowed' : 'Available');
       }
 
-      // ── FIX #5: Recompute books table from book_copies (keeps catalog in sync) ──
+    
       {
         const { total, available } = await syncBooksFromCopies(bookRecord.id);
         console.log('[BookScan] books table synced — total:', total, '| available:', available);
       }
 
       if (isBorrow) {
-        // ── INSERT new borrowing record ──────────────────────────────────
+ 
         const borrowedAt = nowISO();
 
-        // FIX: Use ACTUAL column names from borrowings schema.
-        // student_id = UUID FK (profiles.id)
-        // student_name stores "FULL NAME [student_number]" so we can display both
+ 
         const studentNameWithNo = readableStudentNo
           ? `${student.full_name} [${readableStudentNo}]`
           : student.full_name;
@@ -1616,15 +1586,14 @@ export default function BookManagement({ initialTab }) {
         if (txErr) {
           console.error('[BookScan] Insert error:', txErr);
 
-          // Rollback book_copies
+    
           if (resolvedCopyId) {
             await supabaseAdmin.from('book_copies')
               .update({ status: 'Available' }).eq('copy_id', resolvedCopyId);
           }
           await syncBooksFromCopies(bookRecord.id);
 
-          // FIX: If column doesn't exist yet, retry without unknown columns
-          // This lets the system work even before you run the SQL migration
+ 
           const isColError = txErr.code === '42703' ||
             txErr.message?.includes('column') ||
             txErr.message?.includes('student_number') ||
@@ -1633,7 +1602,7 @@ export default function BookManagement({ initialTab }) {
 
           if (isColError) {
             console.warn('[BookScan] Column error — retrying with minimal payload');
-            // Retry with only columns guaranteed to exist in your schema
+      
             const minimalPayload = {
               student_id:      studentUUID || undefined,
               student_name:    studentNameWithNo,
@@ -1646,7 +1615,7 @@ export default function BookManagement({ initialTab }) {
               returned_at:     null,
               date:            today(),
             };
-            // Remove undefined keys
+           
             Object.keys(minimalPayload).forEach(k => minimalPayload[k] === undefined && delete minimalPayload[k]);
             const { data: retryTx, error: retryErr } = await supabaseAdmin
               .from('borrowings').insert([minimalPayload]).select().single();
@@ -1675,17 +1644,17 @@ export default function BookManagement({ initialTab }) {
         setTransactions(prev => [result, ...prev]);
 
       } else {
-        // ── UPDATE existing borrowing record to returned ─────────────────
+      
         const returnedAt = nowISO();
 
         const { error: retErr } = await supabaseAdmin
           .from('borrowings')
           .update({ status: 'Returned', returned_at: returnedAt })
-          .eq('id', existingBorrow.id);  // ← exact row by primary key
+          .eq('id', existingBorrow.id);  
 
         if (retErr) {
           console.error('[BookScan] Return update error:', retErr);
-          // Rollback book_copies
+        
           if (resolvedCopyId) {
             await supabaseAdmin.from('book_copies')
               .update({ status: 'Borrowed' }).eq('copy_id', resolvedCopyId);
@@ -1701,7 +1670,7 @@ export default function BookManagement({ initialTab }) {
         const result = {
           id:              existingBorrow.id,
           student_id:      existingBorrow.student_id,
-          student_name:    existingBorrow.student_name, // keep original with [number] intact
+          student_name:    existingBorrow.student_name, 
           student_program: student.program || existingBorrow.student_program || '',
           book_id:         bookId,
           book_title:      bookTitle,
@@ -1729,7 +1698,6 @@ export default function BookManagement({ initialTab }) {
     processingRef.current = false;
   }, [student, showToast, loadTransactions]);
 
-  // ── Keyboard handler ─────────────────────────────────────────────────────
   const handleKeyDown = useCallback((e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;
     if (e.key === 'Enter') {
@@ -1749,8 +1717,8 @@ export default function BookManagement({ initialTab }) {
     inputRef.current?.focus({ preventScroll:true });
   };
 
-  // ── Delete transaction ──────────────────────────────────────────────────
-  const [deleteConfirm, setDeleteConfirm] = useState(null); // holds tx to delete
+ 
+  const [deleteConfirm, setDeleteConfirm] = useState(null); 
 
   const handleDeleteTx = useCallback((tx) => {
     setDeleteConfirm(tx);
@@ -1770,7 +1738,7 @@ export default function BookManagement({ initialTab }) {
     }
   }, [deleteConfirm, showToast]);
 
-  // ── Filtered transactions ────────────────────────────────────────────────
+
   const filtered = transactions.filter(tx => {
     const q = search.toLowerCase();
     const studentNoEmbedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
@@ -1782,12 +1750,12 @@ export default function BookManagement({ initialTab }) {
   const borrowedCount = transactions.filter(t => t.status?.toLowerCase() === 'borrowed').length;
   const returnedToday = transactions.filter(t => t.status?.toLowerCase() === 'returned' && t.date === today()).length;
 
-  // ────────────────────────────────────────────────────────────────────────────
+
   return (
     <div className="lm-module" style={{ userSelect:'none' }}>
       <style>{TAB_CSS}</style>
 
-      {/* Hidden keyboard capture — always mounted so scanner works on both tabs */}
+    
       <input
         ref={inputRef} onKeyDown={handleKeyDown}
         onBlur={() => { setFocused(false); refocusIfSafe(); }}
@@ -1861,12 +1829,10 @@ export default function BookManagement({ initialTab }) {
         </button>
       </div>
 
-      {/* ══════════════════════════════════════════════════════════
-          SCANNER TAB
-      ══════════════════════════════════════════════════════════ */}
+ 
       {activeTab === 'scanner' && <>
 
-      {/* ── Scanner Panel ── */}
+ 
       <div style={{
         borderRadius:20,
         border:'1.5px solid rgba(139,0,0,0.14)',
@@ -1875,7 +1841,7 @@ export default function BookManagement({ initialTab }) {
         marginBottom:24, overflow:'hidden',
         position:'relative',
       }}>
-        {/* Decorative top bar */}
+     
         <div style={{
           height:4,
           background:`linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
@@ -1883,7 +1849,7 @@ export default function BookManagement({ initialTab }) {
           animation:'bm-shimmer-bar 3s ease-in-out infinite',
         }}/>
 
-        {/* Header */}
+      
         <div style={{
           padding:'20px 28px 0',
           display:'flex', alignItems:'center', justifyContent:'space-between',
@@ -1913,7 +1879,7 @@ export default function BookManagement({ initialTab }) {
             </div>
           </div>
 
-          {/* Focus indicator only */}
+          
           <div style={{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:6 }}>
             <div style={{
               display:'inline-flex', alignItems:'center', gap:5,
@@ -1938,7 +1904,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         </div>
 
-        {/* Step indicator */}
+        
         <div style={{ padding:'22px 28px 0', display:'flex', alignItems:'center', justifyContent:'center', gap:0 }}>
           <StepDot n={1} active={step === 0} done={step > 0} label="Scan ID" />
           <div style={{
@@ -1968,7 +1934,7 @@ export default function BookManagement({ initialTab }) {
           <StepDot n={3} active={step === 2} done={false} label="Process" />
         </div>
 
-        {/* Scan zones */}
+       
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, padding:'16px 28px' }}>
           <ScanZone
             stepNum={1}
@@ -1986,7 +1952,7 @@ export default function BookManagement({ initialTab }) {
           />
         </div>
 
-        {/* Student chip — shown when student scanned */}
+       
         {student && (
           <div style={{ padding:'0 28px 16px' }}>
             <div style={{
@@ -2034,7 +2000,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         )}
 
-        {/* Processing state */}
+       
         {step === 2 && (
           <div style={{ padding:'0 28px 16px' }}>
             <div style={{
@@ -2050,7 +2016,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         )}
 
-        {/* Last result — fades in on scan, fades out and disappears after ~4 s */}
+        
         {lastResult && (
           <div
             key={lastResult.time?.getTime?.() ?? Math.random()}
@@ -2067,7 +2033,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         )}
 
-        {/* Footer bar */}
+        
         <div style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
           padding:'11px 28px',
@@ -2089,15 +2055,13 @@ export default function BookManagement({ initialTab }) {
         </div>
       </div>
 
-      </>}{/* end scanner tab */}
+      </>}
 
 
-      {/* ══════════════════════════════════════════════════════════
-          PENDING REQUESTS TAB
-      ══════════════════════════════════════════════════════════ */}
+
       {activeTab === 'pending' && <>
 
-        {/* ── Section header ── */}
+        
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           marginBottom: 24, flexWrap: 'wrap', gap: 10,
@@ -2134,7 +2098,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         </div>
 
-        {/* ── New request alert banner ── */}
+        
         {newPendingAlert && (
           <div style={{
             marginBottom: 18,
@@ -2167,7 +2131,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         )}
 
-        {/* ── Error banner ── */}
+        
         {pendingError && (
           <div style={{
             marginBottom: 16, padding: '13px 16px',
@@ -2192,7 +2156,7 @@ export default function BookManagement({ initialTab }) {
           </div>
         )}
 
-        {/* ── Loading ── */}
+      
         {loadingPending ? (
           <div style={{
             borderRadius: 16, border: `1.5px solid rgba(139,0,0,0.12)`,
@@ -2206,7 +2170,7 @@ export default function BookManagement({ initialTab }) {
           </div>
 
         ) : pendingRequests.length === 0 ? (
-          /* ── Empty state ── */
+          
           <div style={{
             borderRadius: 16, overflow: 'hidden',
             border: `1.5px solid rgba(139,0,0,0.12)`,
@@ -2239,7 +2203,7 @@ export default function BookManagement({ initialTab }) {
           </div>
 
         ) : (
-          /* ── Request cards ── */
+          
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {pendingRequests.map((req, idx) => {
               const isProcessing = processingPendingId === req.id;
@@ -2263,7 +2227,7 @@ export default function BookManagement({ initialTab }) {
                   transition: 'all 0.2s ease',
                   opacity: isProcessing ? 0.85 : 1,
                 }}>
-                  {/* Card top accent */}
+                  
                   <div style={{
                     height: 3,
                     background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G})`,
@@ -2271,7 +2235,7 @@ export default function BookManagement({ initialTab }) {
 
                   <div style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
 
-                    {/* Index badge */}
+                  
                     <div style={{
                       width: 36, height: 36, borderRadius: 10, flexShrink: 0,
                       background: `linear-gradient(135deg, ${MAR}, ${MAR2})`,
@@ -2283,7 +2247,7 @@ export default function BookManagement({ initialTab }) {
                       </span>
                     </div>
 
-                    {/* Student info */}
+                    
                     <div style={{ flex: '1 1 160px', minWidth: 0 }}>
                       <div style={{
                         fontFamily: "'Cinzel', serif", fontSize: 13.5, fontWeight: 700,
@@ -2299,10 +2263,10 @@ export default function BookManagement({ initialTab }) {
                       )}
                     </div>
 
-                    {/* Divider */}
+                    
                     <div style={{ width: 1, height: 36, background: 'rgba(139,0,0,0.12)', flexShrink: 0, display: 'none' }} className="pr-divider"/>
 
-                    {/* Book info */}
+                   
                     <div style={{ flex: '2 1 200px', minWidth: 0 }}>
                       <div style={{
                         fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
@@ -2323,7 +2287,7 @@ export default function BookManagement({ initialTab }) {
                       )}
                     </div>
 
-                    {/* Timestamp */}
+                   
                     <div style={{ flexShrink: 0, textAlign: 'right', minWidth: 64 }}>
                       <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
                         {timeAgo}
@@ -2335,7 +2299,7 @@ export default function BookManagement({ initialTab }) {
                       )}
                     </div>
 
-                    {/* Action buttons */}
+                    
                     <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
                       <button
                         onClick={() => confirmPendingRequest(req)}
@@ -2387,18 +2351,16 @@ export default function BookManagement({ initialTab }) {
             })}
           </div>
         )}
-      </>}{/* end pending tab */}
+      </>}
 
 
-      {/* ══════════════════════════════════════════════════════════
-          TRANSACTION HISTORY TAB
-      ══════════════════════════════════════════════════════════ */}
+      
       {activeTab === 'history' && <>
 
-      {/* ── Transaction Table ── */}
+      
       <div className="lm-panel" style={{ marginBottom:0, padding:0, overflow:'visible', borderRadius:14, border:'1.5px solid rgba(139,0,0,0.14)' }}>
 
-        {/* Table header bar */}
+       
         <div style={{
           display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:12,
           padding:'16px 20px',

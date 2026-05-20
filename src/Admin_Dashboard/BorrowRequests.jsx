@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 
-// ─── Design tokens (match BookManagement palette) ─────────────────────────────
+
 const G    = '#C9A84C';
 const GP   = '#F5E4A8';
 const MAR  = '#8B0000';
@@ -14,7 +14,7 @@ const fmtFull = (iso) => iso
   ? new Date(iso).toLocaleString('en-PH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
   : '—';
 
-// ─── Reused from BookManagement (copy if not importable) ─────────────────────
+
 async function syncBooksFromCopies(bookId) {
   const { data: allCopies } = await supabaseAdmin
     .from('book_copies').select('status').eq('book_id', bookId);
@@ -32,7 +32,7 @@ async function syncBooksFromCopies(bookId) {
   return { total, available };
 }
 
-// ─── Status badge ─────────────────────────────────────────────────────────────
+
 function StatusPill({ status }) {
   const cfg = {
     pending:  { bg:'rgba(201,168,76,0.12)', color:'#b08020', border:'rgba(201,168,76,0.30)' },
@@ -53,7 +53,7 @@ function StatusPill({ status }) {
   );
 }
 
-// ─── Confirm Dialog ───────────────────────────────────────────────────────────
+
 function ConfirmDialog({ req, action, onConfirm, onCancel, busy }) {
   if (!req || !action) return null;
   const isApprove = action === 'approve';
@@ -69,7 +69,7 @@ function ConfirmDialog({ req, action, onConfirm, onCancel, busy }) {
         boxShadow:'0 24px 64px rgba(0,0,0,0.55)',
         overflow:'hidden',
       }}>
-        {/* Header */}
+    
         <div style={{
           background:`linear-gradient(135deg,${MAR},${MAR2})`,
           padding:'18px 24px', display:'flex', alignItems:'center', gap:12,
@@ -149,7 +149,6 @@ function ConfirmDialog({ req, action, onConfirm, onCancel, busy }) {
   );
 }
 
-// ─── Request Row ──────────────────────────────────────────────────────────────
 function RequestRow({ req, onApprove, onReject }) {
   const [hov, setHov] = useState(false);
   const isPending = req.status === 'pending';
@@ -201,7 +200,7 @@ function RequestRow({ req, onApprove, onReject }) {
       <td style={{ padding:'11px 14px', textAlign:'center' }} onClick={e => e.stopPropagation()}>
         {isPending ? (
           <div style={{ display:'flex', gap:7, justifyContent:'center' }}>
-            {/* APPROVE */}
+        
             <button
               onClick={() => onApprove(req)}
               title="Approve borrow request"
@@ -248,17 +247,17 @@ function RequestRow({ req, onApprove, onReject }) {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+
 export default function BorrowRequests({ onBadgeCount }) {
   const [requests,    setRequests]    = useState([]);
   const [loading,     setLoading]     = useState(true);
-  const [filter,      setFilter]      = useState('pending');   // pending | approved | rejected | all
-  const [confirm,     setConfirm]     = useState(null);        // { req, action }
+  const [filter,      setFilter]      = useState('pending');  
+  const [confirm,     setConfirm]     = useState(null);      
   const [busy,        setBusy]        = useState(false);
-  const [banner,      setBanner]      = useState(null);        // { msg, ok }
+  const [banner,      setBanner]      = useState(null);        
   const bannerTimer = useRef(null);
 
-  // ── Load requests ──────────────────────────────────────────────────────────
+
   const loadRequests = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabaseAdmin
@@ -274,7 +273,7 @@ export default function BorrowRequests({ onBadgeCount }) {
     setLoading(false);
   }, [onBadgeCount]);
 
-  // ── Real-time subscription ─────────────────────────────────────────────────
+ 
   useEffect(() => {
     loadRequests();
 
@@ -284,7 +283,7 @@ export default function BorrowRequests({ onBadgeCount }) {
         (payload) => {
           const newRow = payload.new;
           setRequests(prev => {
-            // Avoid duplicates
+          
             if (prev.some(r => r.id === newRow.id)) return prev;
             const updated = [newRow, ...prev];
             const pendingCount = updated.filter(r => r.status === 'pending').length;
@@ -320,16 +319,14 @@ export default function BorrowRequests({ onBadgeCount }) {
     return () => supabase.removeChannel(ch);
   }, [loadRequests, onBadgeCount]);
 
-  // ── Show feedback banner ───────────────────────────────────────────────────
+
   const showBanner = (msg, ok = true) => {
     if (bannerTimer.current) clearTimeout(bannerTimer.current);
     setBanner({ msg, ok });
     bannerTimer.current = setTimeout(() => setBanner(null), 3500);
   };
 
-  // ── APPROVE handler ────────────────────────────────────────────────────────
-  // This is the ONLY place that marks a book as Borrowed.
-  // It runs exclusively when an admin clicks Approve.
+
   const handleApprove = async () => {
     if (!confirm?.req) return;
     const req = confirm.req;
@@ -339,14 +336,11 @@ export default function BorrowRequests({ onBadgeCount }) {
       const bookId = req.book_id;
       if (!bookId) throw new Error('No book_id on this request. Cannot approve.');
 
-      // ── 1. Resolve which copy to mark as Borrowed ───────────────────────
-      //    Prefer a UUID copy_id stored directly on the request.
-      //    If absent, find any Available copy of this book.
       const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let resolvedCopyId = UUID_RE.test(req.copy_id) ? req.copy_id : null;
 
       if (!resolvedCopyId) {
-        // Find the first Available copy for this book
+      
         const { data: availCopies, error: findErr } = await supabaseAdmin
           .from('book_copies')
           .select('copy_id, status')
@@ -363,7 +357,7 @@ export default function BorrowRequests({ onBadgeCount }) {
         }
         resolvedCopyId = availCopies[0].copy_id;
       } else {
-        // We have a specific copy_id — verify it's still Available
+    
         const { data: copyRow } = await supabaseAdmin
           .from('book_copies')
           .select('status')
@@ -377,26 +371,24 @@ export default function BorrowRequests({ onBadgeCount }) {
         }
       }
 
-      // ── 2. Update borrow_requests.status = 'approved' ───────────────────
+
       const { error: reqErr } = await supabaseAdmin
         .from('borrow_requests')
         .update({ status: 'approved', reviewed_at: nowISO() })
         .eq('id', req.id);
       if (reqErr) throw new Error(`Request update failed: ${reqErr.message}`);
 
-      // ── 3. Mark the resolved copy as Borrowed in book_copies ────────────
+
       const { error: copyErr } = await supabaseAdmin
         .from('book_copies')
         .update({ status: 'Borrowed' })
         .eq('copy_id', resolvedCopyId);
       if (copyErr) throw new Error(`Copy update failed: ${copyErr.message}`);
 
-      // ── 4. Recompute books.copies + books.available_copies + books.status ─
+
       await syncBooksFromCopies(bookId);
 
-      // ── 5. Insert ONE borrowings row so it appears in Transaction History ─
-      //    Guard: skip if a non-returned row already exists for this request
-      //    to prevent duplicate history entries on double-click.
+
       const { data: existing } = await supabaseAdmin
         .from('borrowings')
         .select('id')
@@ -420,7 +412,7 @@ export default function BorrowRequests({ onBadgeCount }) {
           returned_at:       null,
           date:              today(),
         };
-        // Strip undefined values only (keep nulls for nullable columns)
+     
         Object.keys(borrowingPayload).forEach(k => {
           if (borrowingPayload[k] === undefined) delete borrowingPayload[k];
         });
@@ -446,8 +438,7 @@ export default function BorrowRequests({ onBadgeCount }) {
     setBusy(false);
   };
 
-  // ── REJECT handler ─────────────────────────────────────────────────────────
-  // Only updates borrow_requests.status. Does NOT touch books or book_copies.
+
   const handleReject = async () => {
     if (!confirm?.req) return;
     const req = confirm.req;
@@ -472,18 +463,18 @@ export default function BorrowRequests({ onBadgeCount }) {
     setBusy(false);
   };
 
-  // ── Derived list ───────────────────────────────────────────────────────────
+ 
   const displayed = filter === 'all'
     ? requests
     : requests.filter(r => r.status === filter);
 
   const pendingCount = requests.filter(r => r.status === 'pending').length;
 
-  // ── Render ─────────────────────────────────────────────────────────────────
+
   return (
     <div style={{ fontFamily:'var(--font-sans)' }}>
 
-      {/* ── Banner ── */}
+   
       {banner && (
         <div style={{
           margin:'0 0 16px', padding:'12px 18px', borderRadius:10,
@@ -496,7 +487,7 @@ export default function BorrowRequests({ onBadgeCount }) {
         </div>
       )}
 
-      {/* ── Toolbar ── */}
+  
       <div style={{
         display:'flex', alignItems:'center', justifyContent:'space-between',
         flexWrap:'wrap', gap:10, marginBottom:16,
@@ -533,7 +524,7 @@ export default function BorrowRequests({ onBadgeCount }) {
         </div>
       </div>
 
-      {/* ── Table ── */}
+   
       {loading ? (
         <div style={{ display:'flex', alignItems:'center', gap:10, padding:'48px 0', justifyContent:'center' }}>
           <div className="lm-spinner" />
@@ -581,7 +572,7 @@ export default function BorrowRequests({ onBadgeCount }) {
         </div>
       )}
 
-      {/* ── Confirm Dialog ── */}
+     
       {confirm && (
         <ConfirmDialog
           req={confirm.req}
