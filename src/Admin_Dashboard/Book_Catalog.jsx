@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
 import { extractAbstractText } from '../ocrClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
@@ -206,6 +207,10 @@ function ImageUploadField({ label, value, preview, onFileChange, accept = 'image
 }
 
 function BookFormModal({ book, onClose, onSaved }) {
+  // Phase 9 — campus isolation
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const isEdit = Boolean(book?.id);
   const [form, setForm]         = useState(book ? { ...EMPTY_FORM, ...book } : { ...EMPTY_FORM });
   const [errors, setErrors]     = useState({});
@@ -293,8 +298,10 @@ function BookFormModal({ book, onClose, onSaved }) {
         const { error } = await supabaseAdmin.from('books').update(rest).eq('id', id);
         if (error) throw error;
       } else {
+        // Phase 9: stamp campus_id so this book belongs to the librarian's campus
+        const insertPayload = { ...rest, ...(campusId ? { campus_id: campusId } : {}) };
         const { data: inserted, error } = await supabaseAdmin
-          .from('books').insert(rest).select('id').single();
+          .from('books').insert(insertPayload).select('id').single();
         if (error) throw error;
         bookId = inserted.id;
       }
@@ -1513,6 +1520,10 @@ function DeleteModal({ book, loading, onClose, onConfirm }) {
 }
 
 export default function Book_Catalog() {
+  // Phase 9 — campus isolation
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [books, setBooks]         = useState([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -1538,11 +1549,26 @@ export default function Book_Catalog() {
   const fetchBooks = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
-      const [{ data: booksData, error: booksErr }, { data: copiesData }] = await Promise.all([
-        supabase.from('books').select('*').order('created_at', { ascending: false }),
-        supabaseAdmin.from('book_copies').select('book_id, status'),
-      ]);
+      let qBooks    = supabase.from('books').select('*').order('created_at', { ascending: false });
+      let qCopies   = supabaseAdmin.from('book_copies').select('book_id, status, books!inner(campus_id)');
+      // Active borrowings are the source of truth for what's actually out on loan —
+      // book_copies.status can fall out of sync (e.g. a status update silently fails
+      // during approval), so we cross-check against 'borrowings' to make sure books
+      // that are genuinely borrowed always get counted here too. Fetched without a
+      // join (status matched case-insensitively, filtered to this campus below using
+      // the book ids we already have) so it can't silently come back empty.
+      let qBorrowed = supabaseAdmin.from('borrowings').select('book_id, status').ilike('status', 'borrowed');
+      if (campusId) {
+        qBooks  = qBooks.eq('campus_id', campusId);
+        qCopies = qCopies.eq('books.campus_id', campusId);
+      }
+      const [
+        { data: booksData, error: booksErr },
+        { data: copiesData },
+        { data: borrowedData, error: borrowedErr },
+      ] = await Promise.all([qBooks, qCopies, qBorrowed]);
       if (booksErr) throw booksErr;
+      if (borrowedErr) console.warn('[Book_Catalog] borrowings fetch error:', borrowedErr.message);
 
       const copiesMap = {};
       (copiesData || []).forEach(c => {
@@ -1551,14 +1577,26 @@ export default function Book_Catalog() {
         if (c.status === 'Available') copiesMap[c.book_id].available += 1;
       });
 
+      const bookIdSet = new Set((booksData || []).map(b => b.id));
+      const borrowedCountMap = {};
+      (borrowedData || []).forEach(r => {
+        if (!bookIdSet.has(r.book_id)) return; // keep it scoped to this campus's books
+        borrowedCountMap[r.book_id] = (borrowedCountMap[r.book_id] || 0) + 1;
+      });
+
       const merged = (booksData || []).map(b => {
+        const activeBorrowed = borrowedCountMap[b.id] || 0;
         const counts = copiesMap[b.id];
-        if (!counts) return b; 
+        const total = counts ? counts.total : (parseInt(b.copies) || 0);
+        // Never let "available" exceed what active borrowings say is actually out,
+        // even if book_copies.status wasn't updated correctly.
+        const available = Math.max(0, Math.min(counts ? counts.available : total, total - activeBorrowed));
+        if (!counts && !activeBorrowed) return b;
         return {
           ...b,
-          copies:           counts.total,
-          available_copies: counts.available,
-          status:           counts.available > 0 ? 'Available' : (counts.total > 0 ? 'Borrowed' : b.status),
+          copies:           total,
+          available_copies: available,
+          status:           available > 0 ? 'Available' : (total > 0 ? 'Borrowed' : b.status),
         };
       });
 
@@ -1568,7 +1606,7 @@ export default function Book_Catalog() {
     } finally {
       if (showSpinner) setLoading(false);
     }
-  }, []);
+  }, [campusId]);
 
   useEffect(() => { fetchBooks(true); }, [fetchBooks]);
 
@@ -1698,7 +1736,13 @@ export default function Book_Catalog() {
 
   const totalBooks      = booksWithStatus.length;
   const totalCopies     = booksWithStatus.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
-  const availableCount  = booksWithStatus.reduce((s, b) => s + (parseInt(b.available_copies) ?? (b.status === 'Available' ? parseInt(b.copies) || 0 : 0)), 0);
+  const availableCount  = booksWithStatus.reduce((s, b) => {
+    // parseInt() returns NaN (not null/undefined) when available_copies is
+    // missing, so `??` never falls through — check with Number.isFinite instead.
+    const parsed = parseInt(b.available_copies);
+    const av = Number.isFinite(parsed) ? parsed : (b.status === 'Available' ? (parseInt(b.copies) || 0) : 0);
+    return s + av;
+  }, 0);
   const borrowedCount   = totalCopies - availableCount;
 
   const selectStyle = {

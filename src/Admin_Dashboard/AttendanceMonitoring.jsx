@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 const fmt      = (d, opts) => new Intl.DateTimeFormat('en-PH', opts).format(d);
 const fmtTime  = (d) => fmt(new Date(d), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -568,6 +569,11 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
   );
 }
 function VisitorHistoryTable({ onFocusChange }) {
+  // Phase 9 — campus isolation: a librarian only ever sees their own
+  // campus's visitor/attendance history here.
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [records,  setRecords]  = useState([]);
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
@@ -579,9 +585,11 @@ function VisitorHistoryTable({ onFocusChange }) {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      let q = supabase
         .from('attendance_logs').select('*')
         .order('time_in', { ascending: false }).limit(500);
+      if (campusId) q = q.eq('campus_id', campusId);
+      const { data, error } = await q;
       if (error) throw error;
       setRecords(data || []);
     } catch (err) {
@@ -590,13 +598,15 @@ function VisitorHistoryTable({ onFocusChange }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [campusId]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
   useEffect(() => {
     const ch = supabase.channel('visitor-history-rt')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
+        // Phase 9: ignore realtime rows from other campuses
+        if (campusId && payload.new.campus_id !== campusId) return;
         setRecords(prev => prev.some(r => r.id === payload.new.id) ? prev : [payload.new, ...prev]);
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'attendance_logs' }, (payload) => {
@@ -604,7 +614,7 @@ function VisitorHistoryTable({ onFocusChange }) {
       })
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, []);
+  }, [campusId]);
 
   const handleDelete = useCallback(async () => {
     const rec = delConfirm;
@@ -820,6 +830,10 @@ function VisitorHistoryTable({ onFocusChange }) {
 }
 
 export default function AttendanceMonitoring() {
+  // Phase 9 — campus isolation
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [activeTab,   setActiveTab]   = useState('scanner');
   const [records,     setRecords]     = useState([]);
   const [loading,     setLoading]     = useState(true);
@@ -833,9 +847,11 @@ export default function AttendanceMonitoring() {
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      let q = supabase
         .from('attendance_logs').select('*')
         .eq('date', today()).order('time_in', { ascending: false });
+      if (campusId) q = q.eq('campus_id', campusId);
+      const { data, error } = await q;
       if (error) throw error;
       const now        = new Date();
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
@@ -849,7 +865,7 @@ export default function AttendanceMonitoring() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [campusId]);
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
@@ -858,6 +874,7 @@ export default function AttendanceMonitoring() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, (payload) => {
         const rec = payload.new;
         if (rec.date !== today()) return;
+        if (campusId && rec.campus_id !== campusId) return; // Phase 9: other-campus scan, ignore
         setRecords(prev => {
           if (prev.some(r => r.id === rec.id)) return prev;
           const isNewUniqueStudent = rec.id_no
@@ -876,7 +893,7 @@ export default function AttendanceMonitoring() {
       })
       .subscribe();
     return () => supabase.removeChannel(channel);
-  }, []);
+  }, [campusId]);
 
   const handleScan = useCallback(async (raw) => {
     const parsed = parseQR(raw);
@@ -887,7 +904,12 @@ export default function AttendanceMonitoring() {
       return;
     }
     const now    = new Date();
-    const record = { id_no: parsed.id_no, full_name: parsed.full_name, program: parsed.program, time_in: now.toISOString(), date: today(), status: 'time-in' };
+    const record = {
+      id_no: parsed.id_no, full_name: parsed.full_name, program: parsed.program,
+      time_in: now.toISOString(), date: today(), status: 'time-in',
+      // Phase 9: stamp campus_id so this visit belongs to this librarian's campus
+      ...(campusId ? { campus_id: campusId } : {}),
+    };
     try {
       const { data, error } = await supabase.from('attendance_logs').insert([record]).select().single();
       if (error) throw error;
@@ -906,7 +928,7 @@ export default function AttendanceMonitoring() {
     }
     clearTimeout(resultTimer.current);
     resultTimer.current = setTimeout(() => setScanResult(null), 6000);
-  }, []);
+  }, [campusId]);
 
   const handleDelete = useCallback(async (id) => {
     const { error } = await supabase.from('attendance_logs').delete().eq('id', id);

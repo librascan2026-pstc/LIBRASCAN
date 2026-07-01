@@ -141,13 +141,19 @@ export default function Dashboard({ user, onSignOut }) {
   }, [playNotifSound]);
 
   
+  // Phase 9 — campus isolation: notifications should only surface borrow
+  // requests for books that belong to this librarian's own campus.
+  const campusId = profile?.campus_id ?? null;
+
   const fetchPendingRequests = useCallback(async (isRealtime = false) => {
-    const { data, error } = await supabase
+    let q = supabase
       .from('borrow_requests')
-      .select('id, student_name, book_title, created_at, status')
+      .select(campusId ? 'id, student_name, book_title, created_at, status, books!inner(campus_id)' : 'id, student_name, book_title, created_at, status')
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
       .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('books.campus_id', campusId);
+    const { data, error } = await q;
 
     if (error) { console.error('[Dashboard] notif fetch error:', error.message); return; }
 
@@ -183,7 +189,7 @@ export default function Dashboard({ user, onSignOut }) {
     }));
 
     addNotifications(newNotifs, isRealtime);
-  }, [addNotifications]);
+  }, [addNotifications, campusId]);
 
 
   useEffect(() => {

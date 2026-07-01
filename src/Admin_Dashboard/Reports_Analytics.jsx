@@ -26,6 +26,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES
@@ -38,7 +39,8 @@ const RA_STYLES = `
   @keyframes ra-count    { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
   @keyframes ra-pop      { from{opacity:0;transform:scale(.90)} to{opacity:1;transform:scale(1)} }
 
-  .ra-root { animation:ra-fade-in .38s ease both; }
+  .ra-root { animation:ra-fade-in .38s ease both; max-width:100%; min-width:0; overflow-x:hidden; }
+  .ra-root * { box-sizing:border-box; }
 
   .ra-two-col   { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:20px; }
   .ra-three-col { display:grid; grid-template-columns:1fr 1fr 1fr; gap:14px; margin-bottom:20px; }
@@ -49,15 +51,13 @@ const RA_STYLES = `
   .ra-sh-title::before { content:''; width:3px; height:13px; border-radius:2px; flex-shrink:0; background:linear-gradient(180deg,var(--maroon-light),var(--maroon-deep)); }
   .ra-sh-meta { font-family:var(--font-sans); font-size:11px; color:var(--text-dim); }
 
-  .ra-stat-grid { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:22px; }
-  @media(max-width:900px){ .ra-stat-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
-  @media(max-width:600px){ .ra-stat-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-  .ra-stat { background:var(--cream-light); border:1px solid rgba(139,0,0,0.12); border-radius:var(--radius-md); padding:12px 14px; position:relative; overflow:hidden; transition:box-shadow var(--ease),transform var(--ease),border-color var(--ease); animation:ra-count .38s ease both; min-width:0; box-sizing:border-box; }
+  .ra-root .ra-stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:22px; width:100%; box-sizing:border-box; }
+  .ra-root .ra-stat { background:var(--cream-light); border:1px solid rgba(139,0,0,0.12); border-radius:var(--radius-md); padding:14px 16px; position:relative; overflow:hidden; transition:box-shadow var(--ease),transform var(--ease),border-color var(--ease); animation:ra-count .38s ease both; width:100%; min-width:0; box-sizing:border-box; }
   .ra-stat:hover { box-shadow:0 6px 22px rgba(50,0,0,0.12); transform:translateY(-2px); border-color:rgba(139,0,0,0.24); }
   .ra-stat::after { content:''; position:absolute; bottom:0; left:0; right:0; height:3px; border-radius:0 0 var(--radius-md) var(--radius-md); background:var(--ra-ac,#8B0000); opacity:.60; }
-  .ra-stat-lbl { font-family:var(--font-sans); font-size:9.5px; font-weight:700; letter-spacing:.11em; text-transform:uppercase; color:var(--text-dim); margin-bottom:7px; }
-  .ra-stat-val { font-family:var(--font-display); font-size:clamp(20px,2.2vw,28px); font-weight:700; color:var(--maroon-deep); line-height:1; margin-bottom:5px; }
-  .ra-stat-sub { font-family:var(--font-sans); font-size:10px; color:var(--text-muted); }
+  .ra-stat-lbl { font-family:var(--font-sans); font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; }
+  .ra-stat-val { font-family:var(--font-display); font-size:clamp(22px,2.4vw,30px); font-weight:700; color:var(--maroon-deep); line-height:1; margin-bottom:5px; }
+  .ra-stat-sub { font-family:var(--font-sans); font-size:11px; color:var(--text-muted); }
   .ra-stat-ico { position:absolute; right:12px; top:12px; opacity:.08; color:var(--maroon-mid); }
   .ra-alert-stat { background:linear-gradient(135deg,rgba(139,0,0,0.08),rgba(139,0,0,0.04)); border-color:rgba(139,0,0,0.22) !important; }
   .ra-alert-stat .ra-stat-val { color:#8B0000; }
@@ -70,19 +70,19 @@ const RA_STYLES = `
 
   .ra-sk { border-radius:5px; background:linear-gradient(90deg,rgba(139,0,0,0.06) 25%,rgba(139,0,0,0.10) 50%,rgba(139,0,0,0.06) 75%); background-size:1200px 100%; animation:ra-shimmer 1.4s infinite linear; }
 
-  .ra-hbars { display:flex; flex-direction:column; gap:9px; }
-  .ra-hbar-row { display:flex; align-items:center; gap:9px; }
-  .ra-hbar-rank { font-family:var(--font-display); font-size:10px; font-weight:700; color:var(--text-dim); min-width:18px; text-align:right; flex-shrink:0; }
-  .ra-hbar-label { font-family:var(--font-sans); font-size:11px; color:var(--text-secondary); min-width:80px; max-width:140px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .ra-hbar-track { flex:1; height:14px; background:rgba(139,0,0,0.07); border-radius:99px; overflow:hidden; position:relative; }
+  .ra-hbars { display:flex; flex-direction:column; gap:12px; }
+  .ra-hbar-row { display:flex; align-items:center; gap:12px; }
+  .ra-hbar-rank { font-family:var(--font-display); font-size:12px; font-weight:700; color:var(--text-dim); min-width:24px; text-align:right; flex-shrink:0; }
+  .ra-hbar-label { font-family:var(--font-sans); font-size:13px; color:var(--text-secondary); min-width:110px; max-width:220px; flex-shrink:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ra-hbar-track { flex:1; height:18px; background:rgba(139,0,0,0.07); border-radius:99px; overflow:hidden; position:relative; }
   .ra-hbar-fill { height:100%; border-radius:99px; width:var(--bw,0%); animation:ra-bar-grow .65s cubic-bezier(.4,0,.2,1) both; }
   .ra-hbar-fill.gold   { background:linear-gradient(90deg,#C9A84C,#E0BE72); }
   .ra-hbar-fill.maroon { background:linear-gradient(90deg,#8B0000,#C00000); }
   .ra-hbar-fill.blue   { background:linear-gradient(90deg,#1A4DA0,#2E6DC8); }
   .ra-hbar-fill.teal   { background:linear-gradient(90deg,#0D7377,#14A085); }
   .ra-hbar-fill.purple { background:linear-gradient(90deg,#5B2C8D,#8E44AD); }
-  .ra-hbar-val { font-family:var(--font-sans); font-size:10.5px; color:var(--text-dim); min-width:32px; text-align:left; flex-shrink:0; font-weight:600; }
-  .ra-hbar-pct { font-family:var(--font-sans); font-size:9.5px; color:var(--text-dim); min-width:36px; flex-shrink:0; }
+  .ra-hbar-val { font-family:var(--font-sans); font-size:12.5px; color:var(--text-dim); min-width:40px; text-align:left; flex-shrink:0; font-weight:600; }
+  .ra-hbar-pct { font-family:var(--font-sans); font-size:11px; color:var(--text-dim); min-width:44px; flex-shrink:0; }
 
   .ra-donut-wrap { display:flex; align-items:center; gap:20px; flex-wrap:wrap; justify-content:center; }
   .ra-legend { display:flex; flex-direction:column; gap:7px; flex:1; min-width:120px; }
@@ -163,15 +163,102 @@ const RA_STYLES = `
     display:flex;
     flex-direction:column;
     flex-shrink:0;
-    width:152px;
+    width:clamp(112px, 22vw, 180px);
     scroll-snap-align:start;
     box-shadow:0 4px 18px rgba(30,0,0,0.10);
   }
   .ra-book-card:hover { box-shadow:0 12px 36px rgba(50,0,0,0.20); transform:translateY(-6px); border-color:rgba(139,0,0,0.30); }
 
+  /* ---------- Top Books — auto-running carousel ---------- */
+  .ra-carousel-wrap {
+    position:relative;
+    overflow:hidden;
+    border-radius:var(--radius-md);
+    background:rgba(139,0,0,0.025);
+    border:1px solid rgba(139,0,0,0.10);
+    padding:18px 0 14px;
+    margin-bottom:20px;
+    max-width:100%;
+    width:100%;
+    min-width:0;
+    box-sizing:border-box;
+  }
+  .ra-carousel-wrap::before,
+  .ra-carousel-wrap::after {
+    content:'';
+    position:absolute;
+    top:0; bottom:0;
+    width:clamp(24px,6vw,64px);
+    z-index:3;
+    pointer-events:none;
+  }
+  .ra-carousel-wrap::before { left:0;  background:linear-gradient(90deg, var(--cream-light,#FDF8F0) 0%, rgba(253,248,240,0) 100%); }
+  .ra-carousel-wrap::after  { right:0; background:linear-gradient(270deg, var(--cream-light,#FDF8F0) 0%, rgba(253,248,240,0) 100%); }
+
+  /* The outer viewport must ONLY clip content — it must never be natively
+     scrollable, because native scroll (scrollLeft) fights the JS-driven
+     transform below. That conflict is exactly what made the strip look
+     "cut" / broken once the book count (and therefore track width) grew
+     past a couple of items. Dragging is handled manually in JS instead
+     (see pointer handlers), so it stays correct no matter how many books
+     are in the list. */
+  .ra-carousel-track-outer {
+    overflow:hidden;
+    width:100%;
+    max-width:100%;
+    min-width:0;
+    touch-action:pan-y;
+  }
+  .ra-carousel-track {
+    display:flex;
+    flex-wrap:nowrap;
+    gap:16px;
+    width:max-content;
+    padding:0 30px;
+    will-change:transform;
+    cursor:grab;
+    user-select:none;
+  }
+  .ra-carousel-track.dragging { cursor:grabbing; }
+  .ra-carousel-hint {
+    text-align:center;
+    font-size:10.5px;
+    color:var(--text-dim);
+    font-family:var(--font-sans);
+    margin-top:8px;
+    opacity:0.65;
+  }
+
+  /* Manual prev/next arrows — an alternative way to navigate the strip,
+     works identically whether there are 2 books or 10. */
+  .ra-carousel-arrow {
+    position:absolute;
+    top:50%;
+    transform:translateY(-50%);
+    z-index:4;
+    width:34px;
+    height:34px;
+    border-radius:50%;
+    border:1px solid rgba(139,0,0,0.22);
+    background:var(--cream-light,#FDF8F0);
+    color:var(--maroon-deep);
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    box-shadow:0 4px 14px rgba(50,0,0,0.16);
+    transition:all .18s;
+  }
+  .ra-carousel-arrow:hover { background:var(--maroon-deep); color:#F5E4A8; border-color:var(--maroon-deep); transform:translateY(-50%) scale(1.06); }
+  .ra-carousel-arrow.prev { left:8px; }
+  .ra-carousel-arrow.next { right:8px; }
+  @media(max-width:480px) {
+    .ra-carousel-arrow { width:28px; height:28px; }
+  }
+
   /* Cover thumbnail — deep maroon background with padded cover image */
   .ra-book-thumb {
-    height:160px;
+    height:188px;
     background:linear-gradient(160deg,#7A0000 0%,#4A0000 100%);
     display:flex;
     align-items:center;
@@ -590,8 +677,8 @@ const RA_STYLES = `
   .ra-pg-btn.active { background:linear-gradient(135deg,var(--maroon-mid),var(--maroon-deep)); color:var(--gold-pale); border-color:rgba(201,168,76,0.26); font-weight:600; }
   .ra-pg-btn:disabled { opacity:.30; cursor:not-allowed; }
 
-  .ra-nav-tabs { display:flex; gap:2px; border-bottom:2px solid rgba(139,0,0,0.10); margin-bottom:20px; overflow-x:auto; }
-  .ra-nav-tab { padding:9px 18px; background:transparent; border:none; border-bottom:2px solid transparent; font-family:var(--font-sans); font-size:12px; font-weight:500; color:var(--text-muted); cursor:pointer; white-space:nowrap; transition:all var(--ease); margin-bottom:-2px; display:flex; align-items:center; gap:6px; }
+  .ra-nav-tabs { display:flex; gap:3px; border-bottom:2px solid rgba(139,0,0,0.10); margin-bottom:20px; overflow-x:auto; }
+  .ra-nav-tab { padding:10px 20px; background:transparent; border:none; border-bottom:2px solid transparent; font-family:var(--font-sans); font-size:13px; font-weight:500; color:var(--text-muted); cursor:pointer; white-space:nowrap; transition:all var(--ease); margin-bottom:-2px; display:flex; align-items:center; gap:7px; }
   .ra-nav-tab:hover { color:var(--maroon-mid); }
   .ra-nav-tab.active { color:var(--maroon-deep); border-bottom-color:var(--maroon-mid); font-weight:700; }
 
@@ -615,7 +702,7 @@ const RA_STYLES = `
   .ra-mod-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 
   @media(max-width:1200px) {
-    .ra-stat-grid { grid-template-columns:repeat(3,1fr); }
+    .ra-stat-grid { grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); }
     .ra-two-col   { grid-template-columns:1fr; }
     .ra-three-col { grid-template-columns:1fr 1fr; }
     .ra-book-grid { grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); }
@@ -623,12 +710,12 @@ const RA_STYLES = `
     .ra-book-thumb { height:148px; }
   }
   @media(max-width:768px) {
-    .ra-stat-grid { grid-template-columns:repeat(2,1fr); }
+    .ra-stat-grid { grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:10px; }
     .ra-three-col { grid-template-columns:1fr; }
     .ra-toolbar   { flex-direction:column; align-items:stretch; }
     .ra-search    { max-width:100%; }
     .ra-sp        { display:none; }
-    .ra-hbar-label{ min-width:62px; max-width:90px; font-size:10px; }
+    .ra-hbar-label{ min-width:72px; max-width:110px; font-size:11.5px; }
     .ra-mod-hd    { flex-direction:column; }
     .ra-book-card { width:128px; border-radius:14px; }
     .ra-book-thumb { height:136px; padding:10px 14px; }
@@ -641,8 +728,9 @@ const RA_STYLES = `
     .ra-nav-tab { padding:8px 12px; font-size:11px; }
   }
   @media(max-width:480px) {
-    .ra-stat-grid { grid-template-columns:1fr 1fr; }
-    .ra-stat-val  { font-size:22px; }
+    .ra-stat-grid { grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
+    .ra-stat-val  { font-size:20px; }
+    .ra-stat      { padding:11px 12px; }
     .ra-book-grid { grid-template-columns:repeat(2,1fr); }
     .ra-pg        { flex-direction:column; align-items:flex-start; }
     .ra-book-card { width:112px; border-radius:12px; }
@@ -656,7 +744,26 @@ const RA_STYLES = `
     .ra-book-modal-overlay { padding:12px; }
     .ra-sh-title   { font-size:11px; }
     .ra-mod-title  { font-size:16px; }
+    .ra-carousel-track { padding:0 14px; gap:10px; }
+    .ra-carousel-wrap::before, .ra-carousel-wrap::after { width:28px; }
   }
+  @media(max-width:360px) {
+    .ra-stat-grid { grid-template-columns:1fr 1fr; gap:6px; }
+    .ra-stat      { padding:9px 10px; }
+    .ra-stat-val  { font-size:18px; }
+    .ra-stat-lbl  { font-size:9.5px; }
+    .ra-book-card { width:96px; }
+    .ra-book-thumb{ height:104px; padding:6px 8px; }
+  }
+  @media(min-width:1600px) {
+    .ra-book-card   { width:210px; }
+    .ra-book-thumb  { height:220px; }
+    .ra-hbar-label  { max-width:280px; }
+    .ra-hbar-track  { height:20px; }
+    .ra-nav-tab     { font-size:13.5px; padding:11px 24px; }
+    .ra-stat        { padding:16px 18px; }
+  }
+
 `;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1236,13 +1343,13 @@ function BookModalSlide({ book, rank, period, isActive }) {
       let row = null;
       if (book.book_id) {
         const { data } = await supabase.from('books')
-          .select('id,title,author,authors,year_published,isbn,total_pages,pages,shelf_location,genre,copies,available_copies,color,colors,date_added,created_at,cover_image_url,publisher,edition')
+          .select('id,title,authors,isbn,shelf_location,genre,copies,color,created_at,cover_image_url,publisher,edition,year,status')
           .eq('id', book.book_id).limit(1).single();
         row = data;
       }
       if (!row && book.title) {
         const { data } = await supabase.from('books')
-          .select('id,title,author,authors,year_published,isbn,total_pages,pages,shelf_location,genre,copies,available_copies,color,colors,date_added,created_at,cover_image_url,publisher,edition')
+          .select('id,title,authors,isbn,shelf_location,genre,copies,color,created_at,cover_image_url,publisher,edition,year,status')
           .eq('title', (book.title||'').trim()).limit(1).single();
         row = data;
       }
@@ -1442,98 +1549,102 @@ function TabBooks({ data, loading, period }) {
   const periodLabel = period==='7d'?'Last 7 Days':period==='30d'?'Last 30 Days':'Last 1 Year';
   const totalBorrows = topBooks.reduce((s,b)=>s+b.count,0);
 
-  // ── Drag-to-scroll refs ──
-  const stripRef = useRef(null);
-  const isDragging = useRef(false);
-  const startX = useRef(0);
-  const scrollLeft = useRef(0);
-  const didDrag = useRef(false);
+  // ── Auto-running carousel refs (same pattern as the Super Admin campus carousel) ──
+  const trackRef   = useRef(null);
+  const offsetRef  = useRef(0);
+  const rafRef     = useRef(null);
+  const pausedRef  = useRef(false);
+  const dragRef    = useRef({ active:false, startX:0, startOffset:0, moved:false });
+  const [dragging, setDragging] = useState(false);
 
-  // Custom scrollbar state
-  const [thumbLeft, setThumbLeft] = useState(0);
-  const [thumbWidth, setThumbWidth] = useState(30);
-  const trackRef = useRef(null);
-  const thumbDragging = useRef(false);
-  const thumbStartX = useRef(0);
-  const thumbStartScroll = useRef(0);
+  const loopBooks = topBooks.length ? [...topBooks, ...topBooks, ...topBooks] : [];
 
-  const updateThumb = () => {
-    const el = stripRef.current;
-    if (!el) return;
-    const ratio = el.clientWidth / el.scrollWidth;
-    const w = Math.max(ratio * 100, 8);
-    const left = (el.scrollLeft / el.scrollWidth) * 100;
-    setThumbWidth(w);
-    setThumbLeft(left);
+  // Books changed (e.g. period switched from 7 days → 30 days) — the old
+  // offset belongs to a track of a different width, so reset instead of
+  // carrying over a stale value that would visually "jump"/misalign.
+  useEffect(() => {
+    offsetRef.current = 0;
+    if (trackRef.current) trackRef.current.style.transform = 'translateX(0px)';
+  }, [topBooks.length, period]);
+
+  useEffect(() => {
+    if (!topBooks.length) return;
+    const speed = 0.5;
+    const step = () => {
+      if (!pausedRef.current && !dragRef.current.active && trackRef.current) {
+        const third = trackRef.current.scrollWidth / 3 || 1;
+        offsetRef.current -= speed;
+        if (offsetRef.current <= -third) offsetRef.current += third;
+        if (offsetRef.current > 0) offsetRef.current -= third;
+        trackRef.current.style.transform = `translateX(${offsetRef.current}px)`;
+      }
+      rafRef.current = requestAnimationFrame(step);
+    };
+    rafRef.current = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [topBooks.length]);
+
+  // Manual step — used by the prev/next arrows. Keeps the offset inside
+  // the same [-third, 0] loop range the auto-play uses, so the two never
+  // fight each other regardless of how many books are in the strip.
+  const nudgeTimeoutRef = useRef(null);
+  const nudge = (dir) => {
+    if (!trackRef.current) return;
+    const cardEl = trackRef.current.firstElementChild;
+    const cardW = (cardEl?.getBoundingClientRect().width || 180) + 16; // + gap
+    const third = trackRef.current.scrollWidth / 3 || 1;
+    offsetRef.current -= dir * cardW;
+    if (offsetRef.current <= -third) offsetRef.current += third;
+    if (offsetRef.current > 0) offsetRef.current -= third;
+    trackRef.current.style.transform = `translateX(${offsetRef.current}px)`;
+    pausedRef.current = true;
+    clearTimeout(nudgeTimeoutRef.current);
+    nudgeTimeoutRef.current = setTimeout(() => { pausedRef.current = false; }, 1800);
   };
 
-  // Strip mouse drag handlers
-  const onStripMouseDown = (e) => {
-    if (e.button !== 0) return;
-    isDragging.current = true;
-    didDrag.current = false;
-    startX.current = e.pageX - stripRef.current.offsetLeft;
-    scrollLeft.current = stripRef.current.scrollLeft;
-    stripRef.current.style.cursor = 'grabbing';
-    stripRef.current.style.userSelect = 'none';
+  // Manual drag-to-swipe (mouse + touch) — replaces native overflow
+  // scrolling, which was the root cause of the strip breaking once it
+  // had more cards. Works the same for 2 books or 10.
+  const onDragStart = (clientX) => {
+    dragRef.current = { active:true, startX:clientX, startOffset:offsetRef.current, moved:false };
+    pausedRef.current = true;
+    setDragging(true);
   };
-  const onStripMouseMove = (e) => {
-    if (!isDragging.current) return;
-    e.preventDefault();
-    const x = e.pageX - stripRef.current.offsetLeft;
-    const walk = (x - startX.current) * 1.2;
-    if (Math.abs(walk) > 4) didDrag.current = true;
-    stripRef.current.scrollLeft = scrollLeft.current - walk;
-    updateThumb();
+  const onDragMove = (clientX) => {
+    if (!dragRef.current.active || !trackRef.current) return;
+    const dx = clientX - dragRef.current.startX;
+    if (Math.abs(dx) > 3) dragRef.current.moved = true;
+    let next = dragRef.current.startOffset + dx;
+    const third = trackRef.current.scrollWidth / 3 || 1;
+    // wrap so dragging feels infinite in both directions
+    while (next <= -third) next += third;
+    while (next > 0) next -= third;
+    offsetRef.current = next;
+    trackRef.current.style.transform = `translateX(${next}px)`;
   };
-  const onStripMouseUp = () => {
-    isDragging.current = false;
-    if (stripRef.current) {
-      stripRef.current.style.cursor = 'grab';
-      stripRef.current.style.userSelect = '';
+  const onDragEnd = (e) => {
+    if (!dragRef.current.active) return;
+    const wasTap = !dragRef.current.moved;
+    dragRef.current.active = false;
+    setDragging(false);
+    setTimeout(() => { pausedRef.current = false; }, 400);
+
+    // A tap (pointerdown → pointerup with no real movement) should open
+    // the book's details. We resolve this manually via elementFromPoint
+    // instead of relying on the browser's native "click" event, because
+    // setPointerCapture (used above for smooth dragging) retargets pointer
+    // events and can prevent click from ever reaching the card underneath.
+    if (wasTap && e && typeof e.clientX === 'number') {
+      const hit = document.elementFromPoint(e.clientX, e.clientY);
+      const cardEl = hit?.closest('[data-carousel-idx]');
+      if (cardEl) {
+        const idx = Number(cardEl.getAttribute('data-carousel-idx'));
+        const b = loopBooks[idx];
+        if (b) setSelectedBook({ book:b, rank:(idx % topBooks.length) + 1 });
+      }
     }
   };
 
-  // Thumb drag handlers
-  const onThumbMouseDown = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    thumbDragging.current = true;
-    thumbStartX.current = e.clientX;
-    thumbStartScroll.current = stripRef.current.scrollLeft;
-    document.addEventListener('mousemove', onThumbMouseMove);
-    document.addEventListener('mouseup', onThumbMouseUp);
-  };
-  const onThumbMouseMove = (e) => {
-    if (!thumbDragging.current || !trackRef.current || !stripRef.current) return;
-    const trackW = trackRef.current.offsetWidth;
-    const el = stripRef.current;
-    const scrollRatio = el.scrollWidth / trackW;
-    const dx = e.clientX - thumbStartX.current;
-    el.scrollLeft = thumbStartScroll.current + dx * scrollRatio;
-    updateThumb();
-  };
-  const onThumbMouseUp = () => {
-    thumbDragging.current = false;
-    document.removeEventListener('mousemove', onThumbMouseMove);
-    document.removeEventListener('mouseup', onThumbMouseUp);
-  };
-
-  // Arrow buttons
-  const scrollBy = (dir) => {
-    if (!stripRef.current) return;
-    stripRef.current.scrollBy({ left: dir * 200, behavior: 'smooth' });
-    setTimeout(updateThumb, 320);
-  };
-
-  useEffect(() => {
-    const el = stripRef.current;
-    if (!el) return;
-    updateThumb();
-    el.addEventListener('scroll', updateThumb);
-    window.addEventListener('resize', updateThumb);
-    return () => { el.removeEventListener('scroll', updateThumb); window.removeEventListener('resize', updateThumb); };
-  }, [topBooks]);
 
   return (
     <>
@@ -1550,111 +1661,55 @@ function TabBooks({ data, loading, period }) {
         <span className="ra-sh-meta">Click a book to view details</span>
       </div>
 
-      {/* Strip container */}
-      <div style={{
-        background:'rgba(139,0,0,0.025)',
-        border:'1px solid rgba(139,0,0,0.10)',
-        borderRadius:'var(--radius-md)',
-        padding:'14px 12px 10px',
-        marginBottom:20,
-        position:'relative',
-      }}>
-        {/* Arrow buttons */}
-        <div style={{position:'absolute', top:'50%', left:6, transform:'translateY(-60%)', zIndex:10}}>
-          <button onClick={()=>scrollBy(-1)} style={{
-            width:26, height:26, borderRadius:'50%', border:'1px solid rgba(139,0,0,0.22)',
-            background:'var(--cream-light)', color:'var(--maroon-mid)', cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center', fontSize:13,
-            boxShadow:'0 2px 6px rgba(0,0,0,0.10)',
-          }}>‹</button>
-        </div>
-        <div style={{position:'absolute', top:'50%', right:6, transform:'translateY(-60%)', zIndex:10}}>
-          <button onClick={()=>scrollBy(1)} style={{
-            width:26, height:26, borderRadius:'50%', border:'1px solid rgba(139,0,0,0.22)',
-            background:'var(--cream-light)', color:'var(--maroon-mid)', cursor:'pointer',
-            display:'flex', alignItems:'center', justifyContent:'center', fontSize:13,
-            boxShadow:'0 2px 6px rgba(0,0,0,0.10)',
-          }}>›</button>
-        </div>
-
-        {/* Scrollable strip */}
+      {/* Auto-running carousel */}
+      <div
+        className="ra-carousel-wrap"
+        onMouseEnter={() => { pausedRef.current = true; }}
+        onMouseLeave={() => { pausedRef.current = false; onDragEnd(); }}
+      >
+        {!loading && topBooks.length > 1 && (
+          <button type="button" className="ra-carousel-arrow prev" aria-label="Previous"
+            onClick={()=>nudge(-1)}>{Ic.chevronLeft ? Ic.chevronLeft(16) : '‹'}</button>
+        )}
         <div
-          ref={stripRef}
-          onMouseDown={onStripMouseDown}
-          onMouseMove={onStripMouseMove}
-          onMouseUp={onStripMouseUp}
-          onMouseLeave={onStripMouseUp}
-          style={{
-            display:'flex',
-            gap:16,
-            overflowX:'hidden',
-            padding:'4px 30px 8px',
-            cursor:'grab',
-            scrollSnapType:'x mandatory',
-            WebkitOverflowScrolling:'touch',
-          }}
+          className="ra-carousel-track-outer"
+          onPointerDown={e=>{ e.currentTarget.setPointerCapture?.(e.pointerId); onDragStart(e.clientX); }}
+          onPointerMove={e=>{ if (dragRef.current.active) onDragMove(e.clientX); }}
+          onPointerUp={onDragEnd}
+          onPointerLeave={onDragEnd}
+          onPointerCancel={onDragEnd}
         >
-          {loading
-            ? Array.from({length:8}).map((_,i)=>(
-                <div key={i} className="ra-book-card" style={{pointerEvents:'none'}}>
-                  <div className="ra-sk" style={{height:110,borderRadius:'14px 14px 0 0'}}/>
-                  <div style={{padding:'9px 10px',display:'flex',flexDirection:'column',gap:6}}>
-                    <div className="ra-sk" style={{height:10,width:'90%',borderRadius:4}}/>
-                    <div className="ra-sk" style={{height:10,width:'55%',borderRadius:4}}/>
-                  </div>
-                </div>
-              ))
-            : topBooks.length
-              ? topBooks.map((b,i)=>(
-                  <div key={i} style={{flexShrink:0}} onClick={()=>{ if(!didDrag.current) setSelectedBook({book:b,rank:i+1}); }}>
-                    <BookCard book={b} rank={i+1} delay={i*0.05} onClick={()=>{}}/>
+          <div className={`ra-carousel-track${dragging ? ' dragging' : ''}`} ref={trackRef}>
+            {loading
+              ? Array.from({length:8}).map((_,i)=>(
+                  <div key={i} className="ra-book-card" style={{pointerEvents:'none'}}>
+                    <div className="ra-sk" style={{height:110,borderRadius:'14px 14px 0 0'}}/>
+                    <div style={{padding:'9px 10px',display:'flex',flexDirection:'column',gap:6}}>
+                      <div className="ra-sk" style={{height:10,width:'90%',borderRadius:4}}/>
+                      <div className="ra-sk" style={{height:10,width:'55%',borderRadius:4}}/>
+                    </div>
                   </div>
                 ))
-              : <div className="ra-empty" style={{width:'100%'}}>{Ic.empty()}<div className="ra-empty-h">No borrow data</div></div>
-          }
+              : loopBooks.length
+                ? loopBooks.map((b,i)=>{
+                    const rank = (i % topBooks.length) + 1;
+                    return (
+                      <div key={`${b.book_id || b.title}-${i}`} data-carousel-idx={i} style={{flexShrink:0}}>
+                        <BookCard book={b} rank={rank} delay={0} onClick={()=>{}}/>
+                      </div>
+                    );
+                  })
+                : <div className="ra-empty" style={{width:'100%'}}>{Ic.empty()}<div className="ra-empty-h">No borrow data</div></div>
+            }
+          </div>
         </div>
-
-        {/* Custom drag scrollbar */}
-        <div
-          ref={trackRef}
-          style={{
-            margin:'4px 30px 2px',
-            height:10,
-            background:'rgba(139,0,0,0.08)',
-            borderRadius:99,
-            position:'relative',
-            cursor:'pointer',
-          }}
-          onClick={(e) => {
-            if (thumbDragging.current) return;
-            const rect = trackRef.current.getBoundingClientRect();
-            const clickPct = (e.clientX - rect.left) / rect.width;
-            const el = stripRef.current;
-            el.scrollLeft = clickPct * el.scrollWidth - el.clientWidth / 2;
-            updateThumb();
-          }}
-        >
-          <div
-            onMouseDown={onThumbMouseDown}
-            style={{
-              position:'absolute',
-              top:0, bottom:0,
-              left:`${thumbLeft}%`,
-              width:`${thumbWidth}%`,
-              background:'linear-gradient(90deg,#8B0000,#C00000)',
-              borderRadius:99,
-              cursor:'grab',
-              transition:'width 0.1s',
-              boxShadow:'0 1px 4px rgba(139,0,0,0.25)',
-            }}
-          />
-        </div>
-        <div style={{
-          textAlign:'center', fontSize:10.5, color:'var(--text-dim)',
-          fontFamily:'var(--font-sans)', marginTop:4, opacity:0.65,
-        }}>
-          ← drag to scroll →
-        </div>
+        {!loading && topBooks.length > 1 && (
+          <button type="button" className="ra-carousel-arrow next" aria-label="Next"
+            onClick={()=>nudge(1)}>{Ic.chevronRight ? Ic.chevronRight(16) : '›'}</button>
+        )}
+        {!loading && loopBooks.length > 0 && (
+          <div className="ra-carousel-hint">Hover to pause · drag or use the arrows · click a book to view details</div>
+        )}
       </div>
 
       {/* ── Borrow Frequency — full width expanded bar chart ── */}
@@ -1668,16 +1723,16 @@ function TabBooks({ data, loading, period }) {
               ? <div className="ra-hbars">
                   {topBooks.map((b,i)=>(
                     <div key={i} className="ra-hbar-row" style={{padding:'7px 0',minHeight:34}}>
-                      <span className="ra-hbar-rank" style={{width:32,fontSize:11}}>#{i+1}</span>
-                      <span className="ra-hbar-label" style={{width:160,fontSize:12}} title={b.title}>
+                      <span className="ra-hbar-rank" style={{fontSize:11}}>#{i+1}</span>
+                      <span className="ra-hbar-label" style={{fontSize:12}} title={b.title}>
                         {b.title?.length>22?b.title.slice(0,21)+'…':b.title}
                       </span>
-                      <div className="ra-hbar-track" style={{flex:1,height:18,borderRadius:6}}>
+                      <div className="ra-hbar-track" style={{height:18,borderRadius:6}}>
                         <div className={`ra-hbar-fill ${FILL_CLASSES[i%FILL_CLASSES.length]}`}
                           style={{'--bw':`${pct(b.count,maxB)}%`,height:'100%',borderRadius:6,animationDelay:`${i*0.05}s`}}/>
                       </div>
-                      <span className="ra-hbar-val" style={{width:32,textAlign:'right',fontSize:13,fontWeight:700}}>{fmtNum(b.count)}</span>
-                      <span className="ra-hbar-pct" style={{width:44,textAlign:'right',fontSize:11}}>{pct(b.count,maxB)}%</span>
+                      <span className="ra-hbar-val" style={{fontSize:13,fontWeight:700}}>{fmtNum(b.count)}</span>
+                      <span className="ra-hbar-pct" style={{fontSize:11}}>{pct(b.count,maxB)}%</span>
                     </div>
                   ))}
                 </div>
@@ -2061,7 +2116,7 @@ function TabTrends({ data, loading, period, setPeriod }) {
 
       {/* Summary mini-stats */}
       {!loading && (
-        <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10,marginBottom:18}}>
+        <div className="ra-stat-grid" style={{marginBottom:18}}>
           {[
             {label:'Peak Request Period', val:peakReq?.label||'—',   sub:`${fmtNum(peakReq?.value||0)} requests`,   ac:'#8B0000', ic:Ic.trend},
             {label:'Total Requests',      val:fmtNum(totalReq),      sub:'borrow requests in period',               ac:'#9A5500', ic:Ic.borrowed},
@@ -2157,7 +2212,7 @@ function TabOverdue({ data, loading }) {
   return (
     <>
       {/* Stats */}
-      <div className="ra-stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+      <div className="ra-stat-grid" style={{marginBottom:20}}>
         {[
           {label:'Unreturned Books',    val:fmtNum(overdueList.length),                                    sub:'currently not returned',  ac:'#8B0000', ic:Ic.alert},
           {label:'Students with Books', val:fmtNum(new Set(overdueList.map(o=>o.student_name)).size),      sub:'unique borrowers',        ac:'#9A5500', ic:Ic.users},
@@ -2249,7 +2304,7 @@ function TabAvailability({ data, loading }) {
   return (
     <>
       {/* Quick summary stats */}
-      <div className="ra-stat-grid" style={{gridTemplateColumns:'repeat(4,1fr)',marginBottom:20}}>
+      <div className="ra-stat-grid" style={{marginBottom:20}}>
         {statusRows.map((r,i)=>(
           <div key={i} className="ra-stat" style={{'--ra-ac':r.color}}>
             <div className="ra-stat-ico">{Ic.books(34)}</div>
@@ -2336,7 +2391,7 @@ function TabTransactions({ data, loading }) {
   return (
     <>
       {/* Quick stats */}
-      <div className="ra-stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+      <div className="ra-stat-grid" style={{marginBottom:20}}>
         {[
           {label:'Total Transactions', val:fmtNum(transactions.length), sub:'all records combined',          ac:'#8B0000', ic:Ic.trend},
           {label:'Currently Borrowed', val:fmtNum(borrowed),            sub:'active unreturned check-outs', ac:'#9A5500', ic:Ic.borrowed},
@@ -2633,7 +2688,7 @@ function TabAttendance({ data, loading, period }) {
   return (
     <>
       {/* Stats */}
-      <div className="ra-stat-grid" style={{gridTemplateColumns:'repeat(3,1fr)',marginBottom:20}}>
+      <div className="ra-stat-grid" style={{marginBottom:20}}>
         {[
           {label:'Total Visits',    val:fmtNum(logs.length),         sub:`${periodLabel} attendance logs`,     ac:'#1A4DA0', ic:Ic.attend},
           {label:'Unique Students', val:fmtNum(uniqueStudents),      sub:'distinct student IDs',               ac:'#0D7377', ic:Ic.users},
@@ -2734,6 +2789,11 @@ function TabAttendance({ data, loading, period }) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ReportsAnalytics() {
+  // Phase 9 — campus isolation: every report/analytics query below is
+  // scoped to the signed-in librarian's campus_id.
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [tab,    setTab]    = useState('books');
   const [period, setPeriod] = useState('30d');
   const [statsLoading, setStatsLoading] = useState(true);
@@ -2760,23 +2820,31 @@ export default function ReportsAnalytics() {
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
+      let qBooks     = supabase.from('books').select('id', { count: 'exact' });
+      let qBorrowed  = supabase.from('borrowings').select('id', { count: 'exact' }).eq('status','Borrowed').is('returned_at',null);
+      let qPending   = supabase.from('borrow_requests').select('id, books!inner(campus_id)', { count: 'exact' }).eq('status','pending');
+      let qReturned  = supabase.from('borrowings').select('id', { count: 'exact' }).not('returned_at','is',null);
+      let qStudents  = supabase.from('profiles').select('id', { count: 'exact' }).eq('role','student');
+
+      if (campusId) {
+        qBooks    = qBooks.eq('campus_id', campusId);
+        qBorrowed = qBorrowed.eq('campus_id', campusId);
+        qPending  = qPending.eq('books.campus_id', campusId);
+        qReturned = qReturned.eq('campus_id', campusId);
+        qStudents = qStudents.eq('campus_id', campusId);
+      }
+
       const [
         { count: totalBooks },
         { count: borrowedCount },
         { count: pendingCount },
         { count: returnedCount },
         { count: studentCount },
-      ] = await Promise.all([
-        supabase.from('books').select('*',{count:'exact',head:true}),
-        supabase.from('borrowings').select('*',{count:'exact',head:true}).eq('status','Borrowed').is('returned_at',null),
-        supabase.from('borrow_requests').select('*',{count:'exact',head:true}).eq('status','pending'),
-        supabase.from('borrowings').select('*',{count:'exact',head:true}).not('returned_at','is',null),
-        supabase.from('profiles').select('*',{count:'exact',head:true}).eq('role','student'),
-      ]);
+      ] = await Promise.all([qBooks, qBorrowed, qPending, qReturned, qStudents]);
       setStats({ totalBooks, borrowedCount, pendingCount, returnedCount, studentCount });
     } catch(e) { console.error('[RA] stats error:', e); }
     finally { setStatsLoading(false); }
-  }, []);
+  }, [campusId]);
 
   // ── Rich analytics ──
   const fetchData = useCallback(async () => {
@@ -2785,58 +2853,79 @@ export default function ReportsAnalytics() {
       const periodDays = period==='7d'?7:period==='30d'?30:365;
       const since = new Date(Date.now() - periodDays * 86400000).toISOString();
 
-      // Fetch all data sources in parallel
+      // Fetch all data sources in parallel — every query scoped to this
+      // librarian's campus_id (Phase 9). borrow_requests / book_copies have
+      // no campus_id column of their own, so they're scoped through an
+      // inner join on their related book's campus_id.
+      let qBorrowings = supabase.from('borrowings')
+        .select('id,student_id,student_number,student_name,student_program,book_id,book_title,status,borrowed_at,returned_at,date')
+        .order('borrowed_at',{ascending:false})
+        .limit(2000);
+
+      let qBorrowingsPeriod = supabase.from('borrowings')
+        .select('id,student_name,book_title,borrowed_at,returned_at,status')
+        .gte('borrowed_at', since)
+        .order('borrowed_at');
+
+      // available_copies is NOT a books column — computed below from book_copies
+      let qBooksRaw = supabase.from('books')
+        .select('id,title,genre,copies,cover_image_url,status')
+        .order('title');
+
+      let qReqPeriod = supabase.from('borrow_requests')
+        .select(campusId ? 'id,student_name,book_title,status,created_at,books!inner(campus_id)' : 'id,student_name,book_title,status,created_at')
+        .gte('created_at', since)
+        .order('created_at');
+
+      let qReqAll = supabase.from('borrow_requests')
+        .select(campusId ? 'id,student_name,student_number,book_title,status,created_at,books!inner(campus_id)' : 'id,student_name,student_number,book_title,status,created_at')
+        .order('created_at',{ascending:false})
+        .limit(500);
+
+      let qAttendRaw = supabase.from('attendance_logs')
+        .select('id,id_no,full_name,program,time_in,date,status')
+        .order('time_in',{ascending:false})
+        .limit(2000);
+
+      // Fetch book_copies to compute available_copies per book
+      let qCopiesRaw = supabase.from('book_copies')
+        .select(campusId ? 'book_id,status,books!inner(campus_id)' : 'book_id,status');
+
+      if (campusId) {
+        qBorrowings       = qBorrowings.eq('campus_id', campusId);
+        qBorrowingsPeriod = qBorrowingsPeriod.eq('campus_id', campusId);
+        qBooksRaw         = qBooksRaw.eq('campus_id', campusId);
+        qReqPeriod        = qReqPeriod.eq('books.campus_id', campusId);
+        qReqAll           = qReqAll.eq('books.campus_id', campusId);
+        qAttendRaw        = qAttendRaw.eq('campus_id', campusId);
+        qCopiesRaw        = qCopiesRaw.eq('books.campus_id', campusId);
+      }
+
       const [
-        { data: borrowings    },   // borrowings history (all time; popularity is filtered to `period` below)
-        { data: borrowingsPeriod }, // borrowings in period (for trends)
-        { data: booksRaw      },   // books catalogue
-        { data: reqPeriod     },   // borrow_requests in period (for request trend)
-        { data: reqAll        },   // borrow_requests all (for transactions)
-        { data: attendRaw     },   // attendance_logs
-      ] = await Promise.all([
-        // All borrowings for book popularity & student activity
-        supabase.from('borrowings')
-          .select('id,student_id,student_number,student_name,student_program,book_id,book_title,status,borrowed_at,returned_at,date')
-          .order('borrowed_at',{ascending:false})
-          .limit(2000),
+        { data: borrowings    },
+        { data: borrowingsPeriod },
+        { data: booksRaw      },
+        { data: reqPeriod     },
+        { data: reqAll        },
+        { data: attendRaw     },
+        { data: copiesRaw     },
+      ] = await Promise.all([qBorrowings, qBorrowingsPeriod, qBooksRaw, qReqPeriod, qReqAll, qAttendRaw, qCopiesRaw]);
 
-        // Borrowings within selected period for trend
-        supabase.from('borrowings')
-          .select('id,student_name,book_title,borrowed_at,returned_at,status')
-          .gte('borrowed_at', since)
-          .order('borrowed_at'),
+      // Compute available_copies per book from book_copies table
+      const availableByBookId = {};
+      (copiesRaw||[]).forEach(c => {
+        if (!c.book_id) return;
+        const k = String(c.book_id);
+        if (!availableByBookId[k]) availableByBookId[k] = 0;
+        if (c.status === 'Available') availableByBookId[k]++;
+      });
 
-        // Full book catalogue
-        supabase.from('books')
-          .select('id,title,genre,available_copies,copies,cover_image_url,status')
-          .order('title'),
-
-        // Borrow requests within period
-        supabase.from('borrow_requests')
-          .select('id,student_name,book_title,status,created_at')
-          .gte('created_at', since)
-          .order('created_at'),
-
-        // All borrow_requests for transactions tab (recent 500)
-        supabase.from('borrow_requests')
-          .select('id,student_name,student_number,book_title,status,created_at')
-          .order('created_at',{ascending:false})
-          .limit(500),
-
-        // Attendance logs — recent 30 days for trend, all for table
-        supabase.from('attendance_logs')
-          .select('id,id_no,full_name,program,time_in,date,status')
-          .order('time_in',{ascending:false})
-          .limit(2000),
-      ]);
-
-      // ── Build book lookup from books table ──
-      // Primary key: book_id (most reliable).
-      // Fallback: normalised title string for books without an id match.
-      const bookById   = {};   // id  -> book record
-      const bookByTitle= {};   // normalised title -> book record
+      // Build book lookups — attach computed available_copies to each book record
+      const bookById   = {};
+      const bookByTitle= {};
       const norm = s => (s||'').trim().toLowerCase();
       (booksRaw||[]).forEach(b=>{
+        b.available_copies = availableByBookId[String(b.id)] ?? 0;
         if(b.id)    bookById[String(b.id)] = b;
         if(b.title) bookByTitle[norm(b.title)] = b;
       });
@@ -3089,7 +3178,7 @@ export default function ReportsAnalytics() {
 
     } catch(e) { console.error('[RA] fetchData error:', e); }
     finally { setDataLoading(false); }
-  }, [period]);
+  }, [period, campusId]);
 
   useEffect(()=>{ fetchStats(); }, [fetchStats]);
   useEffect(()=>{ fetchData();  }, [fetchData]);

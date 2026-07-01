@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
@@ -19,6 +20,8 @@ const Icon = {
 const ROLE_CONFIG = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.12)',  color: '#64b5f6',  border: 'rgba(100,181,246,0.28)' },
   admin:           { label: 'Administrator',   bg: 'rgba(201,168,76,0.14)',  color: '#C9A84C',  border: 'rgba(201,168,76,0.30)' },
+  library_manager: { label: 'Library Manager', bg: 'rgba(139,0,0,0.10)',     color: '#c0392b',  border: 'rgba(139,0,0,0.28)' },
+  super_admin:     { label: 'Super Admin',     bg: 'rgba(90,0,90,0.10)',     color: '#9c27b0',  border: 'rgba(156,39,176,0.28)' },
 };
 
 function RoleBadge({ role }) {
@@ -241,6 +244,7 @@ function UserModal({ user, onClose, onSave }) {
               ...inputStyle(false), appearance: 'none', cursor: 'pointer',
             }}>
               <option value="student">Student</option>
+              <option value="library_manager">Library Manager</option>
               <option value="admin">Administrator</option>
             </select>
             {(form.role === 'library_manager' || form.role === 'admin') && (
@@ -359,6 +363,10 @@ function ConfirmDeleteModal({ user, loading, onClose, onConfirm }) {
 }
 
 export default function UserManagement({ onStatsRefresh }) {
+  // Phase 9 — campus isolation
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [users,      setUsers]      = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
@@ -378,19 +386,23 @@ export default function UserManagement({ onStatsRefresh }) {
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabaseAdmin
+      let _q = supabaseAdmin
         .from('profiles')
-        .select('id, first_name, last_name, email, role, created_at, avatar_url')
+        .select('id, first_name, last_name, email, role, created_at, avatar_url, campus_id')
         .order('created_at', { ascending: false });
+      // Phase 9: librarian only sees users from their campus
+      if (campusId) _q = _q.eq('campus_id', campusId);
+      const { data, error } = await _q;
       if (error) throw error;
-      setUsers(data || []);
+      // Exclude super_admin from the list shown to librarians
+      setUsers((data || []).filter(u => u.role !== 'super_admin'));
     } catch (err) {
       showToast('Failed to load users: ' + err.message, true);
       setUsers([]);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [campusId]);
 
   useEffect(() => { loadUsers(); }, [loadUsers]);
 
@@ -419,6 +431,8 @@ export default function UserManagement({ onStatsRefresh }) {
         id: adminData.user.id,
         first_name: formData.first_name.trim(), last_name: formData.last_name.trim(),
         email: formData.email.trim(), role: formData.role,
+        // Phase 9: stamp campus_id so the new user belongs to this librarian's campus
+        ...(campusId ? { campus_id: campusId } : {}),
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
       if (profileErr) throw profileErr;
@@ -467,9 +481,10 @@ export default function UserManagement({ onStatsRefresh }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
-          { label: 'Total Users',    value: counts.total   },
-          { label: 'Students',       value: counts.student },
-          { label: 'Administrators', value: counts.admin   },
+          { label: 'Total Users',      value: counts.total   },
+          { label: 'Students',         value: counts.student },
+          { label: 'Library Managers', value: counts.manager },
+          
         ].map(({ label, value }) => (
           <div key={label} style={{
             padding: '8px 16px', borderRadius: 8,
@@ -525,7 +540,7 @@ export default function UserManagement({ onStatsRefresh }) {
         <select className="lm-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
           <option value="all">All Roles</option>
           <option value="student">Students</option>
-          <option value="admin">Administrators</option>
+          <option value="library_manager">Library Managers</option>
         </select>
         <span style={{
           marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',

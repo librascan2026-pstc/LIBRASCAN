@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 const Icon = {
   users:  (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
@@ -103,6 +104,12 @@ const SCROLL_STYLE = `
 `;
 
 export default function Overview({ onNavigate }) {
+  // Phase 9 — campus isolation: every stat/activity query below is scoped
+  // to the signed-in librarian's own campus_id so campuses never see each
+  // other's books, students, borrowings, or attendance history.
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [stats,         setStats]         = useState({ users: 0, books: 0, borrowed: 0, attendance: 0, available: 0, overdue: 0, newUsers: 0, pending: 0 });
   const [activity,      setActivity]      = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -113,6 +120,27 @@ export default function Overview({ onNavigate }) {
     setLoading(true);
     try {
       const todayStr = new Date().toISOString().split('T')[0];
+
+      let qUsers    = supabase.from('profiles').select('id', { count: 'exact' });
+      let qBooks    = supabase.from('books').select('id', { count: 'exact' });
+      let qBorrowed = supabaseAdmin.from('borrowings').select('id', { count: 'exact' }).eq('status', 'Borrowed');
+      let qAttend   = supabase.from('attendance_logs').select('id', { count: 'exact' }).eq('date', todayStr);
+      let qCopies   = supabaseAdmin.from('book_copies').select('status, books!inner(campus_id)');
+      let qOverdue  = supabaseAdmin.from('borrowings').select('id', { count: 'exact' }).eq('status', 'overdue');
+      let qNewUsers = supabase.from('profiles').select('id', { count: 'exact' }).gte('created_at', todayStr);
+      let qPending  = supabaseAdmin.from('borrowings').select('id', { count: 'exact' }).eq('status', 'pending');
+
+      if (campusId) {
+        qUsers    = qUsers.eq('campus_id', campusId);
+        qBooks    = qBooks.eq('campus_id', campusId);
+        qBorrowed = qBorrowed.eq('campus_id', campusId);
+        qAttend   = qAttend.eq('campus_id', campusId);
+        qCopies   = qCopies.eq('books.campus_id', campusId);
+        qOverdue  = qOverdue.eq('campus_id', campusId);
+        qNewUsers = qNewUsers.eq('campus_id', campusId);
+        qPending  = qPending.eq('campus_id', campusId);
+      }
+
       const [
         { count: users    },
         { count: books    },
@@ -122,16 +150,7 @@ export default function Overview({ onNavigate }) {
         { count: overdue  },
         { count: newUsers },
         { count: pending  },
-      ] = await Promise.all([
-        supabase.from('profiles').select('*',             { count: 'exact', head: true }),
-        supabase.from('books').select('*',                 { count: 'exact', head: true }),
-        supabaseAdmin.from('borrowings').select('*',        { count: 'exact', head: true }).eq('status', 'Borrowed'),
-        supabase.from('attendance_logs').select('*',       { count: 'exact', head: true }).eq('date', todayStr),
-        supabaseAdmin.from('book_copies').select('status'),
-        supabaseAdmin.from('borrowings').select('*',        { count: 'exact', head: true }).eq('status', 'overdue'),
-        supabase.from('profiles').select('*',              { count: 'exact', head: true }).gte('created_at', todayStr),
-        supabaseAdmin.from('borrowings').select('*',        { count: 'exact', head: true }).eq('status', 'pending'),
-      ]);
+      ] = await Promise.all([qUsers, qBooks, qBorrowed, qAttend, qCopies, qOverdue, qNewUsers, qPending]);
       const available = (copiesData || []).filter(c => c.status === 'Available').length;
       setStats({
         users: users || 0, books: books || 0, borrowed: borrowed || 0,
@@ -141,34 +160,42 @@ export default function Overview({ onNavigate }) {
     } catch {
       setStats({ users: 0, books: 0, borrowed: 0, attendance: 0, available: 0, overdue: 0, newUsers: 0, pending: 0 });
     } finally { setLoading(false); }
-  }, []);
+  }, [campusId]);
 
   const loadActivity = useCallback(async () => {
     setActLoading(true);
     try {
+      let qBorrows = supabaseAdmin.from('borrowings')
+        .select('id, status, borrowed_at, returned_at, student_name, book_title')
+        .order('borrowed_at', { ascending: false }).limit(500);
+      let qNewProfiles = supabase.from('profiles')
+        .select('id, first_name, last_name, created_at')
+        .order('created_at', { ascending: false }).limit(200);
+      let qVisits = supabase.from('attendance_logs')
+        .select('id, full_name, time_in')
+        .order('time_in', { ascending: false }).limit(200);
+      let qNewBooks = supabase.from('books')
+        .select('id, title, authors, copies, created_at')
+        .order('created_at', { ascending: false }).limit(200);
+      let qCopyChanges = supabaseAdmin.from('book_copies')
+        .select('id, status, updated_at, book_id, books!inner(title, campus_id)')
+        .order('updated_at', { ascending: false }).limit(200);
+
+      if (campusId) {
+        qBorrows      = qBorrows.eq('campus_id', campusId);
+        qNewProfiles  = qNewProfiles.eq('campus_id', campusId);
+        qVisits       = qVisits.eq('campus_id', campusId);
+        qNewBooks     = qNewBooks.eq('campus_id', campusId);
+        qCopyChanges  = qCopyChanges.eq('books.campus_id', campusId);
+      }
+
       const [
         { data: borrows     },
         { data: newProfiles },
         { data: visits      },
         { data: newBooks    },
         { data: copyChanges },
-      ] = await Promise.all([
-        supabaseAdmin.from('borrowings')
-          .select('id, status, borrowed_at, returned_at, student_name, book_title')
-          .order('borrowed_at', { ascending: false }).limit(500),
-        supabase.from('profiles')
-          .select('id, first_name, last_name, created_at')
-          .order('created_at', { ascending: false }).limit(200),
-        supabase.from('attendance_logs')
-          .select('id, full_name, time_in')
-          .order('time_in', { ascending: false }).limit(200),
-        supabase.from('books')
-          .select('id, title, authors, copies, created_at')
-          .order('created_at', { ascending: false }).limit(200),
-        supabaseAdmin.from('book_copies')
-          .select('id, status, updated_at, book_id, books(title)')
-          .order('updated_at', { ascending: false }).limit(200),
-      ]);
+      ] = await Promise.all([qBorrows, qNewProfiles, qVisits, qNewBooks, qCopyChanges]);
 
       const events = [];
 
@@ -215,7 +242,7 @@ export default function Overview({ onNavigate }) {
     } catch {
       setActivity([]);
     } finally { setActLoading(false); }
-  }, []);
+  }, [campusId]);
 
   useEffect(() => { loadStats(); loadActivity(); }, [loadStats, loadActivity]);
 

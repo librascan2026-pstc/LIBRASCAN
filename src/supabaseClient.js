@@ -7,7 +7,7 @@ const supabaseServiceRole = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY;
 const url  = supabaseUrl  || 'https://placeholder.supabase.co';
 const anon = supabaseAnon || 'placeholder-anon-key';
 
-
+// Standard anon client — RLS is enforced for all user-facing queries
 export const supabase = createClient(url, anon, {
   auth: {
     autoRefreshToken:   true,
@@ -15,7 +15,6 @@ export const supabase = createClient(url, anon, {
     detectSessionInUrl: true,
   },
 });
-
 
 if (!supabaseServiceRole) {
   console.warn(
@@ -27,6 +26,9 @@ if (!supabaseServiceRole) {
   );
 }
 
+// Service-role admin client — bypasses RLS
+// Used only for: profile fetching at login, Super Admin operations,
+// creating librarian accounts, cross-campus queries
 export const supabaseAdmin = createClient(url, supabaseServiceRole || anon, {
   auth: {
     autoRefreshToken:   false,
@@ -40,13 +42,10 @@ export const supabaseAdmin = createClient(url, supabaseServiceRole || anon, {
   },
 });
 
-
-export const ADMIN_EMAILS = [
-  'admin@pampangastateu.edu.ph',
-  'librarian@pampangastateu.edu.ph',
-  
-];
-
-export function isAdminEmail(email) {
-  return ADMIN_EMAILS.includes(email?.toLowerCase());
+// DEPRECATED — role detection is now fully DB-driven via profiles.role
+// Kept only so existing import statements don't break during migration.
+// isAdminEmail always returns false — remove usages when convenient.
+export const ADMIN_EMAILS = [];
+export function isAdminEmail(_email) {
+  return false;
 }

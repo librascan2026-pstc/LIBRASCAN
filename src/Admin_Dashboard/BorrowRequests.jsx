@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 
 const G    = '#C9A84C';
@@ -249,6 +250,12 @@ function RequestRow({ req, onApprove, onReject }) {
 
 
 export default function BorrowRequests({ onBadgeCount }) {
+  // Phase 9 — campus isolation: borrow_requests doesn't carry its own
+  // campus_id column, so it's scoped through the book it references
+  // (books.campus_id), via an inner join filter.
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [requests,    setRequests]    = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [filter,      setFilter]      = useState('pending');  
@@ -260,64 +267,37 @@ export default function BorrowRequests({ onBadgeCount }) {
 
   const loadRequests = useCallback(async () => {
     setLoading(true);
-    const { data, error } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('borrow_requests')
-      .select('*')
+      .select(campusId ? '*, books!inner(campus_id)' : '*')
       .order('created_at', { ascending: false })
       .limit(300);
+    if (campusId) q = q.eq('books.campus_id', campusId);
+    const { data, error } = await q;
     if (error) console.error('[BorrowRequests] load error:', error.message);
     const rows = data || [];
     setRequests(rows);
     const pendingCount = rows.filter(r => r.status === 'pending').length;
     onBadgeCount?.(pendingCount);
     setLoading(false);
-  }, [onBadgeCount]);
+  }, [onBadgeCount, campusId]);
 
  
   useEffect(() => {
     loadRequests();
 
+    // Phase 9: borrow_requests has no campus_id of its own, so instead of
+    // splicing raw realtime payloads (which could belong to another
+    // campus) straight into state, just re-run the properly scoped query.
     const ch = supabase
       .channel('borrow-requests-rt')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'borrow_requests' },
-        (payload) => {
-          const newRow = payload.new;
-          setRequests(prev => {
-          
-            if (prev.some(r => r.id === newRow.id)) return prev;
-            const updated = [newRow, ...prev];
-            const pendingCount = updated.filter(r => r.status === 'pending').length;
-            onBadgeCount?.(pendingCount);
-            return updated;
-          });
-        }
-      )
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrow_requests' },
-        (payload) => {
-          const updatedRow = payload.new;
-          setRequests(prev => {
-            const updated = prev.map(r => r.id === updatedRow.id ? updatedRow : r);
-            const pendingCount = updated.filter(r => r.status === 'pending').length;
-            onBadgeCount?.(pendingCount);
-            return updated;
-          });
-        }
-      )
-      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'borrow_requests' },
-        (payload) => {
-          const deletedId = payload.old?.id;
-          setRequests(prev => {
-            const updated = prev.filter(r => r.id !== deletedId);
-            const pendingCount = updated.filter(r => r.status === 'pending').length;
-            onBadgeCount?.(pendingCount);
-            return updated;
-          });
-        }
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'borrow_requests' }, () => loadRequests())
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'borrow_requests' }, () => loadRequests())
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'borrow_requests' }, () => loadRequests())
       .subscribe();
 
     return () => supabase.removeChannel(ch);
-  }, [loadRequests, onBadgeCount]);
+  }, [loadRequests]);
 
 
   const showBanner = (msg, ok = true) => {
@@ -411,6 +391,8 @@ export default function BorrowRequests({ onBadgeCount }) {
           borrowed_at:       nowISO(),
           returned_at:       null,
           date:              today(),
+          // Phase 9: stamp campus_id so this borrowing belongs to the librarian's campus
+          ...(campusId ? { campus_id: campusId } : {}),
         };
      
         Object.keys(borrowingPayload).forEach(k => {

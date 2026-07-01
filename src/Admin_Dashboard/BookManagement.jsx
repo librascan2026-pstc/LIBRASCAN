@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { useAuth } from '../Login_SignUp/AuthContext';
 
 
 const BORROW_LIMIT = 3; 
@@ -82,22 +83,14 @@ async function syncBooksFromCopies(bookId) {
   const available = (allCopies || []).filter(c => c.status === 'Available').length;
   const newStatus = available === 0 ? 'Borrowed' : 'Available';
 
-  
-  const { error: fullErr } = await supabaseAdmin.from('books').update({
-    copies:           total,
-    available_copies: available,
-    status:           newStatus,
+  // Only update columns confirmed in schema — avoid 400 from unknown columns
+  const { error: updateErr } = await supabaseAdmin.from('books').update({
+    copies: total,
+    status: newStatus,
   }).eq('id', bookId);
 
-  
-  if (fullErr && (fullErr.code === '42703' || fullErr.message?.includes('available_copies') || fullErr.message?.includes('column'))) {
-    console.warn('[syncBooksFromCopies] available_copies column missing — syncing without it');
-    await supabaseAdmin.from('books').update({
-      copies: total,
-      status: newStatus,
-    }).eq('id', bookId);
-  } else if (fullErr) {
-    console.warn('[syncBooksFromCopies] update error:', fullErr.message);
+  if (updateErr) {
+    console.warn('[syncBooksFromCopies] update error:', updateErr.message);
   }
 
   return { total, available };
@@ -696,7 +689,7 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
   
       if (isBorrow) {
         const { count } = await supabase
-          .from('borrowings').select('*', { count:'exact', head:true })
+          .from('borrowings').select('id', { count:'exact' })
           .eq('student_id', studentData.id_no).eq('status', 'Borrowed');
         if ((count || 0) >= BORROW_LIMIT) {
           playErrorSound();
@@ -719,14 +712,14 @@ function _UNUSED_MobileBorrowForm({ onTransactionComplete, showToast }) {
       await syncBooksFromCopies(bookData.id);
 
 const txPayload = {
-  student_id:   pendingReq.student_id   || null,
-  student_name: pendingReq.student_name  || null,
-  book_id:      pendingReq.book_id       || null,
-  book_title:   pendingReq.book_title    || null,
-  copy_label:   pendingReq.copy_label    || null,
-  status:       'Borrowed',
-  borrowed_at:  new Date().toISOString(),
-  returned_at:  null,
+  student_id:   studentData?.id        || null,
+  student_name: studentData?.full_name || confirmData?.student_name || null,
+  book_id:      bookData?.id           || null,
+  book_title:   bookData?.title        || confirmData?.book_title   || null,
+  copy_label:   copyLabel              || null,
+  status:       confirmData.action,
+  borrowed_at:  isBorrow ? now : null,
+  returned_at:  isBorrow ? null : now,
   date:         new Date().toISOString().split('T')[0],
 };
 
@@ -936,6 +929,12 @@ const TAB_CSS = `
 
 
 export default function BookManagement({ initialTab }) {
+  // Phase 9 — campus isolation: every read/write below is scoped to the
+  // signed-in librarian's campus_id so campuses never see or mutate each
+  // other's borrowings, requests, students, or book copies.
+  const { profile } = useAuth();
+  const campusId = profile?.campus_id ?? null;
+
   const [activeTab,    setActiveTab]    = useState(initialTab || 'scanner');
 
 
@@ -1010,27 +1009,33 @@ export default function BookManagement({ initialTab }) {
 
   const loadTransactions = useCallback(async () => {
     setLoadingTx(true);
-    const { data, error } = await supabaseAdmin
+    let q = supabaseAdmin
       .from('borrowings').select('*')
       .order('borrowed_at', { ascending: false }).limit(300);
+    if (campusId) q = q.eq('campus_id', campusId);
+    const { data, error } = await q;
     if (error) console.error('[BookManagement] load error:', error.message);
     if (data) setTransactions(data);
     setLoadingTx(false);
-  }, []);
+  }, [campusId]);
 
   
   const loadPendingRequests = useCallback(async () => {
     setLoadingPending(true);
-    const { data, error } = await supabaseAdmin
+    // borrow_requests has no campus_id of its own — scope through the
+    // referenced book instead.
+    let q = supabaseAdmin
       .from('borrow_requests')
-      .select('*')
+      .select(campusId ? '*, books!inner(campus_id)' : '*')
       .eq('status', 'pending')
       .order('created_at', { ascending: false })
       .limit(200);
+    if (campusId) q = q.eq('books.campus_id', campusId);
+    const { data, error } = await q;
     if (error) console.error('[BookManagement] pending load error:', error.message);
     if (data) setPendingRequests(data);
     setLoadingPending(false);
-  }, []);
+  }, [campusId]);
 
  
   const confirmPendingRequest = useCallback(async (pendingReq) => {
@@ -1052,6 +1057,8 @@ export default function BookManagement({ initialTab }) {
         borrowed_at:     new Date().toISOString(),
         returned_at:     null,
         date:            new Date().toISOString().split('T')[0],
+        // Phase 9: stamp campus_id so this borrowing belongs to the librarian's campus
+        ...(campusId ? { campus_id: campusId } : {}),
       };
       console.log('[Approve] payload:', txPayload);
 
@@ -1162,7 +1169,7 @@ export default function BookManagement({ initialTab }) {
       setPendingError(`Approve failed: ${err.message}`);
       setProcessingPendingId(null);
     }
-  }, [loadPendingRequests, loadTransactions]);
+  }, [loadPendingRequests, loadTransactions, campusId]);
 
 
   const rejectPendingRequest = useCallback(async (pendingReq) => {
@@ -1309,16 +1316,20 @@ export default function BookManagement({ initialTab }) {
     let profile = null;
     if (parsed.id_no) {
    
-      const { data: byStudentNo } = await supabaseAdmin
+      let qStudentNo = supabaseAdmin
         .from('profiles').select('*')
-        .eq('student_number', parsed.id_no).maybeSingle();
+        .eq('student_number', parsed.id_no);
+      if (campusId) qStudentNo = qStudentNo.eq('campus_id', campusId);
+      const { data: byStudentNo } = await qStudentNo.maybeSingle();
       profile = byStudentNo;
 
      
       if (!profile) {
-        const { data: byUsername } = await supabaseAdmin
+        let qUsername = supabaseAdmin
           .from('profiles').select('*')
-          .eq('username', parsed.id_no).maybeSingle();
+          .eq('username', parsed.id_no);
+        if (campusId) qUsername = qUsername.eq('campus_id', campusId);
+        const { data: byUsername } = await qUsername.maybeSingle();
         profile = byUsername;
       }
     }
@@ -1326,11 +1337,12 @@ export default function BookManagement({ initialTab }) {
       const parts = parsed.full_name.trim().split(/\s+/);
       const firstName = parts[0] || '';
       const lastName  = parts[parts.length - 1] || '';
-      const { data: byName } = await supabaseAdmin
+      let qName = supabaseAdmin
         .from('profiles').select('*')
         .ilike('first_name', firstName + '%')
-        .ilike('last_name',  lastName  + '%')
-        .maybeSingle();
+        .ilike('last_name',  lastName  + '%');
+      if (campusId) qName = qName.eq('campus_id', campusId);
+      const { data: byName } = await qName.maybeSingle();
       profile = byName;
     }
 
@@ -1354,7 +1366,7 @@ export default function BookManagement({ initialTab }) {
     setStudent(studentData);
     setStep(1);
     showToast(`Student: ${studentData.full_name}`, 'success');
-  }, [showToast]);
+  }, [showToast, campusId]);
 
  
   const processBookScan = useCallback(async (raw) => {
@@ -1385,26 +1397,36 @@ export default function BookManagement({ initialTab }) {
           .eq('copy_id', parsed.copy_id)
           .maybeSingle();
         if (copyRow) {
-          resolvedCopyId  = copyRow.copy_id;
-          resolvedCopyNum = copyRow.copy_number;
-          const { data: bookByFk } = await supabaseAdmin
-            .from('books').select('*').eq('id', copyRow.book_id).maybeSingle();
-          bookRecord = bookByFk;
+          let qBookByFk = supabaseAdmin.from('books').select('*').eq('id', copyRow.book_id);
+          if (campusId) qBookByFk = qBookByFk.eq('campus_id', campusId);
+          const { data: bookByFk } = await qBookByFk.maybeSingle();
+          // Only accept the scanned copy if its book actually belongs to this campus
+          if (bookByFk) {
+            resolvedCopyId  = copyRow.copy_id;
+            resolvedCopyNum = copyRow.copy_number;
+            bookRecord = bookByFk;
+          }
         }
       }
 
       if (!bookRecord && !parsed.isCopyId) {
-        const { data: byIsbn } = await supabaseAdmin.from('books').select('*').eq('isbn', parsed.base).maybeSingle();
+        let qIsbn = supabaseAdmin.from('books').select('*').eq('isbn', parsed.base);
+        if (campusId) qIsbn = qIsbn.eq('campus_id', campusId);
+        const { data: byIsbn } = await qIsbn.maybeSingle();
         bookRecord = byIsbn;
       }
       if (!bookRecord && !parsed.isCopyId) {
         if (UUID_RE.test(parsed.base)) {
-          const { data: byId } = await supabaseAdmin.from('books').select('*').eq('id', parsed.base).maybeSingle();
+          let qById = supabaseAdmin.from('books').select('*').eq('id', parsed.base);
+          if (campusId) qById = qById.eq('campus_id', campusId);
+          const { data: byId } = await qById.maybeSingle();
           bookRecord = byId;
         }
       }
       if (!bookRecord && !parsed.isCopyId) {
-        const { data: rows } = await supabaseAdmin.from('books').select('*').ilike('title', `%${parsed.base}%`);
+        let qTitle = supabaseAdmin.from('books').select('*').ilike('title', `%${parsed.base}%`);
+        if (campusId) qTitle = qTitle.eq('campus_id', campusId);
+        const { data: rows } = await qTitle;
         bookRecord = rows?.[0] || null;
       }
       if (!bookRecord) {
@@ -1576,6 +1598,8 @@ export default function BookManagement({ initialTab }) {
           borrowed_at:     borrowedAt,
           returned_at:     null,
           date:            today(),
+          // Phase 9: stamp campus_id so this borrowing belongs to the librarian's campus
+          ...(campusId ? { campus_id: campusId } : {}),
         };
 
         console.log('[BookScan] Inserting borrowing:', txPayload);
@@ -1614,6 +1638,8 @@ export default function BookManagement({ initialTab }) {
               borrowed_at:     borrowedAt,
               returned_at:     null,
               date:            today(),
+              // Phase 9: stamp campus_id so this borrowing belongs to the librarian's campus
+              ...(campusId ? { campus_id: campusId } : {}),
             };
            
             Object.keys(minimalPayload).forEach(k => minimalPayload[k] === undefined && delete minimalPayload[k]);
@@ -1696,7 +1722,7 @@ export default function BookManagement({ initialTab }) {
 
     setStep(0); setStudent(null);
     processingRef.current = false;
-  }, [student, showToast, loadTransactions]);
+  }, [student, showToast, loadTransactions, campusId]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;

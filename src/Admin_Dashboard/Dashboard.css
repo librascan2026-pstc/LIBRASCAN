@@ -562,6 +562,7 @@ a { text-decoration: none; }
 .lm-main {
   margin-left: var(--sidebar-w);
   flex: 1;
+  min-width: 0; /* stop wide descendant content (e.g. carousels) from forcing this — and the whole page — wider than the viewport */
   display: flex;
   flex-direction: column;
   min-height: 100vh;
@@ -744,6 +745,8 @@ a { text-decoration: none; }
 
 .lm-content {
   flex: 1;
+  min-width: 0;
+  overflow-x: hidden;
   padding: 28px 30px;
   overflow-y: auto;
   background: var(--bg-base);

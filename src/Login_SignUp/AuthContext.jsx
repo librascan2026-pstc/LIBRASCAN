@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { supabase, supabaseAdmin, isAdminEmail } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 
 const AuthContext = createContext(null);
 
@@ -8,22 +8,32 @@ export function AuthProvider({ children }) {
   const [role,    setRole]    = useState(null);
   const [profile, setProfile] = useState(null);      // row from profiles table
   const [loading, setLoading] = useState(true);
-
-  const deriveRole = (sessionUser) => {
-    if (!sessionUser) return null;
-    if (isAdminEmail(sessionUser.email)) return 'library_manager';
-    return sessionUser.user_metadata?.role || 'student';
-  };
+  // True while we have a logged-in user but haven't confirmed their role from
+  // the DB yet. Consumers (App routing) must treat this like `loading` and
+  // NOT render a role-based dashboard until this is false — otherwise stale
+  // Supabase Auth user_metadata (e.g. leftover "admin") causes a flash of the
+  // wrong dashboard before the real profiles.role value arrives.
+  const [roleResolving, setRoleResolving] = useState(false);
 
   const fetchProfile = useCallback(async (userId) => {
-    if (!userId) { setProfile(null); return; }
+    if (!userId) { setProfile(null); setRole(null); setRoleResolving(false); return; }
+    setRoleResolving(true);
     const { data } = await supabaseAdmin
       .from('profiles')
-      .select('id, first_name, last_name, middle_name, username, email, role, avatar_url, created_at, updated_at')
+      .select(
+        'id, first_name, last_name, middle_name, username, email, role, ' +
+        'avatar_url, campus_id, college_id, program_id, major_id, ' +
+        'student_number, program_legacy, created_at, updated_at'
+      )
       .eq('id', userId)
       .single();
     setProfile(data || null);
-    if (data?.role) setRole(data.role);
+    // Role ALWAYS comes from the DB — never from Supabase Auth user_metadata,
+    // which can be stale (e.g. an account promoted to super_admin after
+    // creation still has metadata.role = "admin"). Using that stale value to
+    // pick a dashboard is what caused the wrong-dashboard flash on login.
+    setRole(data?.role || null);
+    setRoleResolving(false);
   }, []);
 
   useEffect(() => {
@@ -49,8 +59,8 @@ export function AuthProvider({ children }) {
         }
         const u = session?.user ?? null;
         setUser(u);
-        setRole(deriveRole(u));
-        if (u) await fetchProfile(u.id);
+        if (u) await fetchProfile(u.id); // resolves the real role from DB
+        else setRole(null);
         setLoading(false);
       })
       .catch((err) => {
@@ -68,9 +78,8 @@ export function AuthProvider({ children }) {
 
       const u = session?.user ?? null;
       setUser(u);
-      setRole(deriveRole(u));
-      if (u) await fetchProfile(u.id);
-      else setProfile(null);
+      if (u) await fetchProfile(u.id); // resolves the real role from DB
+      else { setProfile(null); setRole(null); }
     });
 
     return () => {
@@ -93,8 +102,7 @@ export function AuthProvider({ children }) {
 
   const commitUser = async (sessionUser) => {
     setUser(sessionUser);
-    setRole(deriveRole(sessionUser));
-    await fetchProfile(sessionUser.id);
+    await fetchProfile(sessionUser.id); // resolves the real role from DB — no guessing
   };
 
   const refreshProfile = useCallback(async () => {
@@ -103,7 +111,7 @@ export function AuthProvider({ children }) {
   }, [fetchProfile]);
 
   return (
-    <AuthContext.Provider value={{ user, role, profile, loading, signOut, signIn, commitUser, refreshProfile }}>
+    <AuthContext.Provider value={{ user, role, profile, loading, roleResolving, signOut, signIn, commitUser, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
