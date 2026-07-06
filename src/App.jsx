@@ -291,8 +291,8 @@ function HeroSection({ onNavClick, onGetStarted }) {
                 <LiteralQRCode size={168}/>
                 <div className="qr-scan-line"/>
               </a>
-              <div className="qr-caption">Scan · Manage · Track</div>
-              <div className="qr-subcaption">Scan to download the app</div>
+              <div className="qr-caption">Scan to download the app</div>
+              
             </div>
             <div className="qr-badge qr-badge--tl">
               <div className="qr-badge__title">Book Checked Out</div>
