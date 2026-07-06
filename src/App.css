@@ -1,12 +1,11 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Josefin+Sans:wght@300;400;600;700&display=swap');
+
 #features,
 #benefits,
 #process,
 #team {
   scroll-margin-top: 80px;
 }
-
-
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Josefin+Sans:wght@300;400;600;700&display=swap');
 
 
 :root {
@@ -209,6 +208,35 @@ body {
 .nav-link:hover { color: var(--gold-light); }
 
 
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 6px;
+  width: 32px;
+  height: 32px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+.nav-toggle span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  background: var(--gold-light);
+  border-radius: 2px;
+  transition: transform 0.3s ease, opacity 0.3s ease, width 0.3s ease;
+}
+.nav-toggle--open span:nth-child(1) { transform: translateY(8px) rotate(45deg); width: 100%; }
+.nav-toggle--open span:nth-child(2) { opacity: 0; }
+.nav-toggle--open span:nth-child(3) { transform: translateY(-8px) rotate(-45deg); width: 100%; }
+
+.nav-mobile-menu { display: none; }
+
+
 .btn-primary {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -360,8 +388,8 @@ body {
 }
 .qr-frame {
   position: relative;
-  width: 380px;
-  height: 380px;
+  width: clamp(240px, 26vw, 380px);
+  height: clamp(240px, 26vw, 380px);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(201, 168, 76, 0.25);
   display: flex;
@@ -369,20 +397,50 @@ body {
   justify-content: center;
   backdrop-filter: blur(20px);
 }
-.qr-frame__inner { text-align: center; }
-.qr-decoration {
+.qr-frame__inner {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+/* The literal, scannable QR code sits inside its own light quiet-zone panel
+   so contrast stays high enough for real cameras to read it, no matter what
+   the surrounding hero card looks like. */
+.qr-code-panel {
   position: relative;
+  display: inline-flex;
+  padding: clamp(10px, 1.6vw, 18px);
+  background: var(--cream);
+  border-radius: 10px;
+  border: 2px solid var(--gold);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35), 0 0 0 6px rgba(201, 168, 76, 0.08);
+  overflow: hidden;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+}
+.qr-code-panel:hover,
+.qr-code-panel:focus-visible {
+  transform: scale(1.03);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.4), 0 0 0 6px rgba(201, 168, 76, 0.18);
+}
+.qr-code-panel svg {
+  width: clamp(140px, 16vw, 200px);
+  height: clamp(140px, 16vw, 200px);
   display: block;
-  margin-bottom: 24px;
 }
 .qr-scan-line {
   position: absolute;
   left: 0;
   right: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--maroon), var(--gold), var(--maroon), transparent);
   animation: scanLine 3s ease-in-out infinite;
-  box-shadow: 0 0 12px var(--gold);
+  box-shadow: 0 0 14px var(--gold), 0 0 4px var(--maroon);
+  opacity: 0.85;
+  pointer-events: none;
 }
 .qr-caption {
   font-family: var(--font-sans);
@@ -392,6 +450,14 @@ body {
   text-transform: uppercase;
   font-weight: 600;
 }
+.qr-subcaption {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: none;
+  margin-top: -8px;
+}
 .qr-badge {
   position: absolute;
   background: white;
@@ -400,6 +466,8 @@ body {
   border-left: 3px solid var(--gold);
   min-width: auto; 
   border-radius: 4px; 
+  white-space: nowrap;
+  z-index: 2;
 }
 .qr-badge--tl { top: -10px; left: -40px; }
 .qr-badge--br { bottom: -10px; right: -40px; }
@@ -462,6 +530,37 @@ body {
   font-size: 11px;
   letter-spacing: 3px;
   color: rgba(255, 255, 255, 0.5);
+  text-transform: uppercase;
+}
+
+/* Live stat-item classes actually rendered by StatsSection in App.jsx */
+.stat-item {
+  text-align: center;
+  padding: 44px 24px;
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  transition: background 0.35s ease, transform 0.35s ease, border-color 0.35s ease;
+}
+.stat-item:hover {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(201, 168, 76, 0.45);
+  transform: translateY(-4px);
+}
+.stat-item__value {
+  font-family: var(--font-display);
+  font-size: 52px;
+  font-weight: 900;
+  color: var(--gold-light);
+  line-height: 1;
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+}
+.stat-item__label {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  letter-spacing: 3px;
+  color: rgba(255, 255, 255, 0.65);
   text-transform: uppercase;
 }
 
@@ -569,6 +668,69 @@ body {
   gap: 12px;
   margin-top: 48px;
   flex-wrap: wrap;
+}
+
+/* Live classes actually rendered by BenefitsSection in App.jsx */
+.benefits__header {
+  text-align: center;
+  max-width: 720px;
+  margin: 0 auto 56px;
+}
+.benefits__title {
+  font-family: var(--font-display);
+  font-size: clamp(32px, 3.6vw, 48px);
+  font-weight: 700;
+  color: var(--white);
+  line-height: 1.2;
+}
+.benefits__cards {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 28px;
+}
+.benefit-item {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(201, 168, 76, 0.2);
+  padding: 40px 32px;
+  position: relative;
+  transition: transform 0.35s ease, border-color 0.35s ease, background 0.35s ease;
+}
+.benefit-item:hover {
+  transform: translateY(-6px);
+  border-color: rgba(201, 168, 76, 0.5);
+  background: rgba(255, 255, 255, 0.07);
+}
+.benefit-item__dot {
+  width: 44px;
+  height: 4px;
+  background: linear-gradient(90deg, var(--gold), var(--gold-light));
+  margin-bottom: 24px;
+}
+.benefit-item__title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--gold-light);
+  margin-bottom: 22px;
+}
+.benefit-item__desc {
+  font-family: var(--font-body);
+  font-size: 15.5px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.78);
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.benefit-item__desc:last-child { margin-bottom: 0; }
+.benefit-item__check {
+  color: var(--gold-light);
+  font-size: 14px;
+  line-height: 1.6;
+  flex-shrink: 0;
 }
 
 .benefits__panel {
@@ -1026,6 +1188,7 @@ body {
   .features__grid { grid-template-columns: repeat(2, 1fr); }
   .stats__grid    { grid-template-columns: repeat(2, 1fr); }
   .scope__tags-grid { grid-template-columns: repeat(2, 1fr); }
+  .benefits__cards { grid-template-columns: repeat(2, 1fr); gap: 24px; }
 
   .nav { padding: 20px 30px; }
   .nav-links { gap: 20px; }
@@ -1050,10 +1213,97 @@ body {
 
 @media (max-width: 640px) {
   .features__grid   { grid-template-columns: 1fr; }
-  .team__grid       { grid-template-columns: repeat(2, 1fr); gap: 20px; }
-  .nav-links        { display: none; }
+  .team__grid       { grid-template-columns: repeat(2, 1fr); gap: 20px 16px; }
   .scope__tags-grid { grid-template-columns: 1fr; }
-  .hero__grid       { grid-template-columns: 1fr; padding: 40px 20px; }
-  .qr-visual        { display: none; }
+  .benefits__cards  { grid-template-columns: 1fr; gap: 20px; }
+  .stats__grid      { grid-template-columns: repeat(2, 1fr); gap: 1px; }
+  .hero__grid       { grid-template-columns: 1fr; padding: 32px 20px; gap: 40px; }
+  .qr-visual        { width: 100%; margin-top: 8px; }
+  .qr-frame         { width: clamp(220px, 66vw, 300px); height: clamp(220px, 66vw, 300px); }
+  .qr-badge--tl     { top: -14px; left: 4px; }
+  .qr-badge--br     { bottom: -14px; right: 4px; }
+  .qr-badge__title  { font-size: 10px; }
+  .qr-badge__sub    { font-size: 10px; }
   .team-member__photo-ring { width: 110px; height: 110px; }
+
+  /* Navbar collapses to a hamburger + slide-down menu */
+  .nav               { padding: 16px 20px; flex-wrap: wrap; }
+  .nav-links,
+  .nav-cta-desktop   { display: none; }
+  .nav-toggle        { display: flex; }
+  .nav-brand__logo   { width: 42px; height: 42px; }
+
+  .nav-mobile-menu {
+    order: 3;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    background: rgba(61, 0, 0, 0.97);
+    backdrop-filter: blur(16px);
+    border-radius: 6px;
+    padding: 0 14px;
+    transition: max-height 0.35s ease, opacity 0.3s ease, margin-top 0.35s ease, padding 0.35s ease;
+    margin-top: 0;
+  }
+  .nav-mobile-menu--open {
+    max-height: 420px;
+    opacity: 1;
+    margin-top: 14px;
+    padding: 10px 14px 20px;
+  }
+  .nav-mobile-link {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.85);
+    background: none;
+    border: none;
+    text-align: left;
+    padding: 14px 4px;
+    border-bottom: 1px solid rgba(201, 168, 76, 0.15);
+    cursor: pointer;
+  }
+  .nav-mobile-link:hover,
+  .nav-mobile-link:active { color: var(--gold-light); }
+  .nav-mobile-cta { margin-top: 18px; width: 100%; text-align: center; }
+
+  /* Tighten section padding on mobile so content never feels cramped or clipped */
+  .features, .benefits, .scope, .process, .team {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+  .stats  { padding: 48px 20px; }
+  .footer { padding: 36px 20px; }
+  .team   { padding-top: 90px; padding-bottom: 70px; }
+
+  .hero__title    { font-size: clamp(36px, 11vw, 48px); }
+  .hero__subtitle { font-size: 16px; margin-bottom: 32px; }
+  .stat-item      { padding: 28px 12px; }
+  .stat-item__value { font-size: 38px; }
+  .stat-item__label { font-size: 9.5px; letter-spacing: 1.5px; }
+}
+
+@media (max-width: 480px) {
+  /* At very narrow widths a single team column reads far better than an
+     orphaned 5th card left dangling in a 2-column grid. */
+  .team__grid { grid-template-columns: 1fr; max-width: 260px; margin-left: auto; margin-right: auto; gap: 32px; }
+  .stats__grid { grid-template-columns: repeat(2, 1fr); }
+  .scope-tag-item { padding: 18px 20px; }
+  .benefit-item, .feature-card { padding: 32px 22px; }
+  .qr-badge--tl { left: 0; }
+  .qr-badge--br { right: 0; }
+}
+
+@media (max-width: 380px) {
+  .hero__title      { font-size: clamp(30px, 10vw, 40px); }
+  .hero__subtitle   { font-size: 15px; }
+  .stat-item__value { font-size: 32px; }
+  .btn-primary, .btn-secondary { padding: 13px 24px; font-size: 11px; }
+  .qr-frame         { width: 88vw; height: 88vw; }
 }

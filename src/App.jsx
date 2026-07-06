@@ -6,6 +6,7 @@ import {
   CREAM, WHITE,
   FEATURES, BENEFITS, STEPS, TEAM, SCOPE_TAGS, STAT_TARGETS,
 } from './constants'
+import { QR_URL, QR_SIZE, QR_RECTS } from './qrData'
 
 import { AuthProvider, useAuth }   from './Login_SignUp/AuthContext'
 import AuthRouter                  from './Login_SignUp/AuthRouter'
@@ -95,6 +96,28 @@ function CornerBracket({ position = 'tl', color = '#C9A84C', size = 24 }) {
   );
 }
 
+// Renders the ACTUAL scannable QR code (encodes the app download link) using
+// the pre-generated module matrix in qrData.js. Colors are pulled straight
+// from the site palette, but kept high-contrast so real cameras can read it.
+function LiteralQRCode({ size = 168 }) {
+  return (
+    <svg
+      viewBox={`0 0 ${QR_SIZE} ${QR_SIZE}`}
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ display: 'block' }}
+      role="img"
+      aria-label="QR code to download the app"
+    >
+      <rect x="0" y="0" width={QR_SIZE} height={QR_SIZE} fill={CREAM} />
+      {QR_RECTS.map(([x, y, w], i) => (
+        <rect key={i} x={x} y={y} width={w} height={1} fill={MAROON_DEEP} />
+      ))}
+    </svg>
+  );
+}
+
 const ICON_MAP = {
   qr:         (size) => <QRIcon         size={size} color={GOLD} />,
   attendance: (size) => <AttendanceIcon size={size} color={GOLD} />,
@@ -159,21 +182,69 @@ function RoleRouter({ user, onSignOut }) {
 
 // ─── Landing page sections (all unchanged from original) ──────────────────────
 function Navbar({ scrolled, onNavClick, onGetStarted }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Close the mobile menu automatically if the viewport is resized back up
+  // to desktop width (e.g. rotating a tablet, or resizing a browser window).
+  useEffect(() => {
+    const onResize = () => { if (window.innerWidth > 640) setMenuOpen(false); };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  const navIds = ["features", "benefits", "process", "team"];
+
+  const handleNav = (id) => {
+    setMenuOpen(false);
+    onNavClick(id);
+  };
+  const handleGetStarted = () => {
+    setMenuOpen(false);
+    onGetStarted();
+  };
+
   return (
-    <nav className={`nav${scrolled ? " scrolled" : ""}`}>
+    <nav className={`nav${scrolled ? " scrolled" : ""}${menuOpen ? " nav--open" : ""}`}>
       <div className="nav-brand">
         <img src="/LibraryLogo.png" alt="PSU Library Logo" className="nav-brand__logo" />
       </div>
+
       <div className="nav-links">
-        {["features", "benefits", "process", "team"].map((id) => (
-          <button key={id} className="nav-link" onClick={() => onNavClick(id)}>
+        {navIds.map((id) => (
+          <button key={id} className="nav-link" onClick={() => handleNav(id)}>
             {id.charAt(0).toUpperCase() + id.slice(1)}
           </button>
         ))}
       </div>
-      <button className="btn-primary btn-primary--sm" onClick={onGetStarted}>
+
+      <button className="btn-primary btn-primary--sm nav-cta-desktop" onClick={handleGetStarted}>
         Get Started
       </button>
+
+      <button
+        type="button"
+        className={`nav-toggle${menuOpen ? " nav-toggle--open" : ""}`}
+        aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+        aria-expanded={menuOpen}
+        aria-controls="mobile-nav-menu"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <span/><span/><span/>
+      </button>
+
+      <div
+        id="mobile-nav-menu"
+        className={`nav-mobile-menu${menuOpen ? " nav-mobile-menu--open" : ""}`}
+      >
+        {navIds.map((id) => (
+          <button key={id} className="nav-mobile-link" onClick={() => handleNav(id)}>
+            {id.charAt(0).toUpperCase() + id.slice(1)}
+          </button>
+        ))}
+        <button className="btn-primary nav-mobile-cta" onClick={handleGetStarted}>
+          Get Started
+        </button>
+      </div>
     </nav>
   );
 }
@@ -210,11 +281,18 @@ function HeroSection({ onNavClick, onGetStarted }) {
             <CornerBracket position="bl" color={GOLD} size={32}/>
             <CornerBracket position="br" color={GOLD} size={32}/>
             <div className="qr-frame__inner">
-              <span className="qr-decoration">
-                <QRIcon size={160} color={GOLD}/>
+              <a
+                href={QR_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="qr-code-panel"
+                aria-label="Scan with your phone or click to download the app"
+              >
+                <LiteralQRCode size={168}/>
                 <div className="qr-scan-line"/>
-              </span>
+              </a>
               <div className="qr-caption">Scan · Manage · Track</div>
+              <div className="qr-subcaption">Scan to download the app</div>
             </div>
             <div className="qr-badge qr-badge--tl">
               <div className="qr-badge__title">Book Checked Out</div>
@@ -277,18 +355,20 @@ function BenefitsSection() {
     <section id="benefits" className="benefits">
       <div className="benefits__inner">
         <div>
-          <div className="section-label" style={{marginBottom:16}}>Why LibraScan</div>
-          <h2 className="benefits__title">Built for <span style={{color:GOLD}}>Efficiency</span></h2>
-          <div style={{display:'flex', flexDirection:'column', gap:16, marginTop:32}}>
+          <div className="benefits__header">
+            <div className="section-label" style={{justifyContent:'center', marginBottom:16}}>Why LibraScan</div>
+            <h2 className="benefits__title">Built for <span style={{color:GOLD}}>Efficiency</span></h2>
+          </div>
+          <div className="benefits__cards">
             {Object.values(BENEFITS).map(({title, points}) => (
               <div key={title} className="benefit-item">
                 <div className="benefit-item__dot"/>
-                <div>
-                  <div className="benefit-item__title">{title}</div>
-                  {points && points.map((p, i) => (
-                    <div key={i} className="benefit-item__desc">• {p}</div>
-                  ))}
-                </div>
+                <div className="benefit-item__title">{title}</div>
+                {points && points.map((p, i) => (
+                  <div key={i} className="benefit-item__desc">
+                    <span className="benefit-item__check">✓</span>{p}
+                  </div>
+                ))}
               </div>
             ))}
           </div>
