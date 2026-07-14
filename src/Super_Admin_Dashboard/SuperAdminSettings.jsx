@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/AuthContext';
 
@@ -313,6 +313,140 @@ const CSS = `
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
+
+  /* ---------- Floating logout button ---------- */
+  .sas-fab {
+    position: fixed; bottom: 30px; right: 30px; z-index: 400;
+    display: flex; align-items: center; justify-content: flex-start;
+    height: 54px; width: 54px;
+    padding: 0;
+    border-radius: 27px;
+    border: 1.6px solid rgba(255,255,255,0.28);
+    cursor: pointer;
+    background: linear-gradient(135deg, #E5533E 0%, ${MAROON_MID} 55%, ${MAROON_DEEP} 100%);
+    color: #fff;
+    box-shadow: 0 6px 20px rgba(139,0,0,0.38), 0 2px 8px rgba(0,0,0,0.20),
+                0 0 0 6px rgba(139,0,0,0.07);
+    overflow: hidden;
+    transition: width 0.36s cubic-bezier(.34,1.45,.44,1),
+                background 0.28s ease, border-color 0.28s ease,
+                color 0.28s ease, box-shadow 0.28s ease,
+                padding 0.32s ease, transform 0.2s ease;
+  }
+  /* Hover (and keyboard focus) drives the expand/transform now — click is reserved for confirming logout */
+  .sas-fab:hover,
+  .sas-fab:focus-visible {
+    width: 168px;
+    padding: 0 22px 0 16px;
+    gap: 12px;
+    transform: translateY(-2px);
+    background: linear-gradient(135deg, #F0664F 0%, #A30000 55%, ${MAROON_DEEP} 100%);
+    border-color: rgba(255,255,255,0.42);
+    box-shadow: 0 10px 28px rgba(139,0,0,0.48), 0 3px 10px rgba(0,0,0,0.24),
+                0 0 0 7px rgba(139,0,0,0.10);
+  }
+  .sas-fab:active {
+    transform: translateY(-2px) scale(0.97);
+  }
+  .sas-fab-icon {
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    width: 54px; height: 54px;
+    margin-left: -1.6px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.16);
+    box-shadow: inset 0 0 0 1.5px rgba(255,255,255,0.30);
+    color: #FFFFFF;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.45));
+    transition: width 0.36s cubic-bezier(.34,1.45,.44,1),
+                margin 0.36s cubic-bezier(.34,1.45,.44,1),
+                background 0.28s ease, transform 0.28s ease;
+  }
+  .sas-fab:hover .sas-fab-icon,
+  .sas-fab:focus-visible .sas-fab-icon {
+    width: 22px; height: 22px;
+    margin-left: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: scale(1.04);
+  }
+  .sas-fab-icon svg { display: block; }
+  .sas-fab-label {
+    font-family: ${FONT_SANS};
+    font-size: 13.5px; font-weight: 700; letter-spacing: 0.02em;
+    white-space: nowrap;
+    color: #FFF6E8;
+    opacity: 0; transform: translateX(-6px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  .sas-fab:hover .sas-fab-label,
+  .sas-fab:focus-visible .sas-fab-label {
+    opacity: 1; transform: none;
+    transition-delay: 0.12s;
+  }
+
+  /* ---------- Logout confirmation modal ---------- */
+  .sas-modal-overlay {
+    position: fixed; inset: 0; z-index: 900;
+    background: rgba(30,5,5,0.50);
+    backdrop-filter: blur(4px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+    animation: sas-fade-in 0.16s ease;
+  }
+  @keyframes sas-fade-in { from { opacity: 0; } to { opacity: 1; } }
+  .sas-modal {
+    width: 100%; max-width: 380px;
+    background: #FFFCF7;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 24px 60px rgba(60,0,0,0.34), 0 4px 14px rgba(0,0,0,0.16);
+    text-align: center;
+    animation: sas-pop-in 0.22s cubic-bezier(.3,1.4,.5,1);
+  }
+  @keyframes sas-pop-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.96); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .sas-modal-header {
+    background: linear-gradient(135deg, ${MAROON_MID} 0%, ${MAROON_DEEP} 100%);
+    padding: 26px 24px 20px;
+  }
+  .sas-modal-icon {
+    width: 50px; height: 50px; border-radius: 50%;
+    margin: 0 auto 14px;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.22);
+    border: 1.5px solid rgba(201,168,76,0.45);
+    color: ${GOLD};
+  }
+  .sas-modal-title {
+    font-family: ${FONT_DISPLAY};
+    font-size: 17px; font-weight: 700; letter-spacing: 0.03em;
+    color: #FDF0CE;
+    margin: 0;
+  }
+  .sas-modal-body { padding: 22px 26px 26px; }
+  .sas-modal-sub {
+    font-family: ${FONT_SANS};
+    font-size: 12.5px; color: ${TEXT_MUTED};
+    line-height: 1.65; margin: 0 0 22px;
+  }
+  .sas-modal-actions { display: flex; gap: 10px; }
+  .sas-modal-actions .sas-btn { flex: 1; padding: 11px 14px; }
+  .sas-modal-actions .sas-btn.d {
+    background: linear-gradient(135deg, #A30000 0%, ${MAROON_DEEP} 100%);
+    border: none;
+    color: #FDE7A8;
+    font-weight: 700;
+    box-shadow: 0 4px 14px rgba(90,0,0,0.35);
+  }
+  .sas-modal-actions .sas-btn.d:hover:not(:disabled) {
+    background: linear-gradient(135deg, #C0392B 0%, #7B0000 100%);
+    box-shadow: 0 6px 20px rgba(80,0,0,0.50);
+    transform: translateY(-1px);
+  }
+  .sas-modal-actions .sas-btn.d:active:not(:disabled) { transform: translateY(0); }
 `;
 
 const ROLES = {
@@ -332,6 +466,84 @@ function Toast({ msg, ok }) {
       }
       {msg}
     </div>
+  );
+}
+
+function LogoutConfirmModal({ onCancel, onConfirm, busy }) {
+  useEffect(() => {
+    const onEsc = (e) => { if (e.key === 'Escape' && !busy) onCancel(); };
+    document.addEventListener('keydown', onEsc);
+    return () => document.removeEventListener('keydown', onEsc);
+  }, [onCancel, busy]);
+
+  return (
+    <div className="sas-modal-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
+      <div className="sas-modal" role="alertdialog" aria-modal="true" aria-labelledby="sas-modal-title">
+        <div className="sas-modal-header">
+          <div className="sas-modal-icon">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M9 21H6a2.5 2.5 0 0 1-2.5-2.5v-13A2.5 2.5 0 0 1 6 3h3"/>
+              <polyline points="15.5 16 20 12 15.5 8"/>
+              <line x1="20" y1="12" x2="8.5" y2="12"/>
+            </svg>
+          </div>
+          <p className="sas-modal-title" id="sas-modal-title">Log out of LibraScan?</p>
+        </div>
+        <div className="sas-modal-body">
+          <p className="sas-modal-sub">You'll be signed out of your Super Admin session on this device and returned to the login screen.</p>
+          <div className="sas-modal-actions">
+            <button className="sas-btn o" onClick={onCancel} disabled={busy}>Cancel</button>
+            <button className="sas-btn d" onClick={onConfirm} disabled={busy}>
+              {busy ? 'Logging out…' : 'Yes, Logout'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FloatingLogout({ onSignOut }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy]       = useState(false);
+
+  const handleConfirmLogout = async () => {
+    setBusy(true);
+    try {
+      await onSignOut();
+    } finally {
+      setBusy(false);
+      setConfirm(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Hover expands the button and reveals the label; clicking opens the confirmation dialog */}
+      <button
+        type="button"
+        className="sas-fab"
+        aria-label="Logout"
+        onClick={() => setConfirm(true)}
+      >
+        <span className="sas-fab-icon">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H6a2.5 2.5 0 0 1-2.5-2.5v-13A2.5 2.5 0 0 1 6 3h3"/>
+            <polyline points="15.5 16 20 12 15.5 8"/>
+            <line x1="20" y1="12" x2="8.5" y2="12"/>
+          </svg>
+        </span>
+        <span className="sas-fab-label">Logout</span>
+      </button>
+
+      {confirm && (
+        <LogoutConfirmModal
+          busy={busy}
+          onCancel={() => !busy && setConfirm(false)}
+          onConfirm={handleConfirmLogout}
+        />
+      )}
+    </>
   );
 }
 
@@ -642,7 +854,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   );
 }
 
-function SecurityTab({ onToast, onSignOut }) {
+function SecurityTab({ onToast }) {
   const [pw,     setPw]     = useState({ old: '', newPw: '', confirm: '' });
   const [pwErr,  setPwErr]  = useState({});
   const [pwBusy, setPwBusy] = useState(false);
@@ -754,17 +966,6 @@ function SecurityTab({ onToast, onSignOut }) {
             </span>
           </div>
         </div>
-
-        <div className="sas-card">
-          <p className="sas-card-h">Sign Out</p>
-          <p className="sas-card-sub">End your current session on this device.</p>
-          <div className="sas-btn-row" style={{ justifyContent: 'center' }}>
-            <button className="sas-btn d" onClick={onSignOut}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-              Logout
-            </button>
-          </div>
-        </div>
       </div>
     </div>
   );
@@ -802,7 +1003,9 @@ export default function SuperAdminSettings({ user, onSignOut }) {
       </div>
 
       {tab === 'profile'  && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
-      {tab === 'security' && <SecurityTab onToast={toast} onSignOut={onSignOut} />}
+      {tab === 'security' && <SecurityTab onToast={toast} />}
+
+      <FloatingLogout onSignOut={onSignOut} />
     </div>
   );
 }

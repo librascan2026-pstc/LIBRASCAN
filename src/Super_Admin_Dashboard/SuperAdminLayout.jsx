@@ -36,12 +36,25 @@ const PAGES = [
 ];
 
 const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
+
+  html, body, #root {
+    background: ${CREAM} !important;
+    color-scheme: light;
+  }
+
+  .sa-layout, .sa-layout *, .sa-layout *::before, .sa-layout *::after {
+    box-sizing: border-box;
+  }
+
   .sa-layout {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
     background: ${CREAM};
     font-family: var(--font-sans, 'DM Sans', 'Josefin Sans', sans-serif);
+    overflow-x: hidden;
+    width: 100%;
   }
 
   /* ---------- Top bar ---------- */
@@ -50,20 +63,73 @@ const CSS = `
     align-items: center;
     justify-content: space-between;
     background: linear-gradient(180deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
-    padding: 10px 26px;
+    padding: 16px 30px;
     box-shadow: 0 3px 14px rgba(40,0,0,0.30);
     position: sticky;
     top: 0;
     z-index: 100;
+    gap: 12px;
+    width: 100%;
   }
-  .sa-brand { display:flex; align-items:center; gap:10px; }
+  .sa-topbar-title {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Cinzel', var(--font-sans, serif);
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 0.4em;
+    text-transform: uppercase;
+    color: rgba(212,175,55,0.32);
+    white-space: nowrap;
+    pointer-events: none;
+    user-select: none;
+  }
+  .sa-brand { display: flex; align-items: center; gap: 14px; min-width: 0; flex-shrink: 1; }
+  .sa-brand-logo-ring {
+    flex-shrink: 0;
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    padding: 2px;
+    background: linear-gradient(135deg, ${GOLD} 0%, ${GOLD_PALE} 50%, ${GOLD} 100%);
+    box-shadow: 0 2px 10px rgba(0,0,0,0.28);
+    display: flex; align-items: center; justify-content: center;
+  }
   .sa-brand img {
-    width: 38px; height: 38px; border-radius: 50%; object-fit: cover;
-    border: 2px solid rgba(245,228,168,0.55);
+    width: 100%; height: 100%; border-radius: 50%; object-fit: cover;
+    border: 2px solid ${MAROON_DEEP};
     background: #fff;
+    display: block;
   }
-  .sa-brand-title { font-size: 15px; font-weight: 800; letter-spacing: 0.05em; color: #fff; line-height: 1.15; }
-  .sa-brand-sub { font-size: 9px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase; color: rgba(245,228,168,0.75); }
+  .sa-brand-text { display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+  .sa-brand-title {
+    font-family: 'Cinzel', var(--font-sans, serif);
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.13em;
+    color: #fff;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .sa-brand-sub {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: ${GOLD_PALE};
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .sa-brand-sub::before {
+    content: '';
+    width: 12px; height: 1px;
+    background: ${GOLD};
+    flex-shrink: 0;
+  }
 
   .sa-topnav { display: flex; align-items: center; gap: 34px; position: relative; }
   .sa-topnav-item {
@@ -81,13 +147,13 @@ const CSS = `
   .sa-topnav-item.active:hover .sa-topnav-icon { transform: none; }
 
   .sa-topnav-item.active .sa-topnav-icon {
-    width: 56px; height: 56px; border-radius: 50%;
+    width: 52px; height: 52px; border-radius: 50%;
     background: #fff;
     color: ${MAROON};
-    box-shadow: 0 10px 22px rgba(20,0,0,0.40), 0 2px 6px rgba(0,0,0,0.18);
-    margin-top: -26px;
+    box-shadow: 0 8px 18px rgba(20,0,0,0.38), 0 2px 6px rgba(0,0,0,0.16);
+    margin-top: -18px;
   }
-  .sa-topnav-item.active .sa-topnav-icon svg { width: 24px; height: 24px; }
+  .sa-topnav-item.active .sa-topnav-icon svg { width: 22px; height: 22px; }
 
   .sa-topnav-label {
     font-size: 9.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
@@ -104,11 +170,12 @@ const CSS = `
   .sa-content { flex: 1; padding: 26px 30px 40px; }
 
   @media (max-width: 768px) {
-    .sa-topbar { padding: 10px 14px; }
+    .sa-topbar { padding: 12px 16px; }
     .sa-brand-title { font-size: 13px; }
     .sa-topnav { gap: 14px; }
     .sa-topnav-label { display: none; }
     .sa-content { padding: 16px; }
+    .sa-topbar-title { display: none; }
   }
 `;
 
@@ -138,12 +205,16 @@ export default function SuperAdminLayout({ user, onSignOut }) {
         {/* Top bar */}
         <header className="sa-topbar">
           <div className="sa-brand">
-            <img src="/LibraryLogo.png" alt="PSU" />
-            <div>
+            <div className="sa-brand-logo-ring">
+              <img src="/LibraryLogo.png" alt="PSU" />
+            </div>
+            <div className="sa-brand-text">
               <div className="sa-brand-title">LIBRASCAN</div>
               <div className="sa-brand-sub">Pampanga State University</div>
             </div>
           </div>
+
+          <div className="sa-topbar-title">Super Admin</div>
 
           <nav className="sa-topnav">
             {PAGES.map(({ key, label, icon }) => (

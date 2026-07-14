@@ -106,5 +106,5 @@ export const STAT_TARGETS = [
   { target: 5000, suffix: "+", label: "Books in Catalog"  },
   { target: 1200, suffix: "+", label: "Registered Users"  },
   { target: 98,   suffix: "%", label: "Scan Accuracy"     },
-  { target: 1,    suffix: "",  label: "University Campus" },
+  { target: 9,    suffix: "",  label: "University Campus" },
 ];

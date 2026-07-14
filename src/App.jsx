@@ -267,7 +267,7 @@ function HeroSection({ onNavClick, onGetStarted }) {
           <h1 className="hero-animate-2 hero__title" style={{color:"#fff",marginBottom:32}}>System</h1>
           <p className="hero-animate-3 hero__subtitle">
             Development and implementation of a QR code-based library management system with online public access
-            catalog and attendance monitoring of Pampanga State University, Sto. Tomas Campus.
+            catalog and attendance monitoring of Pampanga State University.
           </p>
           <div className="hero-animate-4 hero__ctas">
             <button className="btn-primary" onClick={() => onNavClick("features")}>Explore Features</button>
@@ -292,7 +292,7 @@ function HeroSection({ onNavClick, onGetStarted }) {
                 <div className="qr-scan-line"/>
               </a>
               <div className="qr-caption">Scan to download the app</div>
-              
+
             </div>
             <div className="qr-badge qr-badge--tl">
               <div className="qr-badge__title">Book Checked Out</div>

@@ -1,405 +1,392 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Building2, GraduationCap, BookOpen, BookMarked,
-  ClipboardList, Users, LayoutGrid, CalendarDays,
+  Building2, GraduationCap, BookOpen, BookMarked, ClipboardList, Users,
+  LayoutGrid, MapPin, Landmark, Search, ChevronLeft, ChevronRight,
+  CalendarDays, ShieldCheck,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
 
 /* ============================================================================
    LIBRASCAN — Super Admin Overview
-   ----------------------------------------------------------------------------
-   Design concept: "the front desk, the drawer, the ledger."
-   Three textures pulled from a real library, each doing a different job —
-
-     1. STAT CARDS   → the front-desk display board: dark, numeric, glanceable.
-     2. CAMPUS ROLL   → the card-catalog drawer: a physical row of branch seals.
-     3. THE LEDGER    → the paper record book: light, ruled, serif, precise.
-
-   Palette stays true to the PSU maroon/gold identity but is tuned for
-   contrast and restraint. Type pairs a serif (Fraunces) for headings/figures
-   that should feel "recorded," DM Sans for interface copy, and DM Mono for
-   codes, timestamps and tabular data — the way a real ledger mixes hand
-   lettering with ruled numeral columns.
+   Restyled to share the exact visual language of Campus Management Hub:
+   cream/white surfaces, maroon + gold accents, the same hero, stat-card,
+   carousel-card and table treatments — so every Super Admin page now reads
+   as one consistent product.
 ============================================================================ */
 
-const INK          = '#241009';
-const MAROON       = '#7B0000';
-const MAROON_DEEP  = '#4A0000';
-const GOLD         = '#C9A84C';
-const GOLD_DEEP    = '#8C6B22';
-const PAPER        = '#F7EFDC';
+/* ── Design tokens (identical to Campus Management Hub) ─────────────────── */
+const MAROON      = '#7A0000';
+const MAROON_DEEP = '#5C0000';
+const MAROON_MID  = '#8F1616';
+const MAROON_SOFT = 'rgba(122,0,0,0.08)';
+const GOLD        = '#D4AF37';
+const GOLD_DEEP   = '#B8912B';
+const GOLD_PALE   = 'rgba(212,175,55,0.14)';
+const BG          = '#F8F6F2';
+const CARD        = '#FFFFFF';
+const CREAM       = '#FFF8EF';
+const TEXT        = '#3B2A25';
+const TEXT_MUTED  = '#8A7368';
+const BORDER      = '#E8DDD4';
+const SUCCESS     = '#22C55E';
+const DANGER      = '#EF4444';
+const BLUE        = '#3B82F6';
+const PURPLE      = '#9333EA';
+const ORANGE      = '#F97316';
 
 const STATS_CONFIG = [
-  { key: 'totalCampuses',   label: 'Total Campuses',    sub: 'active campuses',     Icon: Building2,     accent: '#D9B65C', iconBg: 'rgba(217,182,92,0.16)' },
-  { key: 'totalStudents',   label: 'Total Students',    sub: 'registered students', Icon: GraduationCap, accent: '#77AEDA', iconBg: 'rgba(119,174,218,0.16)' },
-  { key: 'totalBooks',      label: 'Total Books',       sub: 'across all campuses', Icon: BookOpen,      accent: '#72C296', iconBg: 'rgba(114,194,150,0.16)' },
-  { key: 'totalBorrows',    label: 'Active Borrowings', sub: 'currently borrowed',  Icon: BookMarked,    accent: '#DD9566', iconBg: 'rgba(221,149,102,0.16)' },
-  { key: 'totalAttend',     label: 'Attendance Logs',   sub: 'total log entries',   Icon: ClipboardList, accent: '#B096D6', iconBg: 'rgba(176,150,214,0.16)' },
-  { key: 'totalLibrarians', label: 'Librarians',        sub: 'assigned librarians', Icon: Users,         accent: '#56B7A9', iconBg: 'rgba(86,183,169,0.16)' },
+  { key: 'totalCampuses',   label: 'Total Campuses',    sub: 'active campuses',     Icon: Building2,     tint: { bg: GOLD_PALE,                    fg: GOLD_DEEP } },
+  { key: 'totalStudents',   label: 'Total Students',    sub: 'registered students', Icon: GraduationCap, tint: { bg: 'rgba(59,130,246,0.12)',      fg: BLUE } },
+  { key: 'totalBooks',      label: 'Total Books',       sub: 'across all campuses', Icon: BookOpen,      tint: { bg: 'rgba(34,197,94,0.12)',       fg: '#178A4C' } },
+  { key: 'totalBorrows',    label: 'Active Borrowings', sub: 'currently borrowed',  Icon: BookMarked,    tint: { bg: 'rgba(249,115,22,0.12)',      fg: ORANGE } },
+  { key: 'totalAttend',     label: 'Attendance Logs',   sub: 'total log entries',   Icon: ClipboardList, tint: { bg: 'rgba(147,51,234,0.10)',      fg: PURPLE } },
+  { key: 'totalLibrarians', label: 'Librarians',        sub: 'assigned librarians', Icon: Users,         tint: { bg: MAROON_SOFT,                  fg: MAROON } },
 ];
 
-const LEDGER_COLUMNS = [
-  { key: 'campus',     label: 'Campus' },
-  { key: 'code',       label: 'Code' },
-  { key: 'status',     label: 'Status' },
-  { key: 'librarians', label: 'Librarians' },
-  { key: 'students',   label: 'Students' },
-  { key: 'books',      label: 'Books' },
-  { key: 'borrows',    label: 'Active Borrows' },
-];
+const LEDGER_COLUMNS = ['Campus', 'Code', 'Status', 'Librarians', 'Students', 'Books', 'Active Borrows'];
 
+const PAGE_SIZE = 9;
+
+/* ── Styles ───────────────────────────────────────────────────────────── */
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=DM+Mono:wght@400;500&display=swap');
-
+  .sao, .sao * { box-sizing: border-box; }
   .sao {
-    --font-serif: 'Fraunces', ui-serif, Georgia, serif;
-    --font-mono: 'DM Mono', ui-monospace, monospace;
-    font-family: var(--font-sans, 'DM Sans', 'Josefin Sans', sans-serif);
-    max-width: 1440px;
-    margin: 0 auto;
+    font-family: var(--font-sans,'DM Sans','Josefin Sans',sans-serif);
+    color: ${TEXT};
+    -webkit-font-smoothing: antialiased;
   }
 
-  /* ---------- Header ---------- */
-  .sao-header {
+  /* ---------- Hero ---------- */
+  .sao-hero {
+    position: relative;
+    background: linear-gradient(135deg, ${CREAM} 0%, ${CARD} 100%);
+    border: 1.5px solid ${BORDER};
+    border-radius: 24px;
+    padding: 32px 32px 28px;
+    margin-bottom: 24px;
+    overflow: hidden;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
     gap: 24px;
-    margin-bottom: 28px;
     flex-wrap: wrap;
+    box-shadow: 0 10px 30px rgba(59,42,37,0.08);
   }
-  .sao-eyebrow {
-    display: flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: ${MAROON};
-    opacity: 0.75;
-    margin-bottom: 10px;
-  }
-  .sao-title {
-    font-family: var(--font-serif);
-    font-size: clamp(21px, 2.6vw, 30px);
-    font-weight: 600;
-    color: ${INK};
-    line-height: 1.18;
-    margin-bottom: 8px;
-    max-width: 620px;
-  }
-  .sao-subtitle {
-    font-size: 12.5px;
-    color: rgba(36,16,9,0.56);
-    max-width: 480px;
-    line-height: 1.55;
-  }
-  .sao-stamp {
-    flex-shrink: 0;
-    width: 88px; height: 88px;
+  .sao-hero::before {
+    content: '';
+    position: absolute;
+    top: -60%; right: -8%;
+    width: 420px; height: 420px;
     border-radius: 50%;
-    border: 1.5px dashed rgba(123,0,0,0.45);
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    transform: rotate(-6deg);
-    color: ${MAROON};
-    font-family: var(--font-mono);
-    background: rgba(123,0,0,0.035);
+    background: radial-gradient(circle, rgba(212,175,55,0.18) 0%, rgba(212,175,55,0) 70%);
+    pointer-events: none;
   }
-  .sao-stamp-day  { font-size: 8.5px; font-weight: 700; letter-spacing: 0.12em; opacity: 0.85; }
-  .sao-stamp-date { font-size: 18px; font-weight: 700; line-height: 1; margin: 3px 0; letter-spacing: 0.01em; }
-  .sao-stamp-year { font-size: 8.5px; font-weight: 600; opacity: 0.65; }
+  .sao-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(rgba(122,0,0,0.05) 1px, transparent 1px);
+    background-size: 22px 22px;
+    opacity: 0.6;
+    pointer-events: none;
+  }
+  .sao-hero-left { position: relative; z-index: 1; max-width: 640px; }
+  .sao-hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: ${MAROON_SOFT};
+    border: 1px solid rgba(122,0,0,0.18);
+    color: ${MAROON};
+    font-size: 11px; font-weight: 800; letter-spacing: 0.10em; text-transform: uppercase;
+    padding: 6px 14px; border-radius: 999px; margin-bottom: 16px;
+  }
+  .sao-hero-title {
+    font-size: 25px; font-weight: 800; letter-spacing: -0.01em;
+    color: ${TEXT}; line-height: 1.2; margin-bottom: 10px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .sao-hero-icon {
+    width: 42px; height: 42px; border-radius: 14px;
+    background: ${MAROON_SOFT};
+    border: 1px solid rgba(122,0,0,0.18);
+    display: flex; align-items: center; justify-content: center;
+    color: ${MAROON}; flex-shrink: 0;
+  }
+  .sao-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 560px; font-weight: 500; text-align: left;}
+  .sao-hero-right { position: relative; z-index: 1; display: flex; align-items: center; }
+  .sao-date-chip {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 84px; height: 84px; border-radius: 18px;
+    background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
+    border: 1.5px solid rgba(212,175,55,0.35);
+    box-shadow: 0 10px 24px rgba(122,0,0,0.28);
+    color: #fff; gap: 3px;
+  }
+  .sao-date-day  { font-size: 9px; font-weight: 800; letter-spacing: 0.12em; color: ${GOLD}; text-transform: uppercase; }
+  .sao-date-num  { font-size: 20px; font-weight: 800; line-height: 1; }
+  .sao-date-year { font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.65); }
 
-  /* ---------- Stat cards (front-desk board) ---------- */
-  .sao-grid {
+  /* ---------- Stat cards ---------- */
+  .sao-stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 14px;
-    margin-bottom: 32px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 16px;
+    margin-bottom: 28px;
   }
   @keyframes sao-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   .sao-stat-card {
-    background: linear-gradient(150deg, #200406 0%, #12020380 100%), linear-gradient(150deg, #1c0507 0%, #0f0203 100%);
-    border: 1px solid rgba(201,168,76,0.16);
-    border-radius: 14px;
-    padding: 18px 20px;
-    position: relative;
-    overflow: hidden;
-    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-    animation: sao-rise 0.45s ease both;
+    background: ${CARD};
+    border: 1px solid ${BORDER};
+    border-radius: 16px;
+    padding: 16px;
+    display: flex; align-items: center; gap: 16px;
+    transition: transform 0.16s cubic-bezier(.22,1,.36,1), box-shadow 0.16s, border-color 0.16s;
+    animation: sao-rise 0.4s ease both;
   }
-  .sao-grid .sao-stat-card:nth-child(1) { animation-delay: 0.02s; }
-  .sao-grid .sao-stat-card:nth-child(2) { animation-delay: 0.06s; }
-  .sao-grid .sao-stat-card:nth-child(3) { animation-delay: 0.10s; }
-  .sao-grid .sao-stat-card:nth-child(4) { animation-delay: 0.14s; }
-  .sao-grid .sao-stat-card:nth-child(5) { animation-delay: 0.18s; }
-  .sao-grid .sao-stat-card:nth-child(6) { animation-delay: 0.22s; }
-  .sao-stat-card:hover {
-    transform: translateY(-3px);
-    border-color: rgba(201,168,76,0.34);
-    box-shadow: 0 10px 26px rgba(0,0,0,0.30);
-  }
-  .sao-stat-card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, transparent, var(--accent, ${GOLD}), transparent);
-    opacity: 0.85;
-  }
-  .sao-stat-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .sao-stats-grid .sao-stat-card:nth-child(1) { animation-delay: 0.02s; }
+  .sao-stats-grid .sao-stat-card:nth-child(2) { animation-delay: 0.05s; }
+  .sao-stats-grid .sao-stat-card:nth-child(3) { animation-delay: 0.08s; }
+  .sao-stats-grid .sao-stat-card:nth-child(4) { animation-delay: 0.11s; }
+  .sao-stats-grid .sao-stat-card:nth-child(5) { animation-delay: 0.14s; }
+  .sao-stats-grid .sao-stat-card:nth-child(6) { animation-delay: 0.17s; }
+  .sao-stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(59,42,37,0.08); border-color: rgba(122,0,0,0.22); }
   .sao-stat-icon {
-    width: 34px; height: 34px; border-radius: 9px;
-    display: flex; align-items: center; justify-content: center;
-    background: var(--icon-bg);
-    flex-shrink: 0;
+    width: 42px; height: 42px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
   }
-  .sao-stat-label {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: rgba(245,228,168,0.55);
-    max-width: 110px;
-    line-height: 1.35;
-  }
-  .sao-stat-value {
-    font-family: var(--font-serif);
-    font-size: 30px;
-    font-weight: 600;
-    color: #F8EFD8;
-    line-height: 1;
-    letter-spacing: -0.01em;
-    font-variant-numeric: tabular-nums;
-  }
-  .sao-stat-sub {
-    font-size: 10.5px;
-    color: rgba(245,228,168,0.38);
-    margin-top: 6px;
-  }
-
-  /* ---------- Skeleton (loading) ---------- */
-  @keyframes sao-shimmer { 0% { background-position: -220px 0; } 100% { background-position: 220px 0; } }
-  .sao-skel {
-    background: linear-gradient(90deg, rgba(255,255,255,0.035) 25%, rgba(255,255,255,0.09) 37%, rgba(255,255,255,0.035) 63%);
-    background-size: 420px 100%;
-    animation: sao-shimmer 1.3s linear infinite;
-    border-radius: 7px;
-  }
-  .sao-skel-card { height: 106px; border-radius: 14px; }
-  .sao-skel-line { height: 12px; }
-  .sao-skel-header { height: 82px; border-radius: 14px; margin-bottom: 28px; max-width: 560px; }
-  .sao-skel-carousel { height: 128px; border-radius: 14px; margin-bottom: 28px; }
-  .sao-skel-ledger { height: 260px; border-radius: 14px; }
+  .sao-stat-body { min-width: 0; }
+  .sao-stat-value { font-size: 22px; font-weight: 800; color: ${TEXT}; line-height: 1.15; font-variant-numeric: tabular-nums; }
+  .sao-stat-label { font-size: 11px; font-weight: 700; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+  .sao-stat-sub { font-size: 10.5px; color: rgba(138,115,104,0.7); margin-top: 1px; }
 
   /* ---------- Section titles ---------- */
-  .sao-section-title {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: rgba(123,0,0,0.60);
-    margin-bottom: 4px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  .sao-selector-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
   }
-  .sao-section-title::after { content: ''; flex: 1; height: 1px; background: rgba(123,0,0,0.14); }
-  .sao-section-caption {
-    font-size: 11.5px;
-    color: rgba(36,16,9,0.48);
-    margin-bottom: 14px;
+  .sao-selector-title {
+    font-size: 13px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+    color: ${TEXT_MUTED};
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sao-selector-title svg { color: ${MAROON}; }
+  .sao-selector-caption { font-size: 12px; color: ${TEXT_MUTED}; font-weight: 500; }
+
+  /* ---------- Campus directory carousel (matches Campus Hub cards) ------- */
+  .sao-carousel-section { margin-bottom: 28px; }
+  .sao-carousel-wrap {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 0 4px;
+  }
+  .sao-carousel-track-outer {
+    flex: 1; min-width: 0; overflow: hidden;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
+            mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
+  }
+  .sao-carousel-track { display: flex; gap: 16px; width: max-content; will-change: transform; }
+  .sao-carousel-empty {
+    border: 1.5px dashed rgba(122,0,0,0.28);
+    border-radius: 18px;
+    padding: 30px 20px;
+    text-align: center;
+    color: ${TEXT_MUTED};
+    font-size: 13px; font-weight: 600;
+    width: 100%;
   }
 
-  /* ---------- Campus roll (card-catalog drawer) ---------- */
-  .sao-carousel-section { margin-bottom: 32px; }
-  .sao-carousel-wrap {
+  .sao-campus-card {
+    flex: 0 0 208px;
+    background:
+      radial-gradient(circle at 30% 0%, rgba(255,255,255,0.07) 0%, transparent 55%),
+      linear-gradient(160deg, ${MAROON_MID} 0%, ${MAROON} 45%, ${MAROON_DEEP} 100%);
+    border: 1.5px solid rgba(212,175,55,0.22);
+    border-radius: 18px;
+    padding: 18px 16px 16px;
     position: relative;
-    background: linear-gradient(120deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
-    border-radius: 14px;
     overflow: hidden;
-    box-shadow: 0 6px 20px rgba(80,0,0,0.18);
-  }
-  .sao-carousel-wrap::before,
-  .sao-carousel-wrap::after {
-    content: '';
-    position: absolute;
-    top: 0; bottom: 0;
-    width: 46px;
-    z-index: 2;
-    pointer-events: none;
-  }
-  .sao-carousel-wrap::before { left: 0;  background: linear-gradient(90deg, ${MAROON} 0%, rgba(123,0,0,0) 100%); }
-  .sao-carousel-wrap::after  { right: 0; background: linear-gradient(270deg, ${MAROON_DEEP} 0%, rgba(90,0,0,0) 100%); }
-  .sao-carousel-track-outer { overflow: hidden; }
-  .sao-carousel-track { display: flex; width: max-content; will-change: transform; }
-  .sao-campus-chip {
-    flex-shrink: 0;
-    width: 166px;
-    padding: 18px 12px 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
-    border-right: 1px dashed rgba(255,255,255,0.14);
+    gap: 10px;
+    text-align: center;
+    transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
+    box-shadow: 0 4px 14px rgba(40,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06);
   }
-  .sao-chip-logo {
-    width: 52px; height: 52px;
-    border-radius: 50%;
-    border: 2px solid rgba(201,168,76,0.55);
-    background: #fff;
-    overflow: hidden;
-    flex-shrink: 0;
+  .sao-campus-card::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, transparent, ${GOLD}, transparent);
+    opacity: 0.7;
+  }
+  .sao-campus-card::after {
+    content: '';
+    position: absolute; inset: 0;
+    background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
+    background-size: 16px 16px;
+    pointer-events: none;
+  }
+  .sao-campus-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 16px 34px rgba(40,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08);
+    border-color: rgba(212,175,55,0.5);
+  }
+  .sao-campus-logo {
+    width: 52px; height: 52px; border-radius: 50%;
+    border: 2px solid ${GOLD};
+    background: ${CREAM};
+    overflow: hidden; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.22);
+    box-shadow: 0 3px 10px rgba(0,0,0,0.25), 0 0 0 3px rgba(212,175,55,0.15);
+    position: relative; z-index: 1;
   }
-  .sao-chip-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .sao-chip-name {
-    font-family: var(--font-serif);
-    font-size: 11.5px;
-    font-weight: 600;
-    text-align: center;
-    color: #fff;
-    line-height: 1.3;
+  .sao-campus-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .sao-campus-name {
+    font-size: 13.5px; font-weight: 800; color: #fff; line-height: 1.3;
+    position: relative; z-index: 1;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.25);
   }
-  .sao-chip-meta {
+  .sao-campus-code {
+    font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.6);
+    letter-spacing: 0.05em; text-transform: uppercase;
+    position: relative; z-index: 1;
+  }
+  .sao-campus-stats {
+    display: flex; gap: 12px; margin-top: 4px;
+    position: relative; z-index: 1;
+    border-top: 1px dashed rgba(255,255,255,0.16);
+    padding-top: 10px; width: 100%; justify-content: center;
+  }
+  .sao-campus-stat { display: flex; flex-direction: column; align-items: center; }
+  .sao-campus-stat b { font-size: 15px; font-weight: 800; color: ${GOLD_DEEP}; line-height: 1.2; text-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+  .sao-campus-stat span { font-size: 8.5px; font-weight: 700; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.04em; }
+  .sao-campus-foot {
     display: flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-    color: rgba(245,228,168,0.65);
+    position: relative; z-index: 1;
   }
-  .sao-chip-code {
-    padding: 1px 7px;
-    border-radius: 20px;
-    background: rgba(201,168,76,0.18);
-    color: #F5E4A8;
-    letter-spacing: 0.05em;
-  }
-  .sao-chip-dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-  .sao-carousel-empty { padding: 30px 20px; text-align: center; color: rgba(255,255,255,0.6); font-size: 12.5px; }
+  .sao-status-dot { width: 7px; height: 7px; border-radius: 50%; background: ${SUCCESS}; box-shadow: 0 0 0 3px rgba(34,197,94,0.16); }
+  .sao-status-dot.off { background: ${DANGER}; box-shadow: 0 0 0 3px rgba(239,68,68,0.16); }
+  .sao-status-text { font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.7); }
 
-  /* ---------- The ledger (paper record book) ---------- */
-  .sao-ledger-card {
-    background: ${PAPER};
-    background-image: repeating-linear-gradient(rgba(74,0,0,0.045) 0px, rgba(74,0,0,0.045) 1px, transparent 1px, transparent 42px);
-    border: 1px solid rgba(74,0,0,0.14);
-    border-radius: 14px;
+  /* ---------- Toolbar ---------- */
+  .sao-toolbar {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .sao-search { flex: 1 1 260px; min-width: 200px; position: relative; }
+  .sao-search svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: ${TEXT_MUTED}; pointer-events: none; }
+  .sao-search input {
+    width: 100%; padding: 11px 14px 11px 40px; border-radius: 999px;
+    border: 1.5px solid ${BORDER}; background: ${CARD};
+    font-family: inherit; font-size: 13px; color: ${TEXT}; outline: none;
+    transition: border-color 0.16s, box-shadow 0.16s;
+  }
+  .sao-search input:focus { border-color: ${MAROON}; box-shadow: 0 0 0 4px ${MAROON_SOFT}; }
+  .sao-search input::placeholder { color: rgba(58,42,37,0.35); }
+
+  /* ---------- Table (matches Campus Hub) ---------- */
+  .sao-table-wrap {
+    background: ${CARD};
+    border: 1px solid ${BORDER};
+    border-radius: 18px;
     overflow: hidden;
+    box-shadow: 0 2px 10px rgba(59,42,37,0.04);
   }
-  .sao-ledger-scroll { overflow-x: auto; }
-  .sao-ledger-table { width: 100%; min-width: 700px; border-collapse: collapse; }
-  .sao-ledger-table th {
+  .sao-table-scroll { overflow-x: auto; }
+  .sao-table { width: 100%; border-collapse: collapse; min-width: 700px; }
+  .sao-table thead th {
     text-align: left;
-    font-family: var(--font-mono);
-    font-size: 9.5px;
-    font-weight: 700;
-    letter-spacing: 0.10em;
-    text-transform: uppercase;
-    color: rgba(74,0,0,0.55);
-    padding: 13px 16px;
-    background: rgba(74,0,0,0.055);
-    border-bottom: 1.5px solid rgba(74,0,0,0.22);
+    font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
+    color: rgba(255,248,239,0.92);
+    background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
+    padding: 15px 18px;
     white-space: nowrap;
   }
-  .sao-ledger-table td {
-    padding: 12px 16px;
-    font-size: 12.5px;
-    color: rgba(36,16,9,0.72);
-    border-bottom: 1px dashed rgba(74,0,0,0.15);
-    vertical-align: middle;
-    white-space: nowrap;
+  .sao-table thead th:first-child { border-top-left-radius: 18px; }
+  .sao-table thead th:last-child { border-top-right-radius: 18px; }
+  .sao-table tbody td {
+    padding: 14px 18px; font-size: 13px; color: ${TEXT};
+    border-bottom: 1px solid ${BORDER}; vertical-align: middle;
   }
-  .sao-ledger-table tr:last-child td { border-bottom: none; }
-  .sao-ledger-table tr:hover td { background: rgba(74,0,0,0.035); }
-  .sao-ledger-name { font-family: var(--font-serif); color: ${INK}; font-weight: 600; font-size: 13.5px; }
-  .sao-status {
-    display: inline-flex; align-items: center; gap: 6px;
-    font-family: var(--font-mono);
-    font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em;
-  }
-  .sao-status-ring { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid currentColor; position: relative; flex-shrink: 0; }
-  .sao-status-ring::after { content: ''; position: absolute; inset: 2px; border-radius: 50%; background: currentColor; }
-  .sao-fig {
-    display: inline-block;
-    min-width: 28px;
-    text-align: center;
-    padding: 2px 9px;
-    border-radius: 20px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-  }
+  .sao-table tbody tr:last-child td { border-bottom: none; }
+  .sao-table tbody tr:nth-child(even) td { background: ${CREAM}; }
+  .sao-table tbody tr { transition: background 0.14s; }
+  .sao-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  .sao-table-empty { text-align: center; padding: 0; }
+
+  .sao-name-cell { font-weight: 800; color: ${TEXT}; }
   .sao-code-badge {
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    background: rgba(74,0,0,0.08);
-    color: ${GOLD_DEEP};
-    padding: 2px 8px;
-    border-radius: 5px;
-    letter-spacing: 0.03em;
-    border: 1px solid rgba(74,0,0,0.1);
+    display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em;
+    border-radius: 999px; padding: 4px 12px;
+    background: ${GOLD_PALE}; color: ${GOLD_DEEP};
   }
-  .sao-ledger-empty { text-align: center; color: rgba(36,16,9,0.4); padding: 34px 20px; font-size: 12.5px; white-space: normal; }
+  .sao-status-row { display: flex; align-items: center; gap: 6px; }
+  .sao-status-label { font-size: 12px; font-weight: 700; }
+  .sao-fig {
+    display: inline-block; min-width: 30px; text-align: center;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
+  }
+
+  .sao-pagination {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-top: 1px solid ${BORDER}; background: ${CREAM};
+  }
+  .sao-pagination-info { font-size: 12px; color: ${TEXT_MUTED}; font-weight: 600; }
+  .sao-pagination-btns { display: flex; gap: 6px; }
+  .sao-page-btn {
+    width: 30px; height: 30px; border-radius: 9px; border: 1px solid ${BORDER};
+    background: ${CARD}; color: ${TEXT}; font-size: 12px; font-weight: 700;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: background 0.14s, color 0.14s, border-color 0.14s;
+  }
+  .sao-page-btn:hover:not(:disabled) { background: ${MAROON}; color: #fff; border-color: ${MAROON}; }
+  .sao-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+  .sao-empty {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: 56px 24px; text-align: center;
+  }
+  .sao-empty-illus {
+    width: 76px; height: 76px; border-radius: 22px;
+    background: ${CREAM}; border: 1.5px dashed rgba(122,0,0,0.28);
+    display: flex; align-items: center; justify-content: center;
+    color: ${MAROON}; margin-bottom: 16px;
+  }
+  .sao-empty-title { font-size: 14.5px; font-weight: 800; color: ${TEXT}; margin-bottom: 6px; }
+  .sao-empty-sub { font-size: 12.5px; color: ${TEXT_MUTED}; max-width: 320px; line-height: 1.6; }
+
+  /* ---------- Skeletons ---------- */
+  @keyframes sao-shimmer-sweep { 100% { transform: translateX(100%); } }
+  .sao-shimmer { position: relative; overflow: hidden; background: ${BORDER}; border-radius: 12px; }
+  .sao-shimmer::after {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+    transform: translateX(-100%);
+    animation: sao-shimmer-sweep 1.4s infinite;
+  }
+  .sao-skel-hero { height: 148px; border-radius: 24px; margin-bottom: 24px; }
+  .sao-skel-stat { height: 78px; border-radius: 16px; }
+  .sao-skel-carousel { height: 190px; border-radius: 18px; margin-bottom: 28px; }
+  .sao-skel-table { height: 260px; border-radius: 18px; }
 
   /* ---------- Responsive ---------- */
   @media (max-width: 900px) {
-    .sao-grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+    .sao-stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   }
-
-  @media (max-width: 720px) {
-    .sao-header { gap: 16px; }
-    .sao-stamp { width: 72px; height: 72px; }
-    .sao-stamp-date { font-size: 15px; }
-
-    /* Ledger becomes a stack of index cards */
-    .sao-ledger-scroll { overflow-x: visible; }
-    .sao-ledger-table, .sao-ledger-table thead, .sao-ledger-table tbody,
-    .sao-ledger-table th, .sao-ledger-table td, .sao-ledger-table tr { display: block; width: 100%; }
-    .sao-ledger-table { min-width: 0; }
-    .sao-ledger-table thead { display: none; }
-    .sao-ledger-table tr {
-      background: #fff;
-      border: 1px solid rgba(74,0,0,0.14);
-      border-radius: 10px;
-      margin: 12px;
-      padding: 4px 14px;
-      box-shadow: 0 2px 8px rgba(74,0,0,0.06);
-    }
-    .sao-ledger-table tr:hover td { background: transparent; }
-    .sao-ledger-table td {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 9px 0;
-      border-bottom: 1px dashed rgba(74,0,0,0.14);
-      white-space: normal;
-      gap: 12px;
-    }
-    .sao-ledger-table td:last-child { border-bottom: none; }
-    .sao-ledger-table td::before {
-      content: attr(data-label);
-      font-family: var(--font-mono);
-      font-size: 9px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
-      color: rgba(74,0,0,0.45);
-      flex-shrink: 0;
-    }
-    .sao-ledger-name { font-size: 14px; }
+  @media (max-width: 768px) {
+    .sao-hero { padding: 26px 22px 22px; }
+    .sao-hero-title { font-size: 22px; }
+    .sao-hero-right { width: 100%; justify-content: flex-start; }
+    .sao-table thead th:nth-child(4), .sao-table tbody td:nth-child(4) { display: none; }
   }
-
-  @media (max-width: 480px) {
-    .sao-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .sao-stat-card { padding: 14px 15px; }
-    .sao-stat-value { font-size: 24px; }
-    .sao-stat-label { max-width: 90px; }
-    .sao-header { flex-direction: column; }
-    .sao-stamp { align-self: flex-end; transform: rotate(-4deg) scale(0.95); }
-    .sao-campus-chip { width: 134px; padding: 14px 8px 12px; }
-    .sao-chip-logo { width: 44px; height: 44px; }
+  @media (max-width: 560px) {
+    .sao-table thead th:nth-child(1), .sao-table tbody td:nth-child(1) { display: none; }
+    .sao-hero-title { font-size: 19px; }
+    .sao-hero-icon { width: 34px; height: 34px; }
+    .sao-stats-grid { grid-template-columns: repeat(2, 1fr); }
   }
 `;
 
-/* ─── Decorative auto-scrolling campus roll (display only, no interaction) ── */
+/* ── Campus directory carousel (auto-scroll, display only) ──────────────── */
 function CampusCarousel({ campuses }) {
   const trackRef  = useRef(null);
   const offsetRef = useRef(0);
@@ -441,8 +428,8 @@ function CampusCarousel({ campuses }) {
       <div className="sao-carousel-track-outer">
         <div className="sao-carousel-track" ref={trackRef}>
           {loopList.map((c, idx) => (
-            <div className="sao-campus-chip" key={`${c.id}-${idx}`}>
-              <div className="sao-chip-logo">
+            <div className="sao-campus-card" key={`${c.id}-${idx}`}>
+              <div className="sao-campus-logo">
                 {c.logo_url ? (
                   <img
                     src={c.logo_url}
@@ -453,10 +440,16 @@ function CampusCarousel({ campuses }) {
                   <Building2 size={22} color={MAROON} />
                 )}
               </div>
-              <div className="sao-chip-name">{c.campus_name}</div>
-              <div className="sao-chip-meta">
-                <span className="sao-chip-dot" style={{ background: c.is_active ? '#7FCB8C' : '#E58484' }} />
-                <span className="sao-chip-code">{c.campus_code}</span>
+              <div className="sao-campus-name">{c.campus_name}</div>
+              {c.campus_code && <div className="sao-campus-code">{c.campus_code}</div>}
+              <div className="sao-campus-stats">
+                <div className="sao-campus-stat"><b>{c.librarians ?? 0}</b><span>Staff</span></div>
+                <div className="sao-campus-stat"><b>{c.students ?? 0}</b><span>Students</span></div>
+                <div className="sao-campus-stat"><b>{c.books ?? 0}</b><span>Books</span></div>
+              </div>
+              <div className="sao-campus-foot">
+                <span className={`sao-status-dot${c.is_active ? '' : ' off'}`} />
+                <span className="sao-status-text">{c.is_active ? 'Active' : 'Inactive'}</span>
               </div>
             </div>
           ))}
@@ -468,8 +461,8 @@ function CampusCarousel({ campuses }) {
 
 function StatSkeleton() {
   return (
-    <div className="sao-grid">
-      {STATS_CONFIG.map((_, i) => <div key={i} className="sao-skel sao-skel-card" />)}
+    <div className="sao-stats-grid">
+      {STATS_CONFIG.map((_, i) => <div key={i} className="sao-shimmer sao-skel-stat" />)}
     </div>
   );
 }
@@ -478,6 +471,8 @@ export default function SuperAdminOverview() {
   const [stats,    setStats]    = useState(null);
   const [campuses, setCampuses] = useState([]);
   const [loading,  setLoading]  = useState(true);
+  const [search,   setSearch]   = useState('');
+  const [page,     setPage]     = useState(1);
 
   useEffect(() => {
     async function load() {
@@ -503,15 +498,14 @@ export default function SuperAdminOverview() {
         const activeBorrows = allBorrows.filter(b => b.status === 'approved' || b.status === 'borrowed');
 
         setStats({
-          totalCampuses:  allCampuses.length,
-          totalStudents:  students.length,
-          totalBooks:     allBooks.length,
-          totalBorrows:   activeBorrows.length,
-          totalAttend:    allAttend.length,
+          totalCampuses:   allCampuses.length,
+          totalStudents:   students.length,
+          totalBooks:      allBooks.length,
+          totalBorrows:    activeBorrows.length,
+          totalAttend:     allAttend.length,
           totalLibrarians: allLibs.length,
         });
 
-        // Per-campus breakdown
         const breakdown = allCampuses.map(c => ({
           ...c,
           students:   students.filter(p => p.campus_id === c.id).length,
@@ -532,32 +526,50 @@ export default function SuperAdminOverview() {
     const d = new Date();
     return {
       day:  d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
-      date: d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase(),
+      num:  d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase(),
       year: d.getFullYear(),
     };
   }, []);
+
+  const filteredCampuses = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return campuses;
+    return campuses.filter(c =>
+      [c.campus_name, c.campus_code].filter(Boolean).join(' ').toLowerCase().includes(q)
+    );
+  }, [campuses, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredCampuses.length / PAGE_SIZE));
+  const pagedCampuses = filteredCampuses.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  useEffect(() => { setPage(1); }, [search]);
 
   return (
     <div className="sao">
       <style>{CSS}</style>
 
-      {/* Header */}
+      {/* Hero */}
       {loading ? (
-        <div className="sao-skel sao-skel-header" />
+        <div className="sao-shimmer sao-skel-hero" />
       ) : (
-        <div className="sao-header">
-          <div>
-            <div className="sao-eyebrow"><LayoutGrid size={11} /> Super Admin · System Overview</div>
-            <div className="sao-title">The PSU Library Network, today</div>
-            <div className="sao-subtitle">
-              Live totals across every connected campus, updated as students and librarians check books in and out.
+        <div className="sao-hero">
+          <div className="sao-hero-left">
+            <div className="sao-hero-title">
+              <span className="sao-hero-icon"><ShieldCheck size={22} /></span>
+              Empowering Knowledge Across Every Campus
+            </div>
+            <div className="sao-hero-sub">
+            Bringing every campus library together through centralized management,
+            real-time monitoring, and intelligent insights.
             </div>
           </div>
-          <div className="sao-stamp">
-            <CalendarDays size={13} style={{ marginBottom: 2, opacity: 0.7 }} />
-            <span className="sao-stamp-day">{todayParts.day}</span>
-            <span className="sao-stamp-date">{todayParts.date}</span>
-            <span className="sao-stamp-year">{todayParts.year}</span>
+          <div className="sao-hero-right">
+            <div className="sao-date-chip">
+              <CalendarDays size={13} color={GOLD} />
+              <span className="sao-date-day">{todayParts.day}</span>
+              <span className="sao-date-num">{todayParts.num}</span>
+              <span className="sao-date-year">{todayParts.year}</span>
+            </div>
           </div>
         </div>
       )}
@@ -566,78 +578,113 @@ export default function SuperAdminOverview() {
       {loading ? (
         <StatSkeleton />
       ) : (
-        <div className="sao-grid">
-          {STATS_CONFIG.map(({ key, label, sub, Icon, accent, iconBg }) => (
-            <div key={key} className="sao-stat-card" style={{ '--accent': accent, '--icon-bg': iconBg }}>
-              <div className="sao-stat-top">
-                <div className="sao-stat-label">{label}</div>
-                <div className="sao-stat-icon" style={{ '--icon-bg': iconBg }}>
-                  <Icon size={17} color={accent} strokeWidth={2} />
-                </div>
+        <div className="sao-stats-grid">
+          {STATS_CONFIG.map(({ key, label, sub, Icon, tint }) => (
+            <div key={key} className="sao-stat-card">
+              <div className="sao-stat-icon" style={{ background: tint.bg }}>
+                <Icon size={19} color={tint.fg} strokeWidth={2} />
               </div>
-              <div className="sao-stat-value">{stats?.[key] ?? 0}</div>
-              <div className="sao-stat-sub">{sub}</div>
+              <div className="sao-stat-body">
+                <div className="sao-stat-value">{stats?.[key] ?? 0}</div>
+                <div className="sao-stat-label">{label}</div>
+                <div className="sao-stat-sub">{sub}</div>
+              </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Campus roll */}
+      {/* Campus directory */}
       <div className="sao-carousel-section">
-        <div className="sao-section-title">Campus Directory</div>
-        <div className="sao-section-caption">Every branch in the system, front to back.</div>
-        {loading ? <div className="sao-skel sao-skel-carousel" /> : <CampusCarousel campuses={campuses} />}
+        <div className="sao-selector-head">
+          <div className="sao-selector-title"><MapPin size={14} />Campus Directory ({campuses.length})</div>
+          <div className="sao-selector-caption">Every branch in the system, front to back.</div>
+        </div>
+        {loading ? <div className="sao-shimmer sao-skel-carousel" /> : <CampusCarousel campuses={campuses} />}
       </div>
 
-      {/* The ledger */}
-      <div className="sao-section-title">Circulation Ledger</div>
-      <div className="sao-section-caption">Per-campus staffing and holdings, recorded branch by branch.</div>
+      {/* Circulation ledger */}
+      <div className="sao-selector-head">
+        <div className="sao-selector-title"><Landmark size={14} />Circulation Ledger</div>
+        <div className="sao-selector-caption">Per-campus staffing and holdings, recorded branch by branch.</div>
+      </div>
+
       {loading ? (
-        <div className="sao-skel sao-skel-ledger" />
+        <div className="sao-shimmer sao-skel-table" />
       ) : (
-        <div className="sao-ledger-card">
-          <div className="sao-ledger-scroll">
-            <table className="sao-ledger-table">
-              <thead>
-                <tr>{LEDGER_COLUMNS.map(c => <th key={c.key}>{c.label}</th>)}</tr>
-              </thead>
-              <tbody>
-                {campuses.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="sao-ledger-empty">
-                      No campuses found. Add your first campus in Campus Management.
-                    </td>
-                  </tr>
-                ) : campuses.map(c => (
-                  <tr key={c.id}>
-                    <td data-label="Campus" className="sao-ledger-name">{c.campus_name}</td>
-                    <td data-label="Code">
-                      <span className="sao-code-badge">{c.campus_code}</span>
-                    </td>
-                    <td data-label="Status">
-                      <span className="sao-status" style={{ color: c.is_active ? '#3B9B4F' : '#C2483D' }}>
-                        <span className="sao-status-ring" />
-                        {c.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td data-label="Librarians">
-                      <span className="sao-fig" style={{ background: 'rgba(140,107,34,0.12)', color: GOLD_DEEP }}>{c.librarians}</span>
-                    </td>
-                    <td data-label="Students">
-                      <span className="sao-fig" style={{ background: 'rgba(53,102,145,0.12)', color: '#356691' }}>{c.students}</span>
-                    </td>
-                    <td data-label="Books">
-                      <span className="sao-fig" style={{ background: 'rgba(45,124,86,0.12)', color: '#2D7C56' }}>{c.books}</span>
-                    </td>
-                    <td data-label="Active Borrows">
-                      <span className="sao-fig" style={{ background: 'rgba(178,90,46,0.12)', color: '#B25A2E' }}>{c.borrows}</span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <>
+          <div className="sao-toolbar">
+            <div className="sao-search">
+              <Search size={16} />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search campuses by name or code..."
+                aria-label="Search campuses"
+              />
+            </div>
           </div>
-        </div>
+
+          <div className="sao-table-wrap">
+            {filteredCampuses.length === 0 ? (
+              <div className="sao-empty">
+                <div className="sao-empty-illus"><Building2 size={30} strokeWidth={1.8} /></div>
+                <div className="sao-empty-title">{campuses.length ? 'No matching campuses' : 'No campuses found'}</div>
+                <div className="sao-empty-sub">
+                  {campuses.length
+                    ? 'Try a different search term.'
+                    : 'Add your first campus in Campus Management to see it here.'}
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="sao-table-scroll">
+                  <table className="sao-table">
+                    <thead>
+                      <tr>{LEDGER_COLUMNS.map(c => <th key={c}>{c}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {pagedCampuses.map(c => (
+                        <tr key={c.id}>
+                          <td className="sao-name-cell">{c.campus_name}</td>
+                          <td><span className="sao-code-badge">{c.campus_code}</span></td>
+                          <td>
+                            <div className="sao-status-row">
+                              <span className={`sao-status-dot${c.is_active ? '' : ' off'}`} style={{ boxShadow: 'none' }} />
+                              <span className="sao-status-label" style={{ color: c.is_active ? '#178A4C' : '#B91C1C' }}>
+                                {c.is_active ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                          </td>
+                          <td><span className="sao-fig" style={{ background: MAROON_SOFT, color: MAROON }}>{c.librarians}</span></td>
+                          <td><span className="sao-fig" style={{ background: 'rgba(59,130,246,0.12)', color: BLUE }}>{c.students}</span></td>
+                          <td><span className="sao-fig" style={{ background: 'rgba(34,197,94,0.12)', color: '#178A4C' }}>{c.books}</span></td>
+                          <td><span className="sao-fig" style={{ background: 'rgba(249,115,22,0.12)', color: ORANGE }}>{c.borrows}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {totalPages > 1 && (
+                  <div className="sao-pagination">
+                    <div className="sao-pagination-info">
+                      Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filteredCampuses.length)} of {filteredCampuses.length}
+                    </div>
+                    <div className="sao-pagination-btns">
+                      <button className="sao-page-btn" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} aria-label="Previous page">
+                        <ChevronLeft size={14} />
+                      </button>
+                      <button className="sao-page-btn" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages} aria-label="Next page">
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </>
       )}
     </div>
   );
