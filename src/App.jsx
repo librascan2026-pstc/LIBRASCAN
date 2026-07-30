@@ -181,7 +181,7 @@ function RoleRouter({ user, onSignOut }) {
 }
 
 // ─── Landing page sections (all unchanged from original) ──────────────────────
-function Navbar({ scrolled, onNavClick, onGetStarted }) {
+function Navbar({ scrolled, onNavClick, onGetStarted, onLogoClick }) {
   const [menuOpen, setMenuOpen] = useState(false);
 
   // Close the mobile menu automatically if the viewport is resized back up
@@ -202,12 +202,21 @@ function Navbar({ scrolled, onNavClick, onGetStarted }) {
     setMenuOpen(false);
     onGetStarted();
   };
+  const handleLogoClick = () => {
+    setMenuOpen(false);
+    onLogoClick();
+  };
 
   return (
     <nav className={`nav${scrolled ? " scrolled" : ""}${menuOpen ? " nav--open" : ""}`}>
-      <div className="nav-brand">
+      <button
+        type="button"
+        className="nav-brand"
+        onClick={handleLogoClick}
+        aria-label="Go to home"
+      >
         <img src="/LibraryLogo.png" alt="PSU Library Logo" className="nav-brand__logo" />
-      </div>
+      </button>
 
       <div className="nav-links">
         {navIds.map((id) => (
@@ -251,7 +260,7 @@ function Navbar({ scrolled, onNavClick, onGetStarted }) {
 
 function HeroSection({ onNavClick, onGetStarted }) {
   return (
-    <section className="hero">
+    <section className="hero" id="home">
       <div className="hero__bg">
         <svg style={{ position:"absolute",inset:0,width:"100%",height:"100%",opacity:0.04 }} viewBox="0 0 1440 900" preserveAspectRatio="none">
           {Array.from({length:12}).map((_,i) => (
@@ -612,6 +621,10 @@ function LandingApp() {
     window.scrollTo({ top, behavior: 'smooth' });
   };
 
+  // Logo click: navigate to the #home route (top of the landing page),
+  // using the same addressable-anchor pattern as the other nav links.
+  const goHome = () => scrollTo('home');
+
   // On first load of the landing page, honor a section anchor already in
   // the URL (e.g. arriving at /#features from an external link).
   useEffect(() => {
@@ -646,7 +659,7 @@ function LandingApp() {
   // Landing page
   return (
     <>
-      <Navbar scrolled={scrolled} onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} />
+      <Navbar scrolled={scrolled} onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} onLogoClick={goHome} />
       <HeroSection onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} />
       <StatsSection/>
       <FeaturesSection/>
