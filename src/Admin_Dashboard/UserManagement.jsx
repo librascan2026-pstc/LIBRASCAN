@@ -19,7 +19,6 @@ const Icon = {
 
 const ROLE_CONFIG = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.12)',  color: '#64b5f6',  border: 'rgba(100,181,246,0.28)' },
-  admin:           { label: 'Administrator',   bg: 'rgba(201,168,76,0.14)',  color: '#C9A84C',  border: 'rgba(201,168,76,0.30)' },
   library_manager: { label: 'Library Manager', bg: 'rgba(139,0,0,0.10)',     color: '#c0392b',  border: 'rgba(139,0,0,0.28)' },
   super_admin:     { label: 'Super Admin',     bg: 'rgba(90,0,90,0.10)',     color: '#9c27b0',  border: 'rgba(156,39,176,0.28)' },
 };
@@ -245,7 +244,7 @@ function UserModal({ user, onClose, onSave }) {
             }}>
               <option value="student">Student</option>
               <option value="library_manager">Library Manager</option>
-              <option value="admin">Administrator</option>
+              
             </select>
             {(form.role === 'library_manager' || form.role === 'admin') && (
               <div style={{

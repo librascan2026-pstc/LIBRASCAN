@@ -92,6 +92,14 @@ async function generateCopyQR(copyId, copyNum) {
   return { dataUrl, label: copyId, copyNum, copy_id: copyId };
 }
 
+function slugifyTitle(title) {
+  return (title || 'Untitled')
+    .trim()
+    .replace(/[^a-zA-Z0-9\s-]/g, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 40) || 'Untitled';
+}
+
 
 function Toast({ message, type = 'success' }) {
   if (!message) return null;
@@ -801,6 +809,7 @@ function ViewModal({ book, onClose, onEdit }) {
 
   const downloadCopyQR = (qr, format = 'png') => {
     if (!qr) return;
+    const titleSlug = slugifyTitle(book?.title);
     const canvas   = document.createElement('canvas');
     const img      = new window.Image();
     img.crossOrigin = 'anonymous';
@@ -811,11 +820,29 @@ function ViewModal({ book, onClose, onEdit }) {
       const ctx = canvas.getContext('2d');
       ctx.imageSmoothingEnabled = false;
 
+      // Extra strip at the top to show the book title, so the saved
+      // image is easy to identify at a glance.
+      const titleH = Math.round(28 * scale);
+      const labelH = Math.round(36 * scale);
+      const fullHeight = canvas.height + titleH;
+      canvas.height = fullHeight;
+
       ctx.fillStyle = '#FDF8F0';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-      const labelH = Math.round(36 * scale);
+      ctx.fillStyle = '#5A0000';
+      ctx.font      = `bold ${Math.round(13 * scale)}px sans-serif`;
+      ctx.textAlign = 'center';
+      const maxTitleWidth = canvas.width - Math.round(20 * scale);
+      let titleText = book?.title || 'Untitled';
+      while (ctx.measureText(titleText).width > maxTitleWidth && titleText.length > 3) {
+        titleText = titleText.slice(0, -1);
+      }
+      if (titleText !== (book?.title || 'Untitled')) titleText = titleText.slice(0, -1) + '…';
+      ctx.fillText(titleText, canvas.width / 2, Math.round(19 * scale));
+
+      ctx.drawImage(img, 0, titleH, img.naturalWidth * scale, img.naturalHeight * scale);
+
       ctx.fillStyle = '#FDF8F0';
       ctx.fillRect(0, canvas.height - labelH, canvas.width, labelH);
       ctx.fillStyle = '#5A0000';
@@ -830,7 +857,7 @@ function ViewModal({ book, onClose, onEdit }) {
         const url = URL.createObjectURL(blob);
         const a   = document.createElement('a');
         a.href    = url;
-        a.download = `LIBRASCAN_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
+        a.download = `${titleSlug}_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
@@ -840,7 +867,7 @@ function ViewModal({ book, onClose, onEdit }) {
     img.onerror = () => {
       const a   = document.createElement('a');
       a.href    = qr.dataUrl;
-      a.download = `LIBRASCAN_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
+      a.download = `${titleSlug}_Copy${qr.copyNum}_${(qr.copy_id || qr.label).slice(0, 8)}.${format}`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -1318,10 +1345,13 @@ function ViewModal({ book, onClose, onEdit }) {
               borderBottom: '1px solid rgba(201,168,76,0.20)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
             }}>
-              <div>
+              <div style={{ textAlign: 'left' }}>
                 <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', letterSpacing: '0.04em', marginBottom: 2 }}>
                   QR Codes — {copies} {copies === 1 ? 'Copy' : 'Copies'}
                 </h3>
+                <p style={{ fontSize: 12, color: '#F5E4A8', fontFamily: 'var(--font-sans)', fontWeight: 600, marginBottom: 2 }}>
+                  {book?.title}
+                </p>
                 <p style={{ fontSize: 11, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)' }}>
                   Each copy has a unique QR: encodes its Copy ID (UUID)
                 </p>

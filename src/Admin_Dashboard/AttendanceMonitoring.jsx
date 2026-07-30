@@ -44,6 +44,8 @@ const Ic = {
              <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
              <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
            </svg>,
+  dl:      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  print:   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
 };
 
 const TAB_CSS = `
@@ -631,6 +633,48 @@ function VisitorHistoryTable({ onFocusChange }) {
     return matchQ && matchF;
   });
 
+  // Export / Print — Visitor History.
+  // Both always operate on `filtered`, which already honors the status
+  // dropdown: "All Status" includes time-in + time-out, "Time In" and
+  // "Time Out" each limit to their own record type.
+  const vhExportRows = useCallback(() => filtered.map(r => ({
+    'Student ID': r.id_no || '',
+    'Full Name':  r.full_name || '',
+    'Program':    r.program || '',
+    'Date':       fmtDate(r.time_in),
+    'Time In':    fmtTime(r.time_in),
+    'Status':     r.status === 'time-in' ? 'Time In' : 'Time Out',
+  })), [filtered]);
+
+  const exportVhExcel = useCallback(() => {
+    const rows = vhExportRows();
+    if (!rows.length) return;
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+    const label = filter === 'all' ? 'all' : filter;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `visitor-history-${label}-${today()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [vhExportRows, filter]);
+
+  const printVhHistory = useCallback(() => {
+    const rows = vhExportRows();
+    if (!rows.length) return;
+    const cols = Object.keys(rows[0]);
+    const label = filter === 'all' ? 'All Status' : (filter === 'time-in' ? 'Time In' : 'Time Out');
+    const win = window.open('', '_blank');
+    if (!win) return;
+    const thead = cols.map(c => `<th>${c}</th>`).join('');
+    const tbody = rows.map(r => `<tr>${cols.map(c => `<td>${r[c] ?? '—'}</td>`).join('')}</tr>`).join('');
+    win.document.write(`<html><head><title>Visitor History — ${label}</title><style>body{font-family:sans-serif;font-size:12px;color:#1a0000}h2{color:#8B0000;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#8B0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;letter-spacing:0.04em;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>Visitor History</h2><p style="color:#888;font-size:11px">${label} · ${rows.length} record${rows.length === 1 ? '' : 's'} · ${new Date().toLocaleString('en-PH')}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  }, [vhExportRows, filter]);
+
   return (
     <>
       <div className="lm-panel" style={{ marginBottom: 0, padding: 0, overflow: 'visible', borderRadius: 14, border: '1.5px solid rgba(139,0,0,0.14)' }}>
@@ -676,6 +720,27 @@ function VisitorHistoryTable({ onFocusChange }) {
               <option value="time-in">Time In</option>
               <option value="time-out">Time Out</option>
             </select>
+
+            <button
+              onClick={exportVhExcel}
+              title="Export current view to Excel (CSV)"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                height: 35, padding: '0 13px', borderRadius: 9, cursor: 'pointer',
+                border: '1.5px solid rgba(139,0,0,0.18)', background: 'var(--cream-light)',
+                fontSize: 12.5, fontWeight: 600, color: MAR, fontFamily: 'var(--font-sans)',
+              }}
+            >{Ic.dl} </button>
+            <button
+              onClick={printVhHistory}
+              title="Print current view"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                height: 35, padding: '0 13px', borderRadius: 9, cursor: 'pointer',
+                border: '1.5px solid rgba(139,0,0,0.18)', background: 'var(--cream-light)',
+                fontSize: 12.5, fontWeight: 600, color: MAR, fontFamily: 'var(--font-sans)',
+              }}
+            >{Ic.print} </button>
 
           </div>
         </div>

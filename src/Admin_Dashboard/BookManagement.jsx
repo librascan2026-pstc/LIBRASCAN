@@ -139,6 +139,8 @@ const Ic = {
   warn:   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
   phone:  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>,
   limit:  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+  dl:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>,
+  print:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>,
 };
 
 
@@ -448,8 +450,9 @@ function DRow({ label, value, mono, highlight }) {
 }
 
 
-function DetailModal({ tx, onClose }) {
+function DetailModal({ tx, onClose, campusMap }) {
   if (!tx) return null;
+  const campusName = (campusMap && campusMap[tx.campus_id]) || tx.campus_name || '—';
   const isBorrowed = tx.status?.toLowerCase() === 'borrowed';
   return (
     <div onClick={onClose} style={{
@@ -508,6 +511,7 @@ function DetailModal({ tx, onClose }) {
             })()} mono />
             <DRow label="Name"     value={(tx.student_name || '').replace(/\s*\[.*?\]\s*$/, '') || '—'} />
             <DRow label="Program"  value={tx.student_program} />
+            <DRow label="Campus"   value={campusName} />
             {tx.student_email && <DRow label="Email" value={tx.student_email} mono />}
           </div>
 
@@ -957,9 +961,20 @@ export default function BookManagement({ initialTab }) {
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [selectedTx,   setSelectedTx]  = useState(null);
+  const [campusMap,    setCampusMap]   = useState({});
 
   
   const [scannerConnected, setScannerConnected] = useState(false);
+
+
+  useEffect(() => {
+    // Lookup table so the Transaction Details modal can show the campus
+    // name for each borrowing (borrowings only stores campus_id).
+    supabaseAdmin.from('campuses').select('id, campus_name').then(({ data, error }) => {
+      if (error) { console.warn('[BookManagement] campus lookup error:', error.message); return; }
+      if (data) setCampusMap(Object.fromEntries(data.map(c => [c.id, c.campus_name])));
+    });
+  }, []);
 
 
   useEffect(() => {
@@ -1015,7 +1030,26 @@ export default function BookManagement({ initialTab }) {
     if (campusId) q = q.eq('campus_id', campusId);
     const { data, error } = await q;
     if (error) console.error('[BookManagement] load error:', error.message);
-    if (data) setTransactions(data);
+
+    if (data) {
+      // The campus_id stamped on the borrowing itself can be stale or wrong
+      // (e.g. older/imported records) — always prefer the student's actual
+      // campus from their profile when we're able to resolve it.
+      const studentIds = [...new Set(
+        data.map(r => r.student_id).filter(id => id && UUID_RE.test(String(id).trim()))
+      )];
+      let studentCampusById = {};
+      if (studentIds.length) {
+        const { data: profRows, error: profErr } = await supabaseAdmin
+          .from('profiles').select('id, campus_id').in('id', studentIds);
+        if (profErr) console.warn('[BookManagement] student campus lookup error:', profErr.message);
+        if (profRows) studentCampusById = Object.fromEntries(profRows.map(p => [p.id, p.campus_id]));
+      }
+      setTransactions(data.map(r => ({
+        ...r,
+        campus_id: studentCampusById[r.student_id] ?? r.campus_id,
+      })));
+    }
     setLoadingTx(false);
   }, [campusId]);
 
@@ -1773,6 +1807,58 @@ export default function BookManagement({ initialTab }) {
     return matchQ && matchS;
   });
 
+  // Export / Print — Transaction History.
+  // Both always operate on `filtered`, which already honors the status
+  // dropdown: "All Status" includes borrowed + returned, "Borrowed" limits
+  // to borrowed only, "Returned" limits to returned only.
+  const txExportRows = useCallback(() => filtered.map(tx => {
+    const studentNo = (() => {
+      const embedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
+      const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim()) ? String(tx.student_id).trim() : null;
+      return embedded || fromId || '';
+    })();
+    return {
+      'Student No.':  studentNo,
+      'Name':         (tx.student_name || '').replace(/\s*\[.*?\]\s*$/, ''),
+      'Program':      tx.student_program || '',
+      'Campus':       campusMap[tx.campus_id] || tx.campus_name || '',
+      'Book Title':   tx.book_title || '',
+      'Copy Label':   tx.copy_label || '',
+      'Status':       tx.status || '',
+      'Borrowed At':  fmtFull(tx.borrowed_at),
+      'Returned At':  tx.returned_at ? fmtFull(tx.returned_at) : 'Not yet returned',
+    };
+  }), [filtered, campusMap]);
+
+  const exportTxExcel = useCallback(() => {
+    const rows = txExportRows();
+    if (!rows.length) { showToast('No transactions to export.', 'error'); return; }
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+    const label = statusFilter === 'all' ? 'all' : statusFilter.toLowerCase();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `transaction-history-${label}-${today()}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [txExportRows, statusFilter, showToast]);
+
+  const printTxHistory = useCallback(() => {
+    const rows = txExportRows();
+    if (!rows.length) { showToast('No transactions to print.', 'error'); return; }
+    const cols = Object.keys(rows[0]);
+    const label = statusFilter === 'all' ? 'All Status' : (statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1));
+    const win = window.open('', '_blank');
+    if (!win) { showToast('Please allow pop-ups to print.', 'error'); return; }
+    const thead = cols.map(c => `<th>${c}</th>`).join('');
+    const tbody = rows.map(r => `<tr>${cols.map(c => `<td>${r[c] ?? '—'}</td>`).join('')}</tr>`).join('');
+    win.document.write(`<html><head><title>Transaction History — ${label}</title><style>body{font-family:sans-serif;font-size:12px;color:#1a0000}h2{color:#8B0000;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#8B0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;letter-spacing:0.04em;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>Transaction History</h2><p style="color:#888;font-size:11px">${label} · ${rows.length} record${rows.length === 1 ? '' : 's'} · ${new Date().toLocaleString('en-PH')}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  }, [txExportRows, statusFilter, showToast]);
+
   const borrowedCount = transactions.filter(t => t.status?.toLowerCase() === 'borrowed').length;
   const returnedToday = transactions.filter(t => t.status?.toLowerCase() === 'returned' && t.date === today()).length;
 
@@ -2429,6 +2515,27 @@ export default function BookManagement({ initialTab }) {
               <option value="returned">Returned</option>
             </select>
 
+            <button
+              onClick={exportTxExcel}
+              title="Export current view to Excel (CSV)"
+              style={{
+                display:'inline-flex', alignItems:'center', gap:6,
+                height:35, padding:'0 13px', borderRadius:9, cursor:'pointer',
+                border:'1.5px solid rgba(139,0,0,0.18)', background:'var(--cream-light)',
+                fontSize:12.5, fontWeight:600, color: MAR, fontFamily:'var(--font-sans)',
+              }}
+            >{Ic.dl}</button>
+            <button
+              onClick={printTxHistory}
+              title="Print current view"
+              style={{
+                display:'inline-flex', alignItems:'center', gap:6,
+                height:35, padding:'0 13px', borderRadius:9, cursor:'pointer',
+                border:'1.5px solid rgba(139,0,0,0.18)', background:'var(--cream-light)',
+                fontSize:12.5, fontWeight:600, color: MAR, fontFamily:'var(--font-sans)',
+              }}
+            >{Ic.print} </button>
+
           </div>
         </div>
 
@@ -2469,7 +2576,7 @@ export default function BookManagement({ initialTab }) {
         )}
       </div>
 
-      {selectedTx && <DetailModal tx={selectedTx} onClose={() => setSelectedTx(null)} />}
+      {selectedTx && <DetailModal tx={selectedTx} campusMap={campusMap} onClose={() => setSelectedTx(null)} />}
 
       
       {deleteConfirm && (
