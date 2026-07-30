@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import SuperAdminOverview    from './SuperAdminOverview';
 import CampusManagementHub   from './CampusManagementHub';
 import LibrarianManagement   from './LibrarianManagement';
@@ -179,15 +179,61 @@ const CSS = `
   }
 `;
 
+// ---------------------------------------------------------------------------
+// URL <-> tab mapping. Gives each Super Admin tab a real browser URL
+// (e.g. /superadmin/campuses) using the native History API — no router
+// dependency required, and no changes needed anywhere outside this file.
+// ---------------------------------------------------------------------------
+const PATH_BY_PAGE = {
+  overview:   '/superadmin/overview',
+  campuses:   '/superadmin/campuses',
+  librarians: '/superadmin/librarians',
+  settings:   '/superadmin/settings',
+};
+const PAGE_BY_PATH = Object.fromEntries(
+  Object.entries(PATH_BY_PAGE).map(([key, path]) => [path, key])
+);
+
+function pageFromCurrentPath() {
+  return PAGE_BY_PATH[window.location.pathname] || 'overview';
+}
+
 export default function SuperAdminLayout({ user, onSignOut }) {
-  const [page, setPage] = useState('overview');
+  const [page, setPage] = useState(pageFromCurrentPath);
+
+  // If we land here on an unmapped path (e.g. "/" or "/superadmin"),
+  // normalize the address bar to match whichever tab is showing.
+  useEffect(() => {
+    const targetPath = PATH_BY_PAGE[page];
+    if (window.location.pathname !== targetPath) {
+      window.history.replaceState({ page }, '', targetPath);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Keep the tab in sync with browser Back/Forward navigation.
+  useEffect(() => {
+    const onPopState = () => setPage(pageFromCurrentPath());
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Use this instead of setPage() wherever the tab changes, so the URL
+  // always stays in sync with what's on screen.
+  const navigateTo = (key) => {
+    const targetPath = PATH_BY_PAGE[key] || PATH_BY_PAGE.overview;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ page: key }, '', targetPath);
+    }
+    setPage(key);
+  };
 
   const renderPage = () => {
     switch (page) {
       case 'overview':
         return <SuperAdminOverview />;
       case 'campuses':
-        return <CampusManagementHub user={user} onNavigate={setPage} />;
+        return <CampusManagementHub user={user} onNavigate={navigateTo} />;
       case 'librarians':
         return <LibrarianManagement />;
       case 'settings':
@@ -221,7 +267,7 @@ export default function SuperAdminLayout({ user, onSignOut }) {
               <button
                 key={key}
                 className={`sa-topnav-item${page === key ? ' active' : ''}`}
-                onClick={() => setPage(key)}
+                onClick={() => navigateTo(key)}
               >
                 <span className="sa-topnav-icon">{icon}</span>
                 <span className="sa-topnav-label">{label}</span>

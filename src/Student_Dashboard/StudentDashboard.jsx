@@ -1817,8 +1817,15 @@ function PageSettings({ user, onSignOut }) {
 /* ═══════════════════════════════════════════════════════
    ROOT COMPONENT
 ═══════════════════════════════════════════════════════ */
+const STUDENT_TAB_IDS = ['home', 'catalog', 'borrowed', 'favorites', 'history', 'profile', 'settings'];
+
+function getStudentTabFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  return STUDENT_TAB_IDS.includes(hash) ? hash : 'home';
+}
+
 export default function StudentDashboard({ user, onSignOut }) {
-  const [activeTab,        setActiveTab]        = useState('home');
+  const [activeTab,        setActiveTab]        = useState(getStudentTabFromHash);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen,       setMobileOpen]       = useState(false);
   const [showLogout,       setShowLogout]        = useState(false);
@@ -1832,7 +1839,18 @@ export default function StudentDashboard({ user, onSignOut }) {
       .catch(e => console.warn('[Profile fetch]',e?.message));
   }, [user?.id]);
 
-  const navigate = useCallback((tab) => { setActiveTab(tab); setMobileOpen(false); }, []);
+  const navigate = useCallback((tab) => {
+    setActiveTab(tab);
+    setMobileOpen(false);
+    if (window.location.hash !== `#${tab}`) window.location.hash = tab;
+  }, []);
+
+  // Keep activeTab in sync with the URL hash (back/forward buttons, direct links, manual edits)
+  useEffect(() => {
+    const onHashChange = () => setActiveTab(getStudentTabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const firstName   = profile?.first_name || user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Student';
   const lastName    = profile?.last_name  || user?.user_metadata?.last_name  || '';

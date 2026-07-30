@@ -506,14 +506,55 @@ function Footer() {
   );
 }
 
+// ─── Top-level URL routing ────────────────────────────────────────────────────
+// Real, addressable browser URLs for the auth flow and each dashboard, using
+// the native History API (same pattern as SuperAdminLayout's internal tabs):
+//   /               → landing page (sections addressable via #features, #benefits, ...)
+//   /login          → LoginPage
+//   /signup         → SignupPage
+//   /forgot-password → ForgotPasswordPage
+//   /reset-password  → ResetPasswordPage
+//   /admin          → Dashboard (library_manager / admin)
+//   /student        → StudentDashboard
+//   /superadmin*    → SuperAdminLayout (manages its own sub-paths already)
+const AUTH_PATH_BY_PAGE = {
+  'login':            '/login',
+  'signup':           '/signup',
+  'forgot-password':  '/forgot-password',
+  'reset-password':   '/reset-password',
+};
+const AUTH_PAGE_BY_PATH = Object.fromEntries(
+  Object.entries(AUTH_PATH_BY_PAGE).map(([key, path]) => [path, key])
+);
+const DASHBOARD_PATH_BY_ROLE = {
+  super_admin:     '/superadmin',
+  library_manager: '/admin',
+  admin:           '/admin',
+  student:         '/student',
+};
+
+function authPageFromPath(pathname) {
+  return AUTH_PAGE_BY_PATH[pathname] || null;
+}
+
 // ─── Main app shell ───────────────────────────────────────────────────────────
 function LandingApp() {
   const [scrolled, setScrolled] = useState(false);
   const [authPage, setAuthPage] = useState(() => {
     if (window.location.hash.includes('type=recovery')) return 'forgot-password';
-    return null;
+    return authPageFromPath(window.location.pathname);
   });
-  const { user, loading, signOut } = useAuth();
+  const { user, role, loading, signOut } = useAuth();
+
+  // Move to an auth screen (or back to "/" when passed null), keeping the
+  // address bar in sync via the native History API.
+  const goToAuth = (page) => {
+    const targetPath = page ? AUTH_PATH_BY_PAGE[page] : '/';
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ authPage: page }, '', targetPath);
+    }
+    setAuthPage(page);
+  };
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 60);
@@ -529,13 +570,62 @@ function LandingApp() {
     return () => window.removeEventListener('hashchange', handle);
   }, []);
 
+  // Keep the top-level screen in sync with browser Back/Forward navigation
+  // between "/", the auth paths, and the dashboard paths.
+  useEffect(() => {
+    const onPopState = () => {
+      if (window.location.hash.includes('type=recovery')) { setAuthPage('forgot-password'); return; }
+      setAuthPage(authPageFromPath(window.location.pathname));
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Once a logged-in user's DB role has resolved, point the address bar at
+  // that dashboard's own path (e.g. /admin, /student, /superadmin) so it's
+  // bookmarkable and reloads land in the right place.
+  useEffect(() => {
+    if (!user || role === null) return;
+    const targetPath = DASHBOARD_PATH_BY_ROLE[role] || '/student';
+    if (!window.location.pathname.startsWith(targetPath)) {
+      window.history.replaceState({}, '', targetPath);
+    }
+  }, [user, role]);
+
+  // Redirect straight dashboard-path visits back to /login when signed out
+  // (e.g. someone bookmarked /admin or /superadmin).
+  useEffect(() => {
+    if (loading || user) return;
+    const dashboardPaths = Object.values(DASHBOARD_PATH_BY_ROLE);
+    if (dashboardPaths.some(p => window.location.pathname.startsWith(p))) {
+      goToAuth('login');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, user]);
+
   const scrollTo = (id) => {
     const el = document.getElementById(id);
     if (!el) return;
+    window.history.pushState(null, '', `#${id}`);
     const navHeight = document.querySelector('.nav')?.offsetHeight || 80;
     const top = el.getBoundingClientRect().top + window.scrollY - navHeight;
     window.scrollTo({ top, behavior: 'smooth' });
   };
+
+  // On first load of the landing page, honor a section anchor already in
+  // the URL (e.g. arriving at /#features from an external link).
+  useEffect(() => {
+    if (user || authPage) return;
+    const id = window.location.hash.replace('#', '');
+    if (!id || window.location.hash.includes('type=recovery')) return;
+    const el = document.getElementById(id);
+    if (el) {
+      const navHeight = document.querySelector('.nav')?.offsetHeight || 80;
+      const top = el.getBoundingClientRect().top + window.scrollY - navHeight;
+      window.scrollTo({ top, behavior: 'smooth' });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, authPage]);
 
   if (loading) return <AppLoader />;
 
@@ -547,8 +637,8 @@ function LandingApp() {
     return (
       <AuthRouter
         initialPage={authPage}
-        onLoginSuccess={() => setAuthPage(null)}
-        onGoLanding={() => setAuthPage(null)}
+        onLoginSuccess={() => goToAuth(null)}
+        onGoLanding={() => goToAuth(null)}
       />
     );
   }
@@ -556,8 +646,8 @@ function LandingApp() {
   // Landing page
   return (
     <>
-      <Navbar scrolled={scrolled} onNavClick={scrollTo} onGetStarted={() => setAuthPage('login')} />
-      <HeroSection onNavClick={scrollTo} onGetStarted={() => setAuthPage('login')} />
+      <Navbar scrolled={scrolled} onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} />
+      <HeroSection onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} />
       <StatsSection/>
       <FeaturesSection/>
       <BenefitsSection/>

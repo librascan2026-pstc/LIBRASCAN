@@ -81,9 +81,16 @@ const LABEL_MAP = {
   settings:    'Settings',
 };
 
+const ADMIN_TAB_IDS = NAV.map(n => n.id); // overview, attendance, bookmanage, catalog, users, reports, settings
+
+function getTabFromHash() {
+  const hash = window.location.hash.replace('#', '');
+  return ADMIN_TAB_IDS.includes(hash) ? hash : 'overview';
+}
+
 export default function Dashboard({ user, onSignOut }) {
   const { profile } = useAuth();
-  const [activeTab, setActiveTab]       = useState('overview');
+  const [activeTab, setActiveTab]       = useState(getTabFromHash);
   const [notifOpen, setNotifOpen]       = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen]     = useState(false);
@@ -254,12 +261,21 @@ export default function Dashboard({ user, onSignOut }) {
     if (tab === 'bookmanage') setBookManageTab('scanner');
     setActiveTab(tab);
     setMobileOpen(false);
+    if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   };
 
   const navigateFromOverview = (tab) => {
     setActiveTab(tab);
     setMobileOpen(false);
+    if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   };
+
+  // Keep activeTab in sync with the URL hash (back/forward buttons, direct links, manual edits)
+  useEffect(() => {
+    const onHashChange = () => setActiveTab(getTabFromHash());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
 
   const renderContent = () => {
     switch (activeTab) {
