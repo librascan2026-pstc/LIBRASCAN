@@ -80,6 +80,14 @@ const CSS = `
     flex-wrap: wrap;
     box-shadow: 0 10px 30px rgba(59,42,37,0.08);
   }
+  .cmh-hero-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 4px;
+    border-radius: 24px 24px 0 0;
+    background: linear-gradient(90deg, ${MAROON_DEEP}, ${MAROON}, ${GOLD}, ${MAROON}, ${MAROON_DEEP});
+    background-size: 200% 100%;
+    animation: cmh-shimmer-bar 3s ease-in-out infinite;
+    z-index: 2;
+  }
   .cmh-hero::before {
     content: '';
     position: absolute;
@@ -121,7 +129,7 @@ const CSS = `
   }
   .cmh-hero-sub {
     font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED};
-    max-width: 560px; font-weight: 500;
+    max-width: 520px; font-weight: 500;
     text-align: left;
   }
   .cmh-hero-right { position: relative; z-index: 1; display: flex; align-items: center; }
@@ -509,6 +517,12 @@ const CSS = `
   .cmh-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
   /* ── Empty states ────────────────────────────────────────────────────── */
+  .cmh-emptybar {
+    height: 4px;
+    background: linear-gradient(90deg, ${MAROON_DEEP}, ${MAROON}, ${GOLD}, ${MAROON}, ${MAROON_DEEP});
+    background-size: 200% 100%;
+    animation: cmh-shimmer-bar 3s ease-in-out infinite;
+  }
   .cmh-empty {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     padding: 64px 24px; text-align: center;
@@ -535,6 +549,10 @@ const CSS = `
   }
   @keyframes cmh-shimmer-sweep { 100% { transform: translateX(100%); } }
   @keyframes cmh-spin { to { transform: rotate(360deg); } }
+  @keyframes cmh-shimmer-bar {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
   /* ── Context menu ────────────────────────────────────────────────────── */
   .cmh-ctx {
@@ -1840,6 +1858,7 @@ export default function CampusManagementHub() {
 
       {/* Hero header */}
       <div className="cmh-hero">
+        {selectedCampus && <div className="cmh-hero-bar" />}
         <div className="cmh-hero-left">
           <div className="cmh-hero-title">
             <span className="cmh-hero-icon"><Landmark size={22} /></span>
@@ -1883,6 +1902,7 @@ export default function CampusManagementHub() {
 
           {!selectedCampus ? (
             <div className="cmh-table-wrap">
+              <div className="cmh-emptybar" />
               <EmptyState hasCampuses={campuses.length > 0} onAddCampus={() => setModal({ type: 'campus', data: null })} />
             </div>
           ) : (

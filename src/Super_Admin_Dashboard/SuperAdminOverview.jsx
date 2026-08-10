@@ -101,7 +101,7 @@ const CSS = `
   }
   .sao-hero-title {
     font-size: 25px; font-weight: 800; letter-spacing: -0.01em;
-    color: ${TEXT}; line-height: 1.2; margin-bottom: 10px;
+    color: ${TEXT}; line-height: 1.25; margin-bottom: 10px;
     display: flex; align-items: center; gap: 12px;
   }
   .sao-hero-icon {
@@ -111,7 +111,7 @@ const CSS = `
     display: flex; align-items: center; justify-content: center;
     color: ${MAROON}; flex-shrink: 0;
   }
-  .sao-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 560px; font-weight: 500; text-align: left;}
+  .sao-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 610px; font-weight: 500; text-align: left;}
   .sao-hero-right { position: relative; z-index: 1; display: flex; align-items: center; }
   .sao-date-chip {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -368,21 +368,46 @@ const CSS = `
   .sao-skel-carousel { height: 190px; border-radius: 18px; margin-bottom: 28px; }
   .sao-skel-table { height: 260px; border-radius: 18px; }
 
-  /* ---------- Responsive ---------- */
+  /* ============================================================
+     RESPONSIVE — graduated for tablets down to the smallest phones
+  ============================================================ */
   @media (max-width: 900px) {
     .sao-stats-grid { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   }
   @media (max-width: 768px) {
     .sao-hero { padding: 26px 22px 22px; }
-    .sao-hero-title { font-size: 22px; }
+    .sao-hero-title { font-size: 22px; align-items: flex-start; }
+    .sao-hero-icon { margin-top: 3px; }
     .sao-hero-right { width: 100%; justify-content: flex-start; }
     .sao-table thead th:nth-child(4), .sao-table tbody td:nth-child(4) { display: none; }
   }
   @media (max-width: 560px) {
     .sao-table thead th:nth-child(1), .sao-table tbody td:nth-child(1) { display: none; }
-    .sao-hero-title { font-size: 19px; }
-    .sao-hero-icon { width: 34px; height: 34px; }
+    .sao-hero { padding: 22px 18px 18px; border-radius: 20px; }
+    .sao-hero-title { font-size: 19px; gap: 10px; }
+    .sao-hero-icon { width: 34px; height: 34px; margin-top: 2px; }
+    .sao-hero-sub { font-size: 13.5px; }
     .sao-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 430px) {
+    .sao-hero { padding: 20px 16px 16px; }
+    .sao-hero-eyebrow { font-size: 10px; padding: 5px 12px; margin-bottom: 12px; }
+    .sao-hero-title { font-size: 17px; line-height: 1.3; gap: 9px; }
+    .sao-hero-icon { width: 30px; height: 30px; border-radius: 10px; }
+    .sao-hero-icon svg { width: 15px; height: 15px; }
+    .sao-hero-sub { font-size: 12.5px; line-height: 1.55; }
+    .sao-date-chip { width: 62px; height: 62px; border-radius: 14px; gap: 2px; }
+    .sao-date-num { font-size: 15px; }
+    .sao-date-day, .sao-date-year { font-size: 7.5px; }
+    .sao-campus-card { flex: 0 0 168px; padding: 15px 13px 13px; }
+    .sao-search input { font-size: 12.5px; padding: 10px 12px 10px 36px; }
+  }
+  @media (max-width: 340px) {
+    .sao-hero-title { font-size: 15.5px; }
+    .sao-hero-icon { width: 27px; height: 27px; }
+    .sao-hero-icon svg { width: 13px; height: 13px; }
+    .sao-date-chip { width: 54px; height: 54px; }
+    .sao-date-num { font-size: 13px; }
   }
 `;
 

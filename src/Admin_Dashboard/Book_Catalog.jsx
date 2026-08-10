@@ -60,6 +60,7 @@ const Ic = {
   upload:   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>,
   book:     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
   refresh:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>,
+  clock:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
 };
 
 async function uploadImage(file, folder = 'covers') {
@@ -307,7 +308,15 @@ function BookFormModal({ book, onClose, onSaved }) {
         if (error) throw error;
       } else {
         // Phase 9: stamp campus_id so this book belongs to the librarian's campus
-        const insertPayload = { ...rest, ...(campusId ? { campus_id: campusId } : {}) };
+        // New books are registered as "pending" — they hold a spot in the catalog
+        // (copies + QR codes are generated below as usual) but are only counted
+        // as officially part of the collection once a Super Admin confirms the
+        // registration from the Super Admin > Books > Pending Requests tab.
+        const insertPayload = {
+          ...rest,
+          ...(campusId ? { campus_id: campusId } : {}),
+          registration_status: 'pending',
+        };
         const { data: inserted, error } = await supabaseAdmin
           .from('books').insert(insertPayload).select('id').single();
         if (error) throw error;
@@ -1091,7 +1100,20 @@ function ViewModal({ book, onClose, onEdit }) {
                   {book.volume_title}
                 </div>
               )}
-              <div style={{ marginTop: 10 }}><StatusBadge status={book.status} /></div>
+              <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <StatusBadge status={book.status} />
+                {book.registration_status === 'pending' && (
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 5,
+                    padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+                    fontFamily: 'var(--font-sans)', background: 'rgba(201,168,76,0.16)', color: '#8a6d1f',
+                    border: '1px solid rgba(201,168,76,0.35)',
+                  }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+                    Awaiting Super Admin Confirmation
+                  </span>
+                )}
+              </div>
             </div>
 
             <div style={{
@@ -1567,6 +1589,10 @@ export default function Book_Catalog() {
   const [deleteBook, setDeleteBook] = useState(null);
   const [deleting, setDeleting]     = useState(false);
 
+  // 'book' = officially registered catalog · 'pending' = new titles submitted
+  // for Super Admin confirmation, not yet counted as part of the collection.
+  const [activeTab, setActiveTab] = useState('book');
+
   const [toast, setToast]   = useState({ msg: '', type: 'success' });
   const toastRef = useRef();
 
@@ -1653,7 +1679,9 @@ export default function Book_Catalog() {
 
   const handleSaved = () => {
     fetchBooks();
-    showToast(editBook ? 'Book updated successfully.' : 'Book added successfully.');
+    showToast(editBook
+      ? 'Book updated successfully.'
+      : 'Book submitted for registration — awaiting Super Admin confirmation.');
   };
 
   const handleDelete = async () => {
@@ -1711,7 +1739,13 @@ export default function Book_Catalog() {
     setShowForm(true);
   };
 
-  const booksWithStatus = books.map(b => {
+  // Books added by this librarian start life as "pending" until a Super Admin
+  // confirms/registers them (see handleSave's insert payload above). Legacy
+  // rows without the column (pre-migration) are treated as already registered.
+  const pendingBooks  = books.filter(b => b.registration_status === 'pending');
+  const registeredBooks = books.filter(b => b.registration_status !== 'pending');
+
+  const booksWithStatus = registeredBooks.map(b => {
     const avail = b.available_copies !== null && b.available_copies !== undefined
       ? parseInt(b.available_copies)
       : parseInt(b.copies) || 0;
@@ -1729,6 +1763,13 @@ export default function Book_Catalog() {
     const matchStatus = statusFilter === 'all' || b.status === statusFilter;
     const matchShelf  = shelfFilter === 'all' || b.shelf_location === shelfFilter;
     return matchSearch && matchGenre && matchStatus && matchShelf;
+  });
+
+  const pendingFiltered = pendingBooks.filter(b => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || [b.title, b.authors, b.isbn, b.publisher].join(' ').toLowerCase().includes(q);
+    const matchGenre  = genreFilter === 'all' || b.genre === genreFilter;
+    return matchSearch && matchGenre;
   });
 
   const actionBtn = (variant) => {
@@ -1857,24 +1898,110 @@ export default function Book_Catalog() {
           <option value="all">All Genres</option>
           {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-          <option value="all">All Status</option>
-          <option value="Available">Available</option>
-          <option value="Borrowed">Borrowed</option>
-        </select>
-        <select style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
-          <option value="all">All Shelves</option>
-          {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
+        {activeTab === 'book' && (
+          <>
+            <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+              <option value="all">All Status</option>
+              <option value="Available">Available</option>
+              <option value="Borrowed">Borrowed</option>
+            </select>
+            <select style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
+              <option value="all">All Shelves</option>
+              {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </>
+        )}
         <span style={{
           marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',
           fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
         }}>
-          {filtered.length} {filtered.length === 1 ? 'record' : 'records'}
+          {activeTab === 'book'
+            ? `${filtered.length} ${filtered.length === 1 ? 'record' : 'records'}`
+            : `${pendingFiltered.length} awaiting confirmation`}
         </span>
       </div>
 
-      {loading ? (
+      <div style={{ display: 'flex', gap: 28, marginBottom: 20, borderBottom: '1.5px solid rgba(139,0,0,0.12)' }}>
+        {[
+          { key: 'book',    label: 'Book',           icon: Ic.book,  count: null },
+          { key: 'pending', label: 'Unregister book', icon: Ic.clock, count: pendingBooks.length },
+        ].map(t => (
+          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+            display: 'flex', alignItems: 'center', gap: 7,
+            padding: '0 0 11px', cursor: 'pointer',
+            fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700,
+            border: 'none', borderBottom: `2.5px solid ${activeTab === t.key ? '#8B0000' : 'transparent'}`,
+            background: 'transparent',
+            color: activeTab === t.key ? '#8B0000' : 'var(--maroon-mid)',
+            marginBottom: -1.5,
+            transition: 'all 0.16s',
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center' }}>{t.icon}</span>
+            {t.label}
+            {!!t.count && (
+              <span style={{
+                minWidth: 20, height: 20, padding: '0 6px', borderRadius: 999,
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 11, fontWeight: 800,
+                background: 'rgba(139,0,0,0.12)', color: '#8B0000',
+              }}>{t.count}</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'pending' ? (
+        loading ? (
+          <div className="lm-loading">
+            <div className="lm-spinner" />
+            <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading catalog…</span>
+          </div>
+        ) : pendingFiltered.length === 0 ? (
+          <div className="lm-empty">
+            <div className="lm-empty-icon">🕓</div>
+            <div className="lm-empty-text">Nothing pending</div>
+            <div className="lm-empty-sub">
+              {search ? 'Try a different search term.' : 'Books you add will appear here until a Super Admin confirms the registration.'}
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            borderRadius: 10, border: '1px solid rgba(201,168,76,0.35)',
+            overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{
+                  background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+                  borderBottom: '2px solid rgba(201,168,76,0.35)',
+                }}>
+                  {['Book Title', 'Authors', 'ISBN', 'Copies', 'Submitted', 'Status', 'Action'].map((h, i) => (
+                    <th key={h} style={{
+                      padding: '13px 16px', textAlign: i === 3 ? 'center' : 'left',
+                      fontFamily: 'var(--font-sans)', fontSize: 11,
+                      fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                      color: '#F5E4A8', whiteSpace: 'nowrap',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pendingFiltered.map((book, idx) => (
+                  <PendingRow
+                    key={book.id}
+                    book={book}
+                    idx={idx}
+                    onView={() => setViewBook(book)}
+                    onWithdraw={() => setDeleteBook(book)}
+                    ActionBtn={ActionBtn}
+                    Ic={Ic}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      ) : loading ? (
         <div className="lm-loading">
           <div className="lm-spinner" />
           <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading catalog…</span>
@@ -2027,6 +2154,85 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           <ActionBtn variant="edit" onClick={onEdit}>{Ic.edit} Edit</ActionBtn>
           <ActionBtn variant="delete" onClick={onDelete}>{Ic.trash}</ActionBtn>
         </div>
+      </td>
+    </tr>
+  );
+}
+
+function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
+  const [hov, setHov] = useState(false);
+  const submitted = book.created_at
+    ? new Date(book.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' })
+    : '—';
+  return (
+    <tr
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      onClick={onView}
+      style={{
+        background: hov ? 'rgba(201,168,76,0.08)' : (idx % 2 === 0 ? 'transparent' : 'rgba(201,168,76,0.03)'),
+        borderBottom: '1px solid rgba(139,0,0,0.07)',
+        cursor: 'pointer', transition: 'background 0.14s',
+      }}
+    >
+      <td style={{ padding: '11px 16px', maxWidth: 240 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {book.cover_image_url ? (
+            <img src={book.cover_image_url} alt=""
+              style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
+          ) : (
+            <div style={{
+              width: 32, height: 40, borderRadius: 4, flexShrink: 0,
+              background: 'linear-gradient(135deg,rgba(201,168,76,0.20),rgba(139,0,0,0.08))',
+              border: '1px solid rgba(139,0,0,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--text-dim)',
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+          )}
+          <div style={{
+            fontWeight: 600, fontSize: 13, color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170,
+          }}>{book.title}</div>
+        </div>
+      </td>
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{
+          fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          display: 'block', maxWidth: 160,
+        }}>{book.authors || '—'}</span>
+      </td>
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+          {book.isbn || '—'}
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
+          {parseInt(book.copies) || 0}
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{submitted}</span>
+      </td>
+      <td style={{ padding: '11px 16px' }}>
+        <span style={{
+          display: 'inline-flex', alignItems: 'center', gap: 5,
+          padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+          fontFamily: 'var(--font-sans)', background: 'rgba(201,168,76,0.16)', color: '#8a6d1f',
+          border: '1px solid rgba(201,168,76,0.35)',
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+          Awaiting Confirmation
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
+        <ActionBtn variant="delete" onClick={onWithdraw}>{Ic.trash} Withdraw</ActionBtn>
       </td>
     </tr>
   );

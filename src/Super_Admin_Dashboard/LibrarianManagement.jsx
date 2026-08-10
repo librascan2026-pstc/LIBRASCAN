@@ -71,6 +71,14 @@ const CSS = `
     flex-wrap: wrap;
     box-shadow: 0 10px 30px rgba(59,42,37,0.08);
   }
+  .lbm-hero-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 4px;
+    border-radius: 24px 24px 0 0;
+    background: linear-gradient(90deg, ${MAROON_DEEP}, ${MAROON}, ${GOLD}, ${MAROON}, ${MAROON_DEEP});
+    background-size: 200% 100%;
+    animation: lbm-shimmer-bar 3s ease-in-out infinite;
+    z-index: 2;
+  }
   .lbm-hero::before {
     content: '';
     position: absolute; top: -60%; right: -8%;
@@ -107,7 +115,7 @@ const CSS = `
     display: flex; align-items: center; justify-content: center;
     color: ${MAROON}; flex-shrink: 0;
   }
-  .lbm-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 560px; font-weight: 500; text-align: left; }
+  .lbm-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 450px; font-weight: 500; text-align: left; }
   .lbm-hero-right { position: relative; z-index: 1; display: flex; align-items: center; }
 
   /* ---------- Buttons ---------- */
@@ -222,6 +230,12 @@ const CSS = `
   .lbm-page-btn:hover:not(:disabled) { background: ${MAROON}; color: #fff; border-color: ${MAROON}; }
   .lbm-page-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
+  .lbm-emptybar {
+    height: 4px;
+    background: linear-gradient(90deg, ${MAROON_DEEP}, ${MAROON}, ${GOLD}, ${MAROON}, ${MAROON_DEEP});
+    background-size: 200% 100%;
+    animation: lbm-shimmer-bar 3s ease-in-out infinite;
+  }
   .lbm-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 24px; text-align: center; }
   .lbm-empty-illus {
     width: 76px; height: 76px; border-radius: 22px;
@@ -353,6 +367,10 @@ const CSS = `
   @keyframes lbm-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
   .lbm-toast-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   @keyframes lbm-spin { to { transform: rotate(360deg); } }
+  @keyframes lbm-shimmer-bar {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
 
   @media (max-width: 768px) {
     .lbm-hero { padding: 26px 22px 22px; }
@@ -645,6 +663,7 @@ export default function LibrarianManagement() {
 
       {/* Hero */}
       <div className="lbm-hero">
+        <div className="lbm-hero-bar" />
         <div className="lbm-hero-left">
           <div className="lbm-hero-title">
             <span className="lbm-hero-icon"><Users size={22} /></span>
@@ -692,13 +711,16 @@ export default function LibrarianManagement() {
             <div style={{ width: 26, height: 26, borderRadius: '50%', border: `3px solid ${BORDER}`, borderTopColor: MAROON, animation: 'lbm-spin 0.8s linear infinite', display: 'inline-block' }} />
           </div>
         ) : filtered.length === 0 ? (
-          <div className="lbm-empty">
-            <div className="lbm-empty-illus"><Users size={30} strokeWidth={1.8} /></div>
-            <div className="lbm-empty-title">{search ? 'No matching librarians' : 'No librarians yet'}</div>
-            <div className="lbm-empty-sub">
-              {search ? 'Try a different search term.' : 'Click "Add Librarian" to create the first staff account.'}
+          <>
+            <div className="lbm-emptybar" />
+            <div className="lbm-empty">
+              <div className="lbm-empty-illus"><Users size={30} strokeWidth={1.8} /></div>
+              <div className="lbm-empty-title">{search ? 'No matching librarians' : 'No librarians yet'}</div>
+              <div className="lbm-empty-sub">
+                {search ? 'Try a different search term.' : 'Click "Add Librarian" to create the first staff account.'}
+              </div>
             </div>
-          </div>
+          </>
         ) : (
           <>
             <div className="lbm-table-scroll">

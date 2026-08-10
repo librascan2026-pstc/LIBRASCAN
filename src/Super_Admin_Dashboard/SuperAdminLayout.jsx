@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
+import { LayoutGrid, Building2, BookOpen, BarChart3, Users, Settings as SettingsIcon } from 'lucide-react';
 import SuperAdminOverview    from './SuperAdminOverview';
 import CampusManagementHub   from './CampusManagementHub';
 import LibrarianManagement   from './LibrarianManagement';
+import SuperAdminBooks       from './SuperAdminBooks';
+import SuperAdminAnalytics   from './SuperAdminAnalytics';
 import SuperAdminSettings    from './SuperAdminSettings';
 
 /* ============================================================================
@@ -19,19 +22,27 @@ const CREAM         = '#FDF8F0';
 const PAGES = [
   {
     key: 'overview', label: 'Dashboard',
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>,
+    icon: <LayoutGrid size={18} strokeWidth={1.8} />,
   },
   {
     key: 'campuses', label: 'Campuses',
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>,
+    icon: <Building2 size={18} strokeWidth={1.8} />,
+  },
+  {
+    key: 'books', label: 'Books',
+    icon: <BookOpen size={18} strokeWidth={1.8} />,
+  },
+  {
+    key: 'analytics', label: 'Analytics',
+    icon: <BarChart3 size={18} strokeWidth={1.8} />,
   },
   {
     key: 'librarians', label: 'Librarian',
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
+    icon: <Users size={18} strokeWidth={1.8} />,
   },
   {
     key: 'settings', label: 'Settings',
-    icon: <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>,
+    icon: <SettingsIcon size={18} strokeWidth={1.8} />,
   },
 ];
 
@@ -64,6 +75,9 @@ const CSS = `
     justify-content: space-between;
     background: linear-gradient(180deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
     padding: 16px 30px;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-left: max(30px, env(safe-area-inset-left));
+    padding-right: max(30px, env(safe-area-inset-right));
     box-shadow: 0 3px 14px rgba(40,0,0,0.30);
     position: sticky;
     top: 0;
@@ -102,7 +116,7 @@ const CSS = `
     background: #fff;
     display: block;
   }
-  .sa-brand-text { display: flex; flex-direction: column; justify-content: center; gap: 5px; }
+  .sa-brand-text { display: flex; flex-direction: column; justify-content: center; gap: 5px; min-width: 0; overflow: hidden; }
   .sa-brand-title {
     font-family: 'Cinzel', var(--font-sans, serif);
     font-size: 16px;
@@ -111,6 +125,8 @@ const CSS = `
     color: #fff;
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sa-brand-sub {
     display: flex;
@@ -123,6 +139,8 @@ const CSS = `
     color: ${GOLD_PALE};
     line-height: 1;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .sa-brand-sub::before {
     content: '';
@@ -169,13 +187,95 @@ const CSS = `
   .sa-main { flex: 1; display: flex; flex-direction: column; }
   .sa-content { flex: 1; padding: 26px 30px 40px; }
 
+  /* ============================================================
+     RESPONSIVE — tuned for real device widths, not just breakpoints:
+     ~768px (tablets / small laptops), ~430px (large phones: iPhone
+     Pro Max, most Android), ~375px (iPhone SE / compact Android),
+     ~340px (oldest/smallest phones still in use).
+  ============================================================ */
+
+  /* Tablets & small laptops — tighten spacing, keep single row */
   @media (max-width: 768px) {
-    .sa-topbar { padding: 12px 16px; }
-    .sa-brand-title { font-size: 13px; }
-    .sa-topnav { gap: 14px; }
+    .sa-topbar { padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); }
+    .sa-brand-title { font-size: 14px; }
+    .sa-topnav { gap: 18px; }
     .sa-topnav-label { display: none; }
-    .sa-content { padding: 16px; }
+    .sa-content { padding: 20px; }
     .sa-topbar-title { display: none; }
+  }
+
+  /* Phones — Facebook-style layout: brand row on top, a full-width,
+     evenly spaced, icon-only tab row underneath with real touch targets */
+  @media (max-width: 560px) {
+    .sa-topbar {
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 10px 14px 0;
+      padding-top: max(10px, env(safe-area-inset-top));
+      padding-left: max(14px, env(safe-area-inset-left));
+      padding-right: max(14px, env(safe-area-inset-right));
+      gap: 0;
+    }
+    .sa-brand { flex: 1 1 auto; min-width: 0; }
+    .sa-brand-logo-ring { width: 36px; height: 36px; }
+    .sa-brand-title { font-size: 13px; letter-spacing: 0.1em; }
+    .sa-brand-sub { font-size: 8px; }
+
+    .sa-topnav {
+      order: 3;
+      flex-basis: 100%;
+      width: 100%;
+      gap: 0;
+      margin-top: 8px;
+      padding-top: 2px;
+      border-top: 1px solid rgba(212,175,55,0.20);
+    }
+    .sa-topnav-item {
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: 48px;
+      justify-content: center;
+      padding: 8px 2px 9px;
+    }
+    .sa-topnav-item.active .sa-topnav-icon {
+      width: 36px; height: 36px;
+      margin-top: 0;
+      box-shadow: 0 4px 10px rgba(20,0,0,0.32);
+    }
+    .sa-topnav-item.active .sa-topnav-icon svg { width: 18px; height: 18px; }
+    /* Facebook-style active indicator: a small underline instead of a
+       floating pill, since the icon row no longer overlaps the bar edge */
+    .sa-topnav-item::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 50%;
+      transform: translateX(-50%);
+      width: 0; height: 2.5px;
+      border-radius: 2px;
+      background: ${GOLD};
+      transition: width 0.18s ease;
+    }
+    .sa-topnav-item.active::after { width: 22px; }
+    .sa-content { padding: 16px; }
+  }
+
+  /* Compact phones (iPhone SE, small Android) — trim further, never overflow */
+  @media (max-width: 375px) {
+    .sa-brand-logo-ring { width: 32px; height: 32px; }
+    .sa-brand-title { font-size: 12px; letter-spacing: 0.08em; }
+    .sa-brand-sub { display: none; }
+    .sa-topnav-item { min-height: 46px; padding: 7px 0 8px; }
+    .sa-topnav-icon { width: 20px; height: 20px; }
+    .sa-topnav-item.active .sa-topnav-icon { width: 33px; height: 33px; }
+    .sa-topnav-item.active .sa-topnav-icon svg { width: 17px; height: 17px; }
+    .sa-content { padding: 12px; }
+  }
+
+  /* Smallest phones still in circulation */
+  @media (max-width: 340px) {
+    .sa-brand-sub { display: none; }
+    .sa-topbar { padding-left: 10px; padding-right: 10px; }
+    .sa-topnav-item { padding-left: 0; padding-right: 0; }
   }
 `;
 
@@ -187,6 +287,8 @@ const CSS = `
 const PATH_BY_PAGE = {
   overview:   '/superadmin/overview',
   campuses:   '/superadmin/campuses',
+  books:      '/superadmin/books',
+  analytics:  '/superadmin/analytics',
   librarians: '/superadmin/librarians',
   settings:   '/superadmin/settings',
 };
@@ -234,6 +336,10 @@ export default function SuperAdminLayout({ user, onSignOut }) {
         return <SuperAdminOverview />;
       case 'campuses':
         return <CampusManagementHub user={user} onNavigate={navigateTo} />;
+      case 'books':
+        return <SuperAdminBooks />;
+      case 'analytics':
+        return <SuperAdminAnalytics />;
       case 'librarians':
         return <LibrarianManagement />;
       case 'settings':
