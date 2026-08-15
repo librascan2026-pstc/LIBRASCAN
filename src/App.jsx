@@ -77,6 +77,55 @@ function ShieldIcon({ size = 44, color = '#C9A84C' }) {
     </svg>
   );
 }
+// ─── Persona icons used on the "Built for Efficiency" benefit cards ──────────
+function GraduationCapIcon({ size = 44, color = '#C9A84C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M22 10 12 5 2 10l10 5 10-5z"/>
+      <path d="M6 12v5c0 1.5 2.7 3 6 3s6-1.5 6-3v-5"/>
+      <path d="M22 10v6"/>
+    </svg>
+  );
+}
+function ClipboardCheckIcon({ size = 44, color = '#C9A84C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="6" y="3.5" width="12" height="18" rx="2"/>
+      <path d="M9 3.5V3a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v.5"/>
+      <path d="M9 13.5l2 2 4-4.5"/>
+    </svg>
+  );
+}
+function ChartAdminIcon({ size = 44, color = '#C9A84C' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 20V10"/>
+      <path d="M12 20V4"/>
+      <path d="M20 20v-7"/>
+      <path d="M2.5 20h19"/>
+    </svg>
+  );
+}
+function CheckBadgeIcon({ size = 15, color = '#8B0000' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="12" fill="currentColor" style={{ color: 'var(--gold-light)' }}/>
+      <path d="M7 12.5l3 3 7-7.5" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+// Matches a benefit card's title to the persona icon it represents. Falls
+// back to a neutral icon so new/renamed personas in constants.js never
+// render blank.
+function benefitIconFor(title = '') {
+  const t = title.toLowerCase();
+  if (t.includes('student'))       return GraduationCapIcon;
+  if (t.includes('staff') || t.includes('librarian')) return ClipboardCheckIcon;
+  if (t.includes('admin'))         return ChartAdminIcon;
+  return GraduationCapIcon;
+}
+
 function CornerBracket({ position = 'tl', color = '#C9A84C', size = 24 }) {
   const paths = {
     tl: `M0,${size} L0,0 L${size},0`,
@@ -258,7 +307,54 @@ function Navbar({ scrolled, onNavClick, onGetStarted, onLogoClick }) {
   );
 }
 
+// Shown instead of navigating to QR_URL — the APK build isn't ready for
+// public download yet, so scanning/clicking the QR opens this notice.
+function UnderConstructionModal({ onClose }) {
+  useEffect(() => {
+    const onKeyDown = (e) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="uc-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="uc-modal-title"
+      onClick={onClose}
+    >
+      <div className="uc-modal" onClick={(e) => e.stopPropagation()}>
+        <button
+          type="button"
+          className="uc-modal__close"
+          aria-label="Close"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+        <div className="uc-modal__icon">
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke={GOLD} strokeWidth="1.6">
+            <path d="M12 9v4" strokeLinecap="round"/>
+            <path d="M12 17h.01" strokeLinecap="round"/>
+            <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L14.71 3.86a2 2 0 0 0-3.42 0z"/>
+          </svg>
+        </div>
+        <div className="section-label" style={{justifyContent:"center", marginBottom:14}}> Mobile App</div>
+        <h3 id="uc-modal-title" className="uc-modal__title">Under Construction</h3>
+        <p className="uc-modal__desc">
+          The LibraScan mobile app isn't ready for download just yet. Our team is putting on
+          the finishing touches please check back soon.
+        </p>
+        <button type="button" className="btn-primary" onClick={onClose}>Got it</button>
+      </div>
+    </div>
+  );
+}
+
 function HeroSection({ onNavClick, onGetStarted }) {
+  const [showUnderConstruction, setShowUnderConstruction] = useState(false);
+
   return (
     <section className="hero" id="home">
       <div className="hero__bg">
@@ -290,16 +386,15 @@ function HeroSection({ onNavClick, onGetStarted }) {
             <CornerBracket position="bl" color={GOLD} size={32}/>
             <CornerBracket position="br" color={GOLD} size={32}/>
             <div className="qr-frame__inner">
-              <a
-                href={QR_URL}
-                target="_blank"
-                rel="noopener noreferrer"
+              <button
+                type="button"
                 className="qr-code-panel"
-                aria-label="Scan with your phone or click to download the app"
+                aria-label="App download is under construction"
+                onClick={() => setShowUnderConstruction(true)}
               >
                 <LiteralQRCode size={168}/>
                 <div className="qr-scan-line"/>
-              </a>
+              </button>
               <div className="qr-caption">Scan to download the app</div>
 
             </div>
@@ -314,6 +409,9 @@ function HeroSection({ onNavClick, onGetStarted }) {
           </div>
         </div>
       </div>
+      {showUnderConstruction && (
+        <UnderConstructionModal onClose={() => setShowUnderConstruction(false)} />
+      )}
     </section>
   );
 }
@@ -359,7 +457,18 @@ function FeaturesSection() {
   );
 }
 
-function BenefitsSection() {
+// Small arrow used on the benefit-card CTA — slides right on hover via CSS.
+function ArrowRightIcon({ size = 14 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 12h14"/>
+      <path d="M13 6l6 6-6 6"/>
+    </svg>
+  );
+}
+
+function BenefitsSection({ onNavClick }) {
+  const [ref, inView] = useInView(0.2);
   return (
     <section id="benefits" className="benefits">
       <div className="benefits__inner">
@@ -367,19 +476,35 @@ function BenefitsSection() {
           <div className="benefits__header">
             <div className="section-label" style={{justifyContent:'center', marginBottom:16}}>Why LibraScan</div>
             <h2 className="benefits__title">Built for <span style={{color:GOLD}}>Efficiency</span></h2>
+            <p className="benefits__subtitle">
+              One system, built to move faster for everyone who touches the library
+              from the student browsing the shelves to the admin reading the reports.
+            </p>
           </div>
-          <div className="benefits__cards">
-            {Object.values(BENEFITS).map(({title, points}) => (
-              <div key={title} className="benefit-item">
-                <div className="benefit-item__dot"/>
-                <div className="benefit-item__title">{title}</div>
-                {points && points.map((p, i) => (
-                  <div key={i} className="benefit-item__desc">
-                    <span className="benefit-item__check">✓</span>{p}
+          <div ref={ref} className={`benefits__cards${inView ? ' benefits__cards--visible' : ''}`}>
+            {Object.values(BENEFITS).map(({title, points}, index) => {
+              const Icon = benefitIconFor(title);
+              return (
+                <div key={title} className="benefit-item">
+                  <span className="benefit-item__sheen" aria-hidden="true"/>
+                  <CornerBracket position="tl"/>
+                  <CornerBracket position="br"/>
+                  <div className="benefit-item__index">{String(index + 1).padStart(2, '0')}</div>
+                  
+                  <div className="benefit-item__title">{title}</div>
+                  <div className="benefit-item__rule"/>
+                  <div className="benefit-item__list">
+                    {points && points.map((p, i) => (
+                      <div key={i} className="benefit-item__desc" style={{transitionDelay:`${i * 0.05}s`}}>
+                        <span className="benefit-item__check"><CheckBadgeIcon size={15}/></span>
+                        <span>{p}</span>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            ))}
+                 
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -663,7 +788,7 @@ function LandingApp() {
       <HeroSection onNavClick={scrollTo} onGetStarted={() => goToAuth('login')} />
       <StatsSection/>
       <FeaturesSection/>
-      <BenefitsSection/>
+      <BenefitsSection onNavClick={scrollTo}/>
       <ScopeSection/>
       <ProcessSection/>
       <TeamSection/>

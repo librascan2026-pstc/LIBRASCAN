@@ -12,9 +12,10 @@ import { supabaseAdmin } from '../supabaseClient';
    LIBRASCAN — Campus Management Hub
    Premium SaaS redesign — same Supabase logic, CRUD paths & business rules,
    entirely new component structure, visual language, motion and UX.
+
 ============================================================================ */
 
-/* ── Design tokens (LIBRASCAN brand) ─────────────────────────────────────── */
+
 const MAROON       = '#7A0000';
 const MAROON_DEEP  = '#5C0000';
 const MAROON_MID   = '#8F1616';
@@ -2141,6 +2142,6 @@ export default function CampusManagementHub() {
         )}
         {viewRow && <CourseViewModal row={viewRow} onClose={() => setViewRow(null)} />}
       </AnimatePresence>
-    </div>
+    </div>/* git add -A git commit -m "Update all files" git push */
   );
 }
