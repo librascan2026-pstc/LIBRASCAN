@@ -2691,14 +2691,26 @@ function generateAttendanceInsights(dailyCounts) {
     insights.push(`The peak of attendance was on <strong>${peakPt.label}</strong> with <strong>${peakPt.value} visitor${peakPt.value !== 1 ? 's' : ''}</strong>.`);
   }
 
-  // Find stretches of low/zero attendance
-  const low = dailyCounts.filter(d => d.value <= 1);
-  if (low.length >= 3) {
-    const first = low[0].label;
-    const last = low[low.length - 1].label;
-    if (first !== last) {
-      insights.push(`Consistent low attendance was observed between <strong>${first}</strong> and <strong>${last}</strong>, averaging under 1 visit per day.`);
+  // Find the longest *contiguous* stretch of low (<=1) days — not just
+  // "every low day filtered together," which could silently swallow a
+  // spike day in the middle and misreport it as part of a continuous
+  // low stretch.
+  let bestRun = [];
+  let currentRun = [];
+  dailyCounts.forEach(d => {
+    if (d.value <= 1) {
+      currentRun.push(d);
+    } else {
+      if (currentRun.length > bestRun.length) bestRun = currentRun;
+      currentRun = [];
     }
+  });
+  if (currentRun.length > bestRun.length) bestRun = currentRun;
+
+  if (bestRun.length >= 3) {
+    const first = bestRun[0].label;
+    const last = bestRun[bestRun.length - 1].label;
+    insights.push(`Consistent low attendance was observed between <strong>${first}</strong> and <strong>${last}</strong>, averaging under 1 visit per day.`);
   }
 
   // Recent uptick: check last 3 days vs prior stretch
@@ -3206,7 +3218,15 @@ export default function ReportsAnalytics() {
       // return_ = borrowings.returned_at by period
       // ──────────────────────────────────────────────────
       const buildTimeline = (rows, dateField, pts, stepDays) => {
+        // Bucket by calendar day (not raw millisecond distance from "now").
+        // Using the wall-clock time the page happened to load at as the
+        // reference point meant an evening record (e.g. 7:33 PM) could end
+        // up closer in raw time to *tomorrow's* early-morning bucket than
+        // to today's own bucket, pushing it a day ahead. Normalizing both
+        // "now" and each record to local midnight and counting whole days
+        // between them keeps every record in its correct calendar day.
         const now = new Date();
+        now.setHours(0,0,0,0);
         const buckets = Array.from({length:pts},(_,i)=>{
           const d = new Date(now);
           d.setDate(d.getDate() - (pts-1-i)*stepDays);
@@ -3215,14 +3235,16 @@ export default function ReportsAnalytics() {
             : stepDays<=7
             ? d.toLocaleDateString('en-PH',{month:'short',day:'numeric'})
             : d.toLocaleDateString('en-PH',{month:'short',year:'2-digit'});
-          return { label, value:0, date: new Date(d) };
+          return { label, value:0, date: d };
         });
         (rows||[]).forEach(r=>{
-          const rd = new Date(r[dateField]);
-          if(isNaN(rd)) return;
-          let best=0, bestDiff=Infinity;
-          buckets.forEach((t,i)=>{ const diff=Math.abs(rd-t.date); if(diff<bestDiff){bestDiff=diff;best=i;} });
-          buckets[best].value++;
+          const rdRaw = new Date(r[dateField]);
+          if(isNaN(rdRaw)) return;
+          const rd = new Date(rdRaw);
+          rd.setHours(0,0,0,0);
+          const daysAgo = Math.round((now - rd) / 86400000);
+          const idx = (pts - 1) - Math.floor(daysAgo / stepDays);
+          if (idx >= 0 && idx < pts) buckets[idx].value++;
         });
         return buckets;
       };

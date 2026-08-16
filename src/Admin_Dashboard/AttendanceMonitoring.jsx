@@ -6,7 +6,14 @@ const fmt      = (d, opts) => new Intl.DateTimeFormat('en-PH', opts).format(d);
 const fmtTime  = (d) => fmt(new Date(d), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 const fmtDate  = (d) => fmt(new Date(d), { month: 'short', day: 'numeric', year: 'numeric' });
 const fmtFull  = (d) => `${fmtDate(d)} · ${fmtTime(d)}`;
-const today    = () => new Date().toISOString().split('T')[0];
+// Local (not UTC) calendar-day string, e.g. "2026-08-17". Using
+// toISOString() here would report the UTC date, which trails the local
+// PH date by a day between local midnight and 8 AM — causing check-ins
+// to be filed under the wrong date and "today" filters to miss them.
+const today    = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 function parseQR(raw) {
   if (!raw?.trim()) return null;

@@ -15,6 +15,15 @@ const CATEGORY_COLORS = [
 ];
 const fmtNum = n => n == null ? '—' : Number(n).toLocaleString();
 
+// Local (not UTC) calendar-day string, e.g. "2026-08-17". toISOString()
+// reports the UTC date, which trails the local PH date by a day between
+// local midnight and 8 AM — using it for "today" filters can silently
+// match the wrong day's rows (or none at all).
+const todayLocal = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 // ── Catmull-Rom → cubic Bezier smoothing (ported from Reports_Analytics) ──
 function monotoneCurvePath(pts) {
   if (pts.length < 2) return pts.length ? `M${pts[0].x},${pts[0].y}` : '';
@@ -535,7 +544,7 @@ export default function Overview({ onNavigate }) {
   const loadStats = useCallback(async () => {
     setLoading(true);
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = todayLocal();
 
       let qUsers    = supabase.from('profiles').select('id', { count: 'exact' });
       let qBooks    = supabase.from('books').select('id', { count: 'exact' });
@@ -585,7 +594,7 @@ export default function Overview({ onNavigate }) {
   const loadCharts = useCallback(async () => {
     setChartsLoading(true);
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = todayLocal();
       const since = new Date(Date.now() - 6 * 86400000).toISOString();
 
       let qReqPeriod = supabase.from('borrow_requests')
@@ -640,20 +649,30 @@ export default function Overview({ onNavigate }) {
       };
 
       // Daily buckets over the last 7 days (today + 6 days back).
+      // Bucket by calendar day (not raw millisecond distance from "now").
+      // Using the wall-clock time the page happened to load at as the
+      // reference point meant an evening record (e.g. 7:33 PM) could end
+      // up closer in raw time to *tomorrow's* early-morning bucket than
+      // to today's own bucket, pushing it a day ahead. Normalizing both
+      // "now" and each record to local midnight and counting whole days
+      // between them keeps every record in its correct calendar day.
       const buildTimeline = (rows, dateField, pts, stepDays) => {
         const now = new Date();
+        now.setHours(0, 0, 0, 0);
         const buckets = Array.from({ length: pts }, (_, i) => {
           const d = new Date(now);
           d.setDate(d.getDate() - (pts - 1 - i) * stepDays);
           const label = d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
-          return { label, value: 0, date: new Date(d) };
+          return { label, value: 0, date: d };
         });
         (rows || []).forEach(r => {
-          const rd = new Date(r[dateField]);
-          if (isNaN(rd)) return;
-          let best = 0, bestDiff = Infinity;
-          buckets.forEach((t, i) => { const diff = Math.abs(rd - t.date); if (diff < bestDiff) { bestDiff = diff; best = i; } });
-          buckets[best].value++;
+          const rdRaw = new Date(r[dateField]);
+          if (isNaN(rdRaw)) return;
+          const rd = new Date(rdRaw);
+          rd.setHours(0, 0, 0, 0);
+          const daysAgo = Math.round((now - rd) / 86400000);
+          const idx = (pts - 1) - Math.floor(daysAgo / stepDays);
+          if (idx >= 0 && idx < pts) buckets[idx].value++;
         });
         return buckets;
       };
@@ -679,6 +698,32 @@ export default function Overview({ onNavigate }) {
 
   useEffect(() => { loadStats(); loadCharts(); }, [loadStats, loadCharts]);
 
+  // "Today"-scoped widgets (Today's Visitors stat, New users today, and the
+  // Visits by Program pie chart) are computed from `todayStr` at the moment
+  // loadStats/loadCharts run. If the dashboard is left open across midnight
+  // with no attendance/borrowing event to trigger a realtime reload, that
+  // date would never get recomputed and the widgets would keep showing
+  // yesterday's numbers. This schedules an automatic refresh right after
+  // local midnight, then repeats every 24 hours so "today" always rolls
+  // over on its own.
+  useEffect(() => {
+    let dailyInterval;
+    const msUntilMidnight = () => {
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+      return next - now;
+    };
+    const refreshNow = () => { loadStats(); loadCharts(); };
+    const midnightTimeout = setTimeout(() => {
+      refreshNow();
+      dailyInterval = setInterval(refreshNow, 86400000);
+    }, msUntilMidnight());
+    return () => {
+      clearTimeout(midnightTimeout);
+      if (dailyInterval) clearInterval(dailyInterval);
+    };
+  }, [loadStats, loadCharts]);
+
   useEffect(() => {
     const ch = supabase.channel('overview-realtime')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, () => { loadStats(); loadCharts(); })
@@ -699,6 +744,7 @@ export default function Overview({ onNavigate }) {
   ];
 
   const programTotal = programDist.reduce((s, p) => s + p.count, 0) || 1;
+  const todayLabel = new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
   const pieData = programDist.slice(0, 6).map((p, i) => ({
     label: p.program || 'Unknown', name: p.name || p.program || 'Unknown',
     value: p.count, pct: Math.round((p.count / programTotal) * 100),
@@ -771,7 +817,7 @@ export default function Overview({ onNavigate }) {
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'rgba(245,228,168,0.55)' }}>
-                  today
+                  {todayLabel}
                 </span>
                 {pieData.length > 0 && (
                   <span

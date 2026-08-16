@@ -14,7 +14,12 @@ const CREAM = '#FAF6EE';
 const CREAM2 = '#F3EBD8';
 
 
-const today   = () => new Date().toISOString().split('T')[0];
+// Local (not UTC) calendar-day string — see AttendanceMonitoring.jsx for
+// why toISOString()'s UTC date is the wrong thing to use here.
+const today   = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const nowISO  = () => new Date().toISOString();
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—';
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', hour12:true }) : '—';
@@ -724,7 +729,7 @@ const txPayload = {
   status:       confirmData.action,
   borrowed_at:  isBorrow ? now : null,
   returned_at:  isBorrow ? null : now,
-  date:         new Date().toISOString().split('T')[0],
+  date:         today(),
 };
 
       const { error: txErr } = await supabaseAdmin.from('borrowings').insert([txPayload]);
@@ -1090,7 +1095,7 @@ export default function BookManagement({ initialTab }) {
         status:          'Borrowed',
         borrowed_at:     new Date().toISOString(),
         returned_at:     null,
-        date:            new Date().toISOString().split('T')[0],
+        date:            today(),
         // Phase 9: stamp campus_id so this borrowing belongs to the librarian's campus
         ...(campusId ? { campus_id: campusId } : {}),
       };

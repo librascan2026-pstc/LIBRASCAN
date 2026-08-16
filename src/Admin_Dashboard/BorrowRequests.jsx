@@ -10,7 +10,12 @@ const MAR2 = '#6B0000';
 const CREAM = '#FAF6EE';
 
 const nowISO  = () => new Date().toISOString();
-const today   = () => new Date().toISOString().split('T')[0];
+// Local (not UTC) calendar-day string — see AttendanceMonitoring.jsx for
+// why toISOString()'s UTC date is the wrong thing to use here.
+const today   = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 const fmtFull = (iso) => iso
   ? new Date(iso).toLocaleString('en-PH', { year:'numeric', month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', hour12:true })
   : '—';
