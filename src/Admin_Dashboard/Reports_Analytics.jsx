@@ -25,7 +25,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { supabase } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/AuthContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1750,6 +1750,14 @@ function TabStudents({ data, loading, period }) {
   const periodLabel = period==='7d'?'Last 7 days':period==='30d'?'Last 30 days':'Last 12 months';
   const totalBorrows = topStudents.reduce((s,b)=>s+b.borrows,0);
   const totalReturned = topStudents.reduce((s,b)=>s+b.returned,0);
+  const [programExpanded, setProgramExpanded] = useState(false);
+
+  const programTotal = byProgram.reduce((s,p)=>s+p.count,0)||1;
+  const programPieData = byProgram.slice(0,6).map((p,i)=>({
+    label: p.program||'N/A', name: p.name||p.program||'N/A',
+    value: p.count, pct: Math.round((p.count/programTotal)*100),
+    color: CATEGORY_COLORS[i%CATEGORY_COLORS.length],
+  }));
 
   const cols = [
     { key:'rank',          label:'Rank',    width:54,   render:v=><span style={{fontFamily:'var(--font-display)',fontWeight:700,color:'var(--maroon-deep)'}}>{v}</span> },
@@ -1793,22 +1801,55 @@ function TabStudents({ data, loading, period }) {
           </div>
         </div>
 
-        <div className="ra-panel" style={{display:'flex',flexDirection:'column'}}>
-          <div className="ra-panel-hd"><span className="ra-panel-title">By Program / Course</span><span className="ra-panel-sub">borrow distribution</span></div>
-          <div className="ra-panel-body" style={{
-            flex:1,padding:'20px 16px',minHeight:380,
-            display:'flex',alignItems:'center',justifyContent:'center',
-          }}>
-            {loading
-              ? <div style={{display:'flex',justifyContent:'center',alignItems:'center',height:320}}><div className="ra-sk" style={{height:260,width:260,borderRadius:'50%'}}/></div>
-              : byProgram.length
-                ? <PieChart
-                    data={byProgram.slice(0,6).map((p,i)=>({label:p.program||'N/A',value:p.count,color:CATEGORY_COLORS[i%CATEGORY_COLORS.length]}))}
-                    size={300}
-                  />
-                : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No program data</div></div>
-            }
+        <div className="ra-panel" style={{display:'flex',flexDirection:'column'}} onMouseLeave={()=>setProgramExpanded(false)}>
+          <div className="ra-panel-hd">
+            <span className="ra-panel-title">By Program / Course</span>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+              <span className="ra-panel-sub">borrow distribution</span>
+              {programPieData.length > 0 && (
+                <span
+                  onMouseEnter={()=>setProgramExpanded(true)}
+                  style={{display:'flex', alignItems:'center', cursor:'pointer', padding:4, margin:-4}}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(245,228,168,0.85)" strokeWidth="2.4"
+                    style={{transform: programExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s', flexShrink:0}}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              )}
+            </div>
           </div>
+          {programExpanded ? (
+            <div className="ra-panel-body" style={{flex:1, padding:'10px 16px 14px', minHeight:380, overflowY:'auto'}}>
+              {programPieData.map((p,i)=>(
+                <div key={p.label} style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  padding:'10px 0',
+                  borderBottom: i < programPieData.length-1 ? '1px solid rgba(139,0,0,0.08)' : 'none',
+                }}>
+                  <span style={{width:12, height:12, borderRadius:3, background:p.color, flexShrink:0}} />
+                  <span style={{fontFamily:'Georgia,"Times New Roman",serif', fontSize:12.5, color:'var(--text-primary,#3a1010)', lineHeight:1.4}}>
+                    <b style={{color:'var(--maroon-mid,#8B0000)', fontWeight:700}}>{p.pct}%</b>{' '}{p.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="ra-panel-body" style={{
+              flex:1,padding:'20px 16px',minHeight:380,
+              display:'flex',alignItems:'center',justifyContent:'center',
+            }}>
+              {loading
+                ? <div style={{display:'flex',justifyContent:'center',alignItems:'center',height:320}}><div className="ra-sk" style={{height:260,width:260,borderRadius:'50%'}}/></div>
+                : programPieData.length
+                  ? <PieChart
+                      data={programPieData}
+                      size={300}
+                    />
+                  : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No program data</div></div>
+              }
+            </div>
+          )}
         </div>
       </div>
 
@@ -2439,71 +2480,75 @@ function DailyVisitReportChart({ data=[], period='30d' }) {
   );
 
   // Layout
-  const PAD_L = 64, PAD_R = 48, PAD_T = 32, PAD_B = 44;
-  const VW = 1100, VH = 220 + PAD_T + PAD_B;
+  const PAD_L = 68, PAD_R = 28, PAD_T = 34, PAD_B = 48;
+  const VW = 1100, VH = 270 + PAD_T + PAD_B;
   const CW = VW - PAD_L - PAD_R;
-  const CH = 220;
+  const CH = 270;
 
-  const maxV = Math.max(...data.map(d => d.value), 1);
+  const maxRaw = Math.max(...data.map(d => d.value), 0);
+  // Give the tallest bar a little headroom so its value label never
+  // touches the top edge of the plot area — matches the accurate max value
+  // while keeping bar heights truthful to the underlying data.
+  const maxV = Math.max(maxRaw * 1.15, 1);
 
-  // Y-axis ticks
+  // Y-axis ticks — evenly spaced across the padded max, whole numbers
   const yTickCount = 5;
   const yTicks = Array.from({length: yTickCount + 1}, (_, i) => {
     const f = i / yTickCount;
     return { v: Math.round(maxV * f), y: PAD_T + CH - f * CH };
   });
 
-  // Plot points
-  const pts = data.map((d, i) => ({
-    x: PAD_L + (i / Math.max(data.length - 1, 1)) * CW,
-    y: PAD_T + CH - (d.value / maxV) * CH,
-    ...d,
-  }));
+  // Bar geometry — one slot per data point, bar drawn centered with a gap
+  const n = data.length;
+  const slotW = CW / n;
+  const barGapRatio = n > 40 ? 0.15 : n > 20 ? 0.28 : 0.4; // tighter gaps when crowded
+  const barW = Math.max(slotW * (1 - barGapRatio), 1);
 
-  const linePath = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
-  // Light fill area
-  const areaPath = `M${pts[0].x.toFixed(2)},${(PAD_T+CH).toFixed(2)} ` +
-    pts.map(p => `L${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ') +
-    ` L${pts[pts.length-1].x.toFixed(2)},${(PAD_T+CH).toFixed(2)} Z`;
-
-  // Decide which x-axis labels to show
-  const maxXLabels = data.length <= 7 ? data.length : 7;
-  const labelStep = Math.max(1, Math.floor((data.length - 1) / (maxXLabels - 1)));
-  const showXLabel = i => i === 0 || i === data.length - 1 || i % labelStep === 0;
-
-  // Decide which data point labels to show (peak + zero crossings + notable)
   const peakIdx = data.reduce((best, d, i) => d.value > data[best].value ? i : best, 0);
-  const shouldShowLabel = (d, i) => {
-    if (d.value === 0) return false;
-    if (i === peakIdx) return true;
-    if (i === 0 || i === data.length - 1) return d.value > 0;
-    // Show if local max among neighbors
-    const prev = data[i-1]?.value ?? -1;
-    const next = data[i+1]?.value ?? -1;
-    if (d.value > prev && d.value > next && d.value >= 2) return true;
-    return false;
-  };
 
-  const handleMouseMove = (e) => {
+  const bars = data.map((d, i) => {
+    const slotX = PAD_L + i * slotW;
+    const cx = slotX + slotW / 2;
+    const barH = maxV > 0 ? (d.value / maxV) * CH : 0;
+    const y = PAD_T + CH - barH;
+    return { ...d, i, cx, x: cx - barW/2, y, h: barH };
+  });
+
+  // Decide which x-axis labels to show — evenly spaced across the full
+  // range so two labels never land right next to each other.
+  const maxXLabels = Math.min(n, 7);
+  const labelIndices = new Set(
+    Array.from({ length: maxXLabels }, (_, k) =>
+      Math.round((k / Math.max(maxXLabels - 1, 1)) * (n - 1))
+    )
+  );
+  const showXLabel = i => labelIndices.has(i);
+
+  const handleEnter = (e, i) => {
     if (!ref.current) return;
     const rect = ref.current.getBoundingClientRect();
-    const svgX = ((e.clientX - rect.left) / rect.width) * VW;
-    const relX = svgX - PAD_L;
-    const idx = Math.round((relX / CW) * (data.length - 1));
-    const clamped = Math.max(0, Math.min(data.length - 1, idx));
-    setHovIdx(clamped);
-    setTip({ x: e.clientX - rect.left, y: e.clientY - rect.top, d: data[clamped] });
+    setHovIdx(i);
+    setTip({ x: e.clientX - rect.left, y: e.clientY - rect.top, d: data[i] });
+  };
+  const handleMove = (e) => {
+    if (!ref.current || hovIdx === null) return;
+    const rect = ref.current.getBoundingClientRect();
+    setTip(t => t ? { ...t, x: e.clientX - rect.left, y: e.clientY - rect.top } : t);
   };
 
   return (
     <div style={{position:'relative', userSelect:'none', width:'100%'}} ref={ref}
-      onMouseMove={handleMouseMove}
       onMouseLeave={() => { setTip(null); setHovIdx(null); }}>
-      <svg viewBox={`0 0 ${VW} ${VH}`} style={{width:'100%', height:'auto', display:'block', minHeight:200}}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} style={{width:'100%', height:'auto', display:'block', minHeight:200}}
+        onMouseMove={handleMove}>
         <defs>
-          <linearGradient id="dvt-area-grad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8B0000" stopOpacity="0.10"/>
-            <stop offset="100%" stopColor="#8B0000" stopOpacity="0.01"/>
+          <linearGradient id="dvt-bar-grad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#A80000" stopOpacity="1"/>
+            <stop offset="100%" stopColor="#6B0000" stopOpacity="1"/>
+          </linearGradient>
+          <linearGradient id="dvt-bar-grad-hov" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#C9A84C" stopOpacity="1"/>
+            <stop offset="100%" stopColor="#8B0000" stopOpacity="1"/>
           </linearGradient>
         </defs>
 
@@ -2522,7 +2567,7 @@ function DailyVisitReportChart({ data=[], period='30d' }) {
             <text
               x={PAD_L - 8} y={t.y}
               textAnchor="end" dominantBaseline="middle"
-              style={{fontFamily:'Georgia,serif', fontSize:10, fill:'#555', fontWeight:400}}
+              style={{fontFamily:'Georgia,serif', fontSize:11.5, fill:'#444', fontWeight:500}}
             >
               {t.v}
             </text>
@@ -2534,59 +2579,62 @@ function DailyVisitReportChart({ data=[], period='30d' }) {
 
         {/* Y-axis label */}
         <text
-          x={14} y={PAD_T + CH/2}
+          x={16} y={PAD_T + CH/2}
           textAnchor="middle" dominantBaseline="middle"
-          transform={`rotate(-90, 14, ${PAD_T + CH/2})`}
-          style={{fontFamily:'Georgia,serif', fontSize:9.5, fill:'#444', letterSpacing:'0.08em', fontWeight:600}}
+          transform={`rotate(-90, 16, ${PAD_T + CH/2})`}
+          style={{fontFamily:'Georgia,serif', fontSize:10.5, fill:'#3a1010', letterSpacing:'0.08em', fontWeight:700}}
         >
           Y-AXIS: VISITORS
         </text>
 
-        {/* Area fill */}
-        <path d={areaPath} fill="url(#dvt-area-grad)"/>
-
-        {/* Line */}
-        <path d={linePath} fill="none" stroke="#8B0000" strokeWidth="2.2"
-          strokeLinejoin="round" strokeLinecap="round"/>
-
-        {/* Data point circles + value labels */}
-        {pts.map((p, i) => {
-          const isHov = hovIdx === i;
-          const showLbl = shouldShowLabel(data[i], i);
+        {/* Bars */}
+        {bars.map((b, i) => {
+          const isHov  = hovIdx === i;
+          const isPeak = i === peakIdx && b.value > 0;
+          const showLbl = isHov || isPeak;
           return (
-            <g key={i}>
-              {/* Circle marker */}
-              <circle cx={p.x} cy={p.y} r={isHov ? 6 : 4}
-                fill={isHov ? '#8B0000' : '#fff'}
-                stroke="#8B0000" strokeWidth={isHov ? 2.5 : 2}
-              />
-              {/* Value label above notable points */}
+            <g key={i}
+              onMouseEnter={e => handleEnter(e, i)}
+              style={{cursor: b.value > 0 ? 'pointer' : 'default'}}
+            >
+              {/* Invisible full-height hit area so hovering anywhere in the
+                  column (not just on a short bar) shows the tooltip */}
+              <rect x={PAD_L + i*slotW} y={PAD_T} width={slotW} height={CH} fill="transparent"/>
+              {b.value > 0 && (
+                <rect
+                  x={b.x} y={b.y} width={barW} height={Math.max(b.h, 1.5)}
+                  rx={Math.min(3, barW/2)} ry={Math.min(3, barW/2)}
+                  fill={isHov ? 'url(#dvt-bar-grad-hov)' : 'url(#dvt-bar-grad)'}
+                  stroke={isHov ? '#C9A84C' : 'none'}
+                  strokeWidth={isHov ? 1.2 : 0}
+                  style={{transition:'fill .12s, opacity .12s'}}
+                />
+              )}
               {showLbl && (
-                <text x={p.x} y={p.y - 10}
+                <text x={b.cx} y={b.y - 8}
                   textAnchor="middle" dominantBaseline="auto"
                   style={{fontFamily:'Georgia,serif', fontSize:11, fill:'#8B0000', fontWeight:700}}
                 >
-                  {data[i].value}
+                  {b.value}
                 </text>
               )}
             </g>
           );
         })}
 
-        {/* Hover vertical rule */}
+        {/* Hover column highlight rule at baseline */}
         {hovIdx !== null && (
           <line
-            x1={pts[hovIdx].x} y1={PAD_T}
-            x2={pts[hovIdx].x} y2={PAD_T+CH}
-            stroke="rgba(139,0,0,0.25)" strokeWidth="1" strokeDasharray="3,3"
+            x1={PAD_L} y1={PAD_T+CH} x2={PAD_L+CW} y2={PAD_T+CH}
+            stroke="rgba(139,0,0,0.35)" strokeWidth="1.4"
           />
         )}
 
         {/* X-axis labels */}
-        {pts.map((p, i) => showXLabel(i) && (
-          <text key={i} x={p.x} y={PAD_T + CH + 14}
+        {bars.map((b, i) => showXLabel(i) && (
+          <text key={i} x={b.cx} y={PAD_T + CH + 14}
             textAnchor="middle" dominantBaseline="hanging"
-            style={{fontFamily:'Georgia,serif', fontSize:9, fill:'#555'}}
+            style={{fontFamily:'Georgia,serif', fontSize:9, fill: hovIdx===i ? '#8B0000' : '#555', fontWeight: hovIdx===i ? 700 : 400}}
           >
             {data[i].label}
           </text>
@@ -2675,6 +2723,14 @@ function TabAttendance({ data, loading, period }) {
   const peakDay = dailyCounts.length ? dailyCounts.reduce((a,b)=>b.value>a.value?b:a,dailyCounts[0]) : null;
   const uniqueStudents = new Set(logs.map(l=>l.id_no).filter(Boolean)).size;
   const insights = generateAttendanceInsights(dailyCounts);
+  const [programExpanded, setProgramExpanded] = useState(false);
+
+  const programTotal = byProgram.reduce((s,p)=>s+p.count,0)||1;
+  const programPieData = byProgram.slice(0,6).map((p,i)=>({
+    label: p.program||'Unknown', name: p.name||p.program||'Unknown',
+    value: p.count, pct: Math.round((p.count/programTotal)*100),
+    color: CATEGORY_COLORS[i%CATEGORY_COLORS.length],
+  }));
 
   const cols = [
     { key:'full_name', label:'Name',    width:'26%' },
@@ -2756,24 +2812,58 @@ function TabAttendance({ data, loading, period }) {
         </div>
 
         {/* RIGHT: Visits by Program panel */}
-        <div className="ra-panel" style={{display:'flex', flexDirection:'column'}}>
+        <div
+          className="ra-panel"
+          style={{display:'flex', flexDirection:'column'}}
+          onMouseLeave={()=>setProgramExpanded(false)}
+        >
           {/* Maroon header */}
           <div className="ra-panel-hd">
             <span className="ra-panel-title">Visits by Program</span>
-            <span className="ra-panel-sub">distribution</span>
+            <div style={{display:'flex', alignItems:'center', gap:10}}>
+              <span className="ra-panel-sub">distribution</span>
+              {programPieData.length > 0 && (
+                <span
+                  onMouseEnter={()=>setProgramExpanded(true)}
+                  style={{display:'flex', alignItems:'center', cursor:'pointer', padding:4, margin:-4}}
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(245,228,168,0.85)" strokeWidth="2.4"
+                    style={{transform: programExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition:'transform 0.2s', flexShrink:0}}>
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              )}
+            </div>
           </div>
-          {/* Pie chart */}
-          <div style={{flex:1, padding:'16px', display:'flex', alignItems:'center', justifyContent:'center', minHeight:300}}>
-            {loading
-              ? <div className="ra-sk" style={{height:220,width:220,borderRadius:'50%'}}/>
-              : byProgram.length
-                ? <PieChart
-                    data={byProgram.slice(0,6).map((p,i)=>({label:p.program||'Unknown',value:p.count,color:CATEGORY_COLORS[i%CATEGORY_COLORS.length]}))}
-                    size={280}
-                  />
-                : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No attendance data</div></div>
-            }
-          </div>
+          {/* Pie chart / expandable percentage list */}
+          {programExpanded ? (
+            <div style={{flex:1, padding:'10px 16px 14px', overflowY:'auto', minHeight:300}}>
+              {programPieData.map((p,i)=>(
+                <div key={p.label} style={{
+                  display:'flex', alignItems:'center', gap:12,
+                  padding:'10px 0',
+                  borderBottom: i < programPieData.length-1 ? '1px solid rgba(139,0,0,0.08)' : 'none',
+                }}>
+                  <span style={{width:12, height:12, borderRadius:3, background:p.color, flexShrink:0}} />
+                  <span style={{fontFamily:'Georgia,"Times New Roman",serif', fontSize:12.5, color:'var(--text-primary,#3a1010)', lineHeight:1.4}}>
+                    <b style={{color:'var(--maroon-mid,#8B0000)', fontWeight:700}}>{p.pct}%</b>{' '}{p.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{flex:1, padding:'16px', display:'flex', alignItems:'center', justifyContent:'center', minHeight:300}}>
+              {loading
+                ? <div className="ra-sk" style={{height:220,width:220,borderRadius:'50%'}}/>
+                : programPieData.length
+                  ? <PieChart
+                      data={programPieData}
+                      size={280}
+                    />
+                  : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No attendance data</div></div>
+              }
+            </div>
+          )}
         </div>
 
       </div>
@@ -2891,6 +2981,18 @@ export default function ReportsAnalytics() {
       let qCopiesRaw = supabase.from('book_copies')
         .select(campusId ? 'book_id,status,books!inner(campus_id)' : 'book_id,status');
 
+      // Canonical program list (id, name, code) — used to resolve the free-text
+      // program strings stored on attendance_logs/borrowings to the university's
+      // actual program codes, so records for the same real course are grouped
+      // together even if the stored text varies slightly.
+      // Uses supabaseAdmin (not the anon client) because the programs table is
+      // otherwise only readable via the admin client elsewhere in the app
+      // (see CampusManagementHub.jsx) — under the same RLS policy, an anon
+      // read here would silently come back empty and no code would ever match.
+      // Not campus-scoped: program codes (BSIT, BSCS, etc.) are shared
+      // reference data across the university, not per-campus.
+      let qPrograms = supabaseAdmin.from('programs').select('program_name,program_code');
+
       if (campusId) {
         qBorrowings       = qBorrowings.eq('campus_id', campusId);
         qBorrowingsPeriod = qBorrowingsPeriod.eq('campus_id', campusId);
@@ -2909,7 +3011,17 @@ export default function ReportsAnalytics() {
         { data: reqAll        },
         { data: attendRaw     },
         { data: copiesRaw     },
-      ] = await Promise.all([qBorrowings, qBorrowingsPeriod, qBooksRaw, qReqPeriod, qReqAll, qAttendRaw, qCopiesRaw]);
+        { data: programsRaw   },
+      ] = await Promise.all([qBorrowings, qBorrowingsPeriod, qBooksRaw, qReqPeriod, qReqAll, qAttendRaw, qCopiesRaw, qPrograms]);
+
+      if (!programsRaw || programsRaw.length === 0) {
+        console.warn(
+          '[Reports_Analytics] No rows came back from `programs` — program codes ' +
+          '(BSIT, BSCS, etc.) will not apply to the charts below, and raw program ' +
+          'text will be shown instead. Check that the programs table has rows and ' +
+          'that supabaseAdmin has read access to it.'
+        );
+      }
 
       // Compute available_copies per book from book_copies table
       const availableByBookId = {};
@@ -2940,6 +3052,55 @@ export default function ReportsAnalytics() {
       const getGenre   = title => (bookByTitle[norm(title)]||{}).genre||'';
       const getCover   = title => (bookByTitle[norm(title)]||{}).cover_image_url||null;
       const getBookRec = title => bookByTitle[norm(title)] || {};
+
+      // Resolve any raw program string (as stored on attendance_logs /
+      // borrowings) to this university's official program code, so that
+      // records for the same real course are always counted together —
+      // even if the stored text has different spacing/casing — and charts
+      // show the short code (e.g. "BSCS") instead of the full program name.
+      //
+      // Two different raw sources feed this: profile.program_legacy (set
+      // from the exact programs.program_name at signup — should match
+      // cleanly) and attendance_logs.program (whatever text is printed on
+      // the student's physical ID and scanned via QR — e.g. "BS INFORMATION
+      // TECHNOLOGY" instead of "Bachelor of Science in Information
+      // Technology"). A strict exact match misses that second case, so this
+      // also tries the program code itself and a fuzzy substring match.
+      const stripText = s => (s||'')
+        .toLowerCase()
+        .replace(/[.,;:]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const programByStrippedName = {};
+      const programByStrippedCode = {};
+      const programNameByCode = {};
+      (programsRaw||[]).forEach(p => {
+        const code = p.program_code || p.program_name;
+        if (!code) return;
+        if (p.program_name) programByStrippedName[stripText(p.program_name)] = code;
+        if (p.program_code) programByStrippedCode[stripText(p.program_code)] = code;
+        if (p.program_name) programNameByCode[code] = p.program_name;
+      });
+      const resolveProgramCode = raw => {
+        const key = stripText(raw);
+        if (!key) return 'Unknown';
+        // 1. Exact match against the full program name.
+        if (programByStrippedName[key]) return programByStrippedName[key];
+        // 2. Exact match against the code itself (ID may already show it).
+        if (programByStrippedCode[key]) return programByStrippedCode[key];
+        // 3. Fuzzy fallback — scanned ID text often drops/reorders words
+        //    ("BS Information Technology" vs "Bachelor of Science in
+        //    Information Technology"), so check if either string contains
+        //    the other, keeping the longest (most specific) match.
+        let best = null, bestLen = 0;
+        for (const name in programByStrippedName) {
+          if ((key.includes(name) || name.includes(key)) && name.length > bestLen) {
+            best = programByStrippedName[name];
+            bestLen = name.length;
+          }
+        }
+        return best || raw; // still no match — show the raw text as-is
+      };
 
       // ──────────────────────────────────────────────────
       // BOOK POPULARITY
@@ -3031,10 +3192,11 @@ export default function ReportsAnalytics() {
         }));
       const progCount = {};
       periodBorrowingsForStudents.forEach(b=>{
-        const p = b.student_program||'';
+        const p = resolveProgramCode(b.student_program);
         if(p) progCount[p]=(progCount[p]||0)+1;
       });
-      const byProgram = Object.entries(progCount).sort((a,b)=>b[1]-a[1]).map(([program,count])=>({program,count}));
+      const byProgram = Object.entries(progCount).sort((a,b)=>b[1]-a[1])
+        .map(([program,count])=>({program,count,name:programNameByCode[program]||program}));
       setStuData({ topStudents, byProgram });
 
       // ──────────────────────────────────────────────────
@@ -3165,8 +3327,9 @@ export default function ReportsAnalytics() {
       const logsFiltered = logsAll.filter(l => l.time_in && new Date(l.time_in).getTime() >= sinceTime);
 
       const progAttend = {};
-      logsFiltered.forEach(l=>{ const p=l.program||'Unknown'; progAttend[p]=(progAttend[p]||0)+1; });
-      const attendByProgram = Object.entries(progAttend).sort((a,b)=>b[1]-a[1]).map(([program,count])=>({program,count}));
+      logsFiltered.forEach(l=>{ const p=resolveProgramCode(l.program); progAttend[p]=(progAttend[p]||0)+1; });
+      const attendByProgram = Object.entries(progAttend).sort((a,b)=>b[1]-a[1])
+        .map(([program,count])=>({program,count,name:programNameByCode[program]||program}));
 
       // Timeline buckets match the selected period
       const [attendPts, attendStep] = period==='7d'?[7,1]:period==='30d'?[30,1]:[12,30];
@@ -3198,8 +3361,6 @@ export default function ReportsAnalytics() {
     {id:'books',       label:'Book Popularity',  icon:Ic.books   },
     {id:'students',    label:'Student Activity', icon:Ic.users   },
     {id:'trends',      label:'Borrowing Trends', icon:Ic.trend   },
-    {id:'unreturned',  label:'Unreturned',       icon:Ic.alert   },
-    {id:'availability',label:'Availability',     icon:Ic.category},
     {id:'transactions',label:'Transactions',     icon:Ic.bars    },
     {id:'attendance',  label:'Attendance',       icon:Ic.attend  },
   ];
@@ -3257,8 +3418,6 @@ export default function ReportsAnalytics() {
         {tab==='books'        && <TabBooks        data={bookData}    loading={dataLoading} period={period}/>}
         {tab==='students'     && <TabStudents     data={stuData}     loading={dataLoading} period={period}/>}
         {tab==='trends'       && <TabTrends       data={trendData}   loading={dataLoading} period={period} setPeriod={setPeriod}/>}
-        {tab==='unreturned'   && <TabOverdue      data={overdueData} loading={dataLoading}/>}
-        {tab==='availability' && <TabAvailability data={availData}   loading={dataLoading}/>}
         {tab==='transactions' && <TabTransactions data={txData}      loading={dataLoading}/>}
         {tab==='attendance'   && <TabAttendance   data={attendData}  loading={dataLoading} period={period}/>}
 

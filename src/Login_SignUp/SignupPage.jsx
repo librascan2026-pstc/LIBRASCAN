@@ -11,7 +11,7 @@ const FONT_SANS  = "'Josefin Sans', sans-serif";
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
 const USERNAME_REGEX    = /^[A-Za-z0-9_\-]+$/;
-const STUDENT_NO_REGEX  = /^\d{4}-\d{5,7}$/;
+const STUDENT_NO_REGEX  = /^\d{11}$/;
 
 const validators = {
   firstName: (v) => {
@@ -43,7 +43,7 @@ const validators = {
   },
   studentNumber: (v) => {
     if (!v.trim())                        return 'Student number is required.';
-    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYY-NNNNNNN (e.g. 2023-9293210).';
+    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYYNNNNNNN (e.g. 20239293210).';
     return '';
   },
   campus:  (v) => (!v ? 'Please select your campus.'  : ''),
@@ -283,6 +283,27 @@ const EMPTY = {
   studentNumber: '', email: '', password: '', confirm: '',
 };
 
+// Student Number is the true unique identifier for an account — unlike
+// names, which can legitimately repeat across different students, no two
+// accounts should ever share the same Student Number. This checks the
+// profiles table directly.
+async function checkStudentNumberTaken(studentNumber) {
+  const val = (studentNumber || '').trim();
+  if (!val) return false;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('student_number', val)
+    .maybeSingle();
+  if (error) {
+    // Don't hard-block signup on a network/RLS hiccup here — the final
+    // re-check right before account creation is the real guard.
+    console.error('[SignupPage] student number uniqueness check failed:', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
 export default function SignupPage({ onGoLogin, onGoLanding }) {
   const [form,        setForm]    = useState(EMPTY);
   const [touched,     setTouched] = useState({});
@@ -308,6 +329,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
   const [hasMajors,       setHasMajors]       = useState(false);
 
   const [cascadeErrors, setCascadeErrors] = useState({ campus: '', college: '', program: '' });
+  const [checkingStudentNumber, setCheckingStudentNumber] = useState(false);
 
   const handleExit = onGoLanding || (() => { window.location.href = '/'; });
 
@@ -369,10 +391,23 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     }
   };
 
-  const handleBlur = (field) => () => {
+  const handleBlur = (field) => async () => {
     setTouched(t => ({ ...t, [field]: true }));
     const err = field === 'confirm' ? validators.confirm(form.confirm, form) : validators[field]?.(form[field]) ?? '';
     setFE(fe => ({ ...fe, [field]: err }));
+
+    // Live-check ID number uniqueness the moment the user leaves the field,
+    // so they find out before they've filled out the rest of the form.
+    if (field === 'studentNumber' && !err) {
+      const value = form.studentNumber;
+      setCheckingStudentNumber(true);
+      const taken = await checkStudentNumberTaken(value);
+      setCheckingStudentNumber(false);
+      // Bail if the field changed while the check was in flight.
+      if (taken && form.studentNumber === value) {
+        setFE(fe => ({ ...fe, studentNumber: 'This Student Number is already registered.' }));
+      }
+    }
   };
 
   // ── Submit ──
@@ -401,6 +436,17 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     if (Object.keys(errs).length || cErrs.campus || cErrs.college || cErrs.program) return;
 
     setLoad(true);
+
+    // Final guard: re-check Student Number uniqueness right before creating
+    // the account. Closes the race condition where two people submit around
+    // the same time, or the earlier on-blur check was skipped.
+    const idTaken = await checkStudentNumberTaken(form.studentNumber);
+    if (idTaken) {
+      setLoad(false);
+      setFE(fe => ({ ...fe, studentNumber: 'This Student Number is already registered.' }));
+      setError('This Student Number is already registered to another account.');
+      return;
+    }
 
     // 1. Create auth user
     const { data: sd, error: authErr } = await supabase.auth.signUp({
@@ -493,7 +539,12 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         <Field label="Last Name" value={form.lastName} onChange={handleChange('lastName')} onBlur={handleBlur('lastName')} placeholder="Enter your last name" error={fieldErrors.lastName} disabled={loading} />
         <Field label="Middle Name (Optional)" value={form.middleName} onChange={handleChange('middleName')} onBlur={handleBlur('middleName')} placeholder="Enter your middle name" error={fieldErrors.middleName} disabled={loading} />
         <Field label="Username" value={form.username} onChange={handleChange('username')} onBlur={handleBlur('username')} placeholder="Enter your username" error={fieldErrors.username} autoComplete="username" disabled={loading} />
-        <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 2023-9293210" error={fieldErrors.studentNumber} disabled={loading} />
+        <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 20239293210" error={fieldErrors.studentNumber} disabled={loading} />
+        {checkingStudentNumber && (
+          <div style={{ marginTop: -4, marginBottom: 7, fontSize: 9.5, fontFamily: FONT_BODY, color: '#8B4513', fontStyle: 'italic' }}>
+            Checking availability…
+          </div>
+        )}
 
         {/* ── Cascading academic info ── */}
         <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.18)', borderRadius: 10, padding: '10px 12px 6px', marginBottom: 8 }}>

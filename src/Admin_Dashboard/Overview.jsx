@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/AuthContext';
 
@@ -9,19 +9,419 @@ const Icon = {
   attend: (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
 };
 
-function relTime(iso) {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1)   return 'just now';
-  if (mins < 60)  return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24)   return `${hrs} hr${hrs > 1 ? 's' : ''} ago`;
-  const days = Math.floor(hrs / 24);
-  if (days === 1) return 'Yesterday';
-  return `${days} days ago`;
+const CATEGORY_COLORS = [
+  '#8B0000','#C9A84C','#1A4DA0','#0D7377','#5B2C8D',
+  '#B87333','#277A3C','#C0392B','#2E4057','#A04000',
+];
+const fmtNum = n => n == null ? '—' : Number(n).toLocaleString();
+
+// ── Catmull-Rom → cubic Bezier smoothing (ported from Reports_Analytics) ──
+function monotoneCurvePath(pts) {
+  if (pts.length < 2) return pts.length ? `M${pts[0].x},${pts[0].y}` : '';
+  const n = pts.length;
+  const dx = [], dy = [], slope = [], m = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx[i]    = pts[i+1].x - pts[i].x;
+    dy[i]    = pts[i+1].y - pts[i].y;
+    slope[i] = dy[i] / dx[i];
+  }
+  m[0] = slope[0];
+  for (let i = 1; i < n - 1; i++) {
+    m[i] = slope[i-1] * slope[i] <= 0 ? 0 : (slope[i-1] + slope[i]) / 2;
+  }
+  m[n-1] = slope[n-2];
+  for (let i = 0; i < n - 1; i++) {
+    if (slope[i] === 0) { m[i] = m[i+1] = 0; continue; }
+    const a = m[i] / slope[i], b = m[i+1] / slope[i], s = a*a + b*b;
+    if (s > 9) { const t = 3 / Math.sqrt(s); m[i] = t*a*slope[i]; m[i+1] = t*b*slope[i]; }
+  }
+  let d = `M${pts[0].x},${pts[0].y}`;
+  for (let i = 0; i < n - 1; i++) {
+    const h = dx[i];
+    d += ` C${pts[i].x+h/3},${pts[i].y+m[i]*h/3} ${pts[i+1].x-h/3},${pts[i+1].y-m[i+1]*h/3} ${pts[i+1].x},${pts[i+1].y}`;
+  }
+  return d;
+}
+
+// ── Full Pie Chart with external labels + legend (ported from Reports_Analytics) ──
+function PieChart({ data=[], size=300, showLegend=true }) {
+  const [hov, setHov] = useState(null);
+  const total = data.reduce((s,d)=>s+d.value,0)||1;
+
+  const PAD = 50;
+  const VW  = size + PAD*2;
+  const VH  = size + PAD*2;
+  const cx  = VW/2;
+  const cy  = VH/2;
+  const R   = size*0.40;
+  const RL  = R + 12;
+  const RLO = R + 36;
+  const RT  = R + 52;
+
+  let angle = -Math.PI/2;
+  const isSingle = data.length === 1;
+  const slices = data.map((d,i)=>{
+    const sweep = isSingle ? Math.PI*2 - 0.0001 : (d.value/total)*Math.PI*2;
+    const mid   = angle + sweep/2;
+    const x1=cx+R*Math.cos(angle),       y1=cy+R*Math.sin(angle);
+    const x2=cx+R*Math.cos(angle+sweep), y2=cy+R*Math.sin(angle+sweep);
+    const lf = sweep>Math.PI?1:0;
+    const lx1=cx+RL*Math.cos(mid),  ly1=cy+RL*Math.sin(mid);
+    const lx2=cx+RLO*Math.cos(mid), ly2=cy+RLO*Math.sin(mid);
+    const tx =cx+RT*Math.cos(mid),  ty =cy+RT*Math.sin(mid);
+    const rawC = Math.cos(mid);
+    const anchor = rawC>0.15?'start':rawC<-0.15?'end':'middle';
+    const pctVal = Math.round((d.value/total)*100);
+    const slice = {...d,i,angle,sweep,mid,x1,y1,x2,y2,lf,lx1,ly1,lx2,ly2,tx,ty,anchor,pctVal};
+    angle += sweep;
+    return slice;
+  });
+
+  return (
+    <div style={{ display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14,width:'100%',height:'100%',minHeight:0 }}>
+      <svg viewBox={`0 0 ${VW} ${VH}`} preserveAspectRatio="xMidYMid meet"
+        style={{width:'100%',height:'100%',maxWidth:VW,maxHeight:VH,display:'block'}}>
+        <defs>
+          <filter id="lm-pshadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="3" stdDeviation="5" floodColor="rgba(0,0,0,0.13)"/>
+          </filter>
+        </defs>
+
+        {slices.map((s,i)=>{
+          const isH = hov===i;
+          const dx = isH?Math.cos(s.mid)*8:0, dy=isH?Math.sin(s.mid)*8:0;
+          const op = hov!==null&&!isH?0.6:1;
+          if(isSingle){
+            return (
+              <g key={i} style={{cursor:'pointer'}} onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}>
+                <circle cx={cx+dx} cy={cy+dy} r={R} fill={s.color} stroke="#fff" strokeWidth="3"
+                  filter="url(#lm-pshadow)" opacity={op} style={{transition:'opacity .18s,cx .18s,cy .18s'}}/>
+              </g>
+            );
+          }
+          return (
+            <g key={i} style={{cursor:'pointer'}} onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}>
+              <path
+                d={`M${cx},${cy} L${s.x1},${s.y1} A${R},${R} 0 ${s.lf},1 ${s.x2},${s.y2} Z`}
+                fill={s.color} stroke="#fff" strokeWidth="3"
+                filter="url(#lm-pshadow)" opacity={op}
+                style={{ transform:`translate(${dx}px,${dy}px)`, transition:'opacity .18s,transform .18s' }}/>
+            </g>
+          );
+        })}
+
+        {slices.map((s,i)=>{
+          const op = hov!==null&&hov!==i?0.3:1;
+          const lx1_=isSingle?cx:s.lx1,   ly1_=isSingle?cy-R:s.ly1;
+          const lx2_=isSingle?cx:s.lx2,   ly2_=isSingle?cy-R-24:s.ly2;
+          const tx_ =isSingle?cx:s.tx,     ty_ =isSingle?cy-R-40:s.ty;
+          const anc_=isSingle?'middle':s.anchor;
+          return (
+            <g key={`L${i}`} opacity={op} style={{transition:'opacity .18s'}}>
+              <circle cx={lx1_} cy={ly1_} r="4" fill={s.color}/>
+              <line x1={lx1_} y1={ly1_} x2={lx2_} y2={ly2_} stroke={s.color} strokeWidth="1.6"/>
+              <text x={tx_} y={ty_-9} textAnchor={anc_}
+                style={{fontSize:13,fontWeight:800,fill:s.color,fontFamily:'var(--font-display,serif)'}}>
+                {s.pctVal}%
+              </text>
+              <text x={tx_} y={ty_+8} textAnchor={anc_}
+                style={{fontSize:10,fill:'#7a6b5a',fontFamily:'var(--font-sans,sans-serif)'}}>
+                {(s.label||'').length>15?(s.label).slice(0,14)+'\u2026':(s.label||'')}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+
+      {showLegend && (
+        <div style={{display:'flex',flexWrap:'wrap',gap:'7px 20px',justifyContent:'center',padding:'0 12px'}}>
+          {slices.map((s,i)=>(
+            <div key={i} onMouseEnter={()=>setHov(i)} onMouseLeave={()=>setHov(null)}
+              style={{display:'flex',alignItems:'center',gap:7,cursor:'pointer',opacity:hov!==null&&hov!==i?0.4:1,transition:'opacity .15s'}}>
+              <div style={{width:12,height:12,borderRadius:3,background:s.color,flexShrink:0}}/>
+              <span style={{fontSize:12,color:'var(--text-secondary,#6b5a4e)',fontFamily:'var(--font-sans,sans-serif)',whiteSpace:'nowrap'}}>
+                {(s.label||'N/A').length>22?s.label.slice(0,21)+'\u2026':(s.label||'N/A')}
+              </span>
+              {hov===i && (
+                <span style={{fontSize:12,fontWeight:700,color:'var(--maroon-mid,#8B0000)',fontFamily:'var(--font-sans,sans-serif)'}}>
+                  {fmtNum(s.value)}
+                </span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Multi-Line Borrowing Activity Trend Chart (ported from Reports_Analytics) ──
+function BorrowingActivityTrendChart({ reqData=[], borrData=[], retData=[], loading, selectedSeries, onSeriesSelect }) {
+  const wrapRef = useRef(null);
+  const [hovIdx, setHovIdx] = useState(null);
+
+  const allLabels = (() => {
+    const seen = new Set(), out = [];
+    [...reqData, ...borrData, ...retData].forEach(d => { if (!seen.has(d.label)) { seen.add(d.label); out.push(d.label); } });
+    return out;
+  })();
+
+  const SERIES = [
+    { key:'borr', label:'Borrowed', color:'#C0152A', data: borrData },
+    { key:'ret',  label:'Returned', color:'#F5A623', data: retData  },
+    { key:'req',  label:'Request',  color:'#22C5C5', data: reqData  },
+  ];
+
+  const lookup = {};
+  SERIES.forEach(s => { lookup[s.key] = {}; s.data.forEach(d => { lookup[s.key][d.label] = d.value; }); });
+
+  const PAD_L=62, PAD_R=24, PAD_T=30, PAD_B=52;
+  const VW=880, CH=220, VH=CH+PAD_T+PAD_B;
+  const CW=VW-PAD_L-PAD_R;
+
+  const allVals = SERIES.flatMap(s => s.data.map(d => d.value));
+  const rawMax  = allVals.length ? Math.max(...allVals) : 4;
+  const yStep   = rawMax <= 10 ? 1 : rawMax <= 30 ? 5 : rawMax <= 60 ? 10 : Math.ceil(rawMax/6/5)*5;
+  const yMax    = Math.max(Math.ceil(rawMax/yStep)*yStep + yStep, 4);
+
+  const xOf = i => PAD_L + (allLabels.length <= 1 ? CW/2 : (i/(allLabels.length-1))*CW);
+  const yOf = v => PAD_T + CH - (v/yMax)*CH;
+
+  const yTickCount = Math.min(7, Math.floor(yMax/yStep)+1);
+  const yTicks = Array.from({length: yTickCount}, (_,i) => {
+    const v = Math.round((yMax / (yTickCount-1)) * i);
+    return { v, y: yOf(v) };
+  });
+
+  const seriesPts = SERIES.map(s => ({
+    ...s,
+    pts: allLabels.map((lbl,i) => ({ x: xOf(i), y: yOf(lookup[s.key][lbl]??0), value: lookup[s.key][lbl]??0, lbl, i })),
+  }));
+
+  const bandW = allLabels.length > 1 ? CW/(allLabels.length-1) : CW;
+
+  if (loading) return <div className="lm-ra-sk" style={{height:280,borderRadius:8}}/>;
+  if (!allLabels.length) return (
+    <div className="lm-ra-empty" style={{padding:32,textAlign:'center'}}>
+      <div className="lm-ra-empty-s">No data for this period</div>
+    </div>
+  );
+
+  const hasSelection = selectedSeries !== null;
+
+  return (
+    <div ref={wrapRef} style={{userSelect:'none', position:'relative', background:'var(--cream-light)'}}>
+      {/* Floating legend toggles — centered at top of chart */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:6,flexWrap:'wrap',marginBottom:8}}>
+        {SERIES.map(l => {
+          const isActive = selectedSeries === l.key;
+          const isNone   = selectedSeries === null;
+          const dimmed   = !isNone && !isActive;
+          return (
+            <button
+              key={l.key}
+              onClick={() => onSeriesSelect(isActive ? null : l.key)}
+              style={{
+                display:'flex', alignItems:'center', gap:7,
+                padding:'5px 14px', borderRadius:99,
+                border: `1.5px solid ${isActive ? l.color : 'rgba(139,0,0,0.18)'}`,
+                background: isActive ? `${l.color}14` : 'rgba(255,255,255,0.80)',
+                cursor:'pointer', transition:'all 0.18s',
+                opacity: dimmed ? 0.38 : 1,
+                outline:'none',
+                boxShadow: isActive ? `0 2px 8px ${l.color}28` : '0 1px 4px rgba(0,0,0,0.06)',
+              }}
+            >
+              <svg width="20" height="10" style={{flexShrink:0}}>
+                <line x1="0" y1="5" x2="20" y2="5" stroke={l.color} strokeWidth={isActive?2.5:2}/>
+                <circle cx="10" cy="5" r={isActive?4:3.5} fill={l.color}/>
+              </svg>
+              <span style={{
+                fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight: isActive ? 700 : 500,
+                color: isActive ? l.color : '#555',
+                whiteSpace:'nowrap',
+              }}>{l.label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ position: 'relative' }}>
+        <svg
+          viewBox={`0 0 ${VW} ${VH}`}
+        style={{width:'100%', height:'auto', display:'block', overflow:'visible'}}
+        onMouseLeave={() => setHovIdx(null)}
+      >
+        <defs>
+          {SERIES.map(s => (
+            <linearGradient key={`grad-${s.key}`} id={`ov-grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={s.color} stopOpacity="0.18"/>
+              <stop offset="100%" stopColor={s.color} stopOpacity="0.01"/>
+            </linearGradient>
+          ))}
+        </defs>
+
+        {yTicks.map(({v,y}) => (
+          <g key={v}>
+            <line x1={PAD_L} y1={y} x2={PAD_L+CW} y2={y}
+              stroke={v===0 ? 'rgba(139,0,0,0.18)' : 'rgba(0,0,0,0.065)'}
+              strokeWidth={v===0 ? 1.2 : 1}
+              strokeDasharray={v===0 ? 'none' : '5,5'}
+            />
+            <text x={PAD_L-10} y={y} textAnchor="end" dominantBaseline="middle"
+              style={{fontFamily:'var(--font-sans)',fontSize:9.5,fill:'rgba(80,0,0,0.45)',fontWeight:500}}>
+              {v}
+            </text>
+          </g>
+        ))}
+
+        <line x1={PAD_L} y1={PAD_T} x2={PAD_L} y2={PAD_T+CH} stroke="rgba(139,0,0,0.15)" strokeWidth="1.2"/>
+
+        <text x={13} y={PAD_T+CH/2} textAnchor="middle" dominantBaseline="middle"
+          transform={`rotate(-90,13,${PAD_T+CH/2})`}
+          style={{fontFamily:'var(--font-sans)',fontSize:9.5,fill:'rgba(80,0,0,0.50)',fontWeight:600,letterSpacing:'0.04em'}}>
+          Number of Books
+        </text>
+
+        {hovIdx !== null && (
+          <line x1={xOf(hovIdx)} y1={PAD_T} x2={xOf(hovIdx)} y2={PAD_T+CH}
+            stroke="rgba(0,0,0,0.14)" strokeWidth="1.2" strokeDasharray="3,3"/>
+        )}
+
+        {hasSelection && seriesPts.filter(s => s.key === selectedSeries).map(s => {
+          const areaPath = monotoneCurvePath(s.pts)
+            + ` L${s.pts[s.pts.length-1].x},${PAD_T+CH} L${s.pts[0].x},${PAD_T+CH} Z`;
+          return (
+            <path key={`area-${s.key}`} d={areaPath} fill={`url(#ov-grad-${s.key})`} stroke="none"/>
+          );
+        })}
+
+        {seriesPts.map(s => {
+          const isSelected = selectedSeries === s.key;
+          const isBlurred  = hasSelection && !isSelected;
+          return (
+            <path key={s.key}
+              d={monotoneCurvePath(s.pts)}
+              fill="none"
+              stroke={s.color}
+              strokeWidth={isSelected ? 3 : isBlurred ? 1.8 : 2.4}
+              strokeOpacity={isBlurred ? 0.22 : 1}
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              style={{transition:'stroke-opacity 0.25s, stroke-width 0.25s'}}
+            />
+          );
+        })}
+
+        {seriesPts.map((s) => {
+          const isSelected = selectedSeries === s.key;
+          const isBlurred  = hasSelection && !isSelected;
+          return s.pts.map((p,i) => {
+            const isHov = hovIdx === i;
+            const rBase = isSelected ? 5 : isBlurred ? 3.5 : 4.5;
+            const r     = isHov ? rBase + 1.5 : rBase;
+            return (
+              <g key={`${s.key}-${i}`} style={{transition:'opacity 0.25s'}} opacity={isBlurred ? 0.25 : 1}>
+                {isHov && !isBlurred && (
+                  <circle cx={p.x} cy={p.y} r={r+5} fill={s.color} opacity={0.12}/>
+                )}
+                <circle cx={p.x} cy={p.y} r={r}
+                  fill={s.color} stroke="#fff" strokeWidth={isSelected ? 2.5 : 1.8}
+                  style={{transition:'r 0.15s'}}
+                />
+                {(isHov || isSelected) && !isBlurred && (
+                  <text x={p.x} y={p.y - r - 6} textAnchor="middle"
+                    style={{fontFamily:'var(--font-sans)',fontSize:isSelected?10.5:10,fontWeight:700,fill:s.color}}>
+                    {p.value}
+                  </text>
+                )}
+              </g>
+            );
+          });
+        })}
+
+        {allLabels.map((lbl,i) => {
+          const x = xOf(i);
+          const skip = allLabels.length > 12 ? Math.ceil(allLabels.length/8) : 1;
+          if (i % skip !== 0 && i !== allLabels.length-1) return null;
+          return (
+            <g key={lbl}>
+              <line x1={x} y1={PAD_T+CH} x2={x} y2={PAD_T+CH+5} stroke="rgba(139,0,0,0.20)" strokeWidth="1"/>
+              <text x={x} y={PAD_T+CH+17} textAnchor="middle"
+                style={{fontFamily:'var(--font-sans)',fontSize:9,
+                  fill: hovIdx===i ? 'rgba(80,0,0,0.85)' : 'rgba(80,0,0,0.45)',
+                  fontWeight: hovIdx===i ? 700 : 400}}>
+                {lbl}
+              </text>
+            </g>
+          );
+        })}
+
+        <text x={PAD_L+CW/2} y={VH-3} textAnchor="middle"
+          style={{fontFamily:'var(--font-sans)',fontSize:10,fill:'rgba(80,0,0,0.52)',fontWeight:600,letterSpacing:'0.08em',textTransform:'uppercase'}}>
+          DATE
+        </text>
+
+        {allLabels.map((_,i) => (
+          <rect key={`hb-${i}`}
+            x={xOf(i) - bandW/2} y={PAD_T}
+            width={bandW} height={CH}
+            fill="transparent"
+            style={{cursor:'crosshair'}}
+            onMouseEnter={() => setHovIdx(i)}
+          />
+        ))}
+      </svg>
+
+      {hovIdx !== null && (() => {
+        const pctX = (xOf(hovIdx)/VW)*100;
+        const tipSeries = hasSelection ? SERIES.filter(s => s.key === selectedSeries) : SERIES;
+        return (
+          <div className="lm-ra-spark-tip" style={{
+            position:'absolute', top:6, pointerEvents:'none', zIndex:20,
+            left:`${pctX}%`,
+            transform: pctX>72 ? 'translateX(-110%)' : pctX<18 ? 'translateX(6%)' : 'translateX(-50%)',
+            minWidth:160,
+          }}>
+            <div style={{fontFamily:'var(--font-sans)',fontSize:11,color:'rgba(245,228,168,0.90)',marginBottom:7,fontWeight:700,borderBottom:'1px solid rgba(255,255,255,0.12)',paddingBottom:5}}>
+              📅 {allLabels[hovIdx]}
+            </div>
+            {tipSeries.map(s => (
+              <div key={s.key} style={{display:'flex',alignItems:'center',justifyContent:'space-between',gap:14,marginBottom:4}}>
+                <div style={{display:'flex',alignItems:'center',gap:6}}>
+                  <div style={{width:9,height:9,borderRadius:'50%',background:s.color,flexShrink:0,boxShadow:`0 0 4px ${s.color}`}}/>
+                  <span style={{fontFamily:'var(--font-sans)',fontSize:10.5,color:'rgba(245,228,168,0.75)'}}>{s.label}</span>
+                </div>
+                <span style={{fontFamily:'var(--font-sans)',fontSize:12,fontWeight:800,color:s.color,textShadow:`0 0 8px ${s.color}55`}}>
+                  {lookup[s.key][allLabels[hovIdx]]??0}
+                </span>
+              </div>
+            ))}
+          </div>
+        );
+      })()}
+      </div>
+    </div>
+  );
 }
 
 const SCROLL_STYLE = `
+  @keyframes lm-ra-shimmer { 0%{background-position:-600px 0} 100%{background-position:600px 0} }
+  .lm-ra-sk { border-radius:5px; background:linear-gradient(90deg,rgba(139,0,0,0.06) 25%,rgba(139,0,0,0.10) 50%,rgba(139,0,0,0.06) 75%); background-size:1200px 100%; animation:lm-ra-shimmer 1.4s infinite linear; }
+  .lm-ra-empty { display:flex; flex-direction:column; align-items:center; justify-content:center; padding:32px 20px; gap:8px; text-align:center; font-family:var(--font-sans); }
+  .lm-ra-empty-s { font-size:11.5px; color:var(--text-dim); max-width:230px; }
+  .lm-ra-spark-tip { position:absolute; pointer-events:none; z-index:20; background:rgba(20,0,0,.90); border:1px solid rgba(201,168,76,.48); border-radius:7px; padding:6px 10px; font-family:var(--font-sans); font-size:11px; color:rgba(245,228,168,.92); white-space:nowrap; box-shadow:0 4px 14px rgba(0,0,0,.36); transition:opacity .10s; }
+
+  .lm-chart-card {
+    display: flex;
+    flex-direction: column;
+    border-radius: var(--radius-lg);
+    border: 1px solid rgba(139,0,0,0.13);
+    box-shadow: 0 2px 12px rgba(30,0,0,0.07);
+    overflow: hidden;
+    min-height: 0;
+    text-align: left;
+  }
+
   .lm-activity-scroll::-webkit-scrollbar { width: 5px; }
   .lm-activity-scroll::-webkit-scrollbar-track { background: rgba(139,0,0,0.04); border-radius: 99px; }
   .lm-activity-scroll::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.22); border-radius: 99px; }
@@ -31,10 +431,23 @@ const SCROLL_STYLE = `
   .lm-overview-bottom {
     display: grid;
     grid-template-columns: 1fr 300px;
-    gap: 18px;
-    margin-top: 18px;
-    align-items: start;
+    gap: 12px;
+    margin-top: 12px;
+    align-items: stretch;
   }
+
+  /* Tighter spacing scoped to the Overview page only — does not affect
+     the shared .lm-stats-grid / .lm-stat-card / .lm-panel classes used
+     on other tabs (Attendance, Book Management, etc). */
+  .lm-overview-page.lm-module { padding: 0; }
+  .lm-overview-page .lm-module-header { margin-bottom: 14px; }
+  .lm-overview-page .lm-stats-grid { gap: 12px; margin-bottom: 14px; }
+  .lm-overview-page .lm-stat-card { padding: 15px 16px 13px; gap: 4px; }
+  .lm-overview-page .lm-stat-icon { width: 34px; height: 34px; margin-bottom: 2px; }
+  .lm-overview-page .lm-stat-value { font-size: 26px; }
+  .lm-overview-page .lm-stat-sub { margin-top: 0; }
+  .lm-overview-page .lm-panel { padding: 14px 16px; margin-bottom: 0; }
+  .lm-overview-page .lm-panel-title { margin-bottom: 8px; padding-bottom: 6px; }
 
   
   .lm-activity-card {
@@ -53,7 +466,7 @@ const SCROLL_STYLE = `
     flex-shrink: 0;
     background: linear-gradient(135deg, #8B0000, #6B0000);
     border-bottom: 2px solid rgba(201,168,76,0.35);
-    padding: 13px 16px;
+    padding: 10px 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -72,7 +485,7 @@ const SCROLL_STYLE = `
   .lm-right-col {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
   }
 
   
@@ -111,10 +524,13 @@ export default function Overview({ onNavigate }) {
   const campusId = profile?.campus_id ?? null;
 
   const [stats,         setStats]         = useState({ users: 0, books: 0, borrowed: 0, attendance: 0, available: 0, overdue: 0, newUsers: 0, pending: 0 });
-  const [activity,      setActivity]      = useState([]);
   const [loading,       setLoading]       = useState(true);
-  const [actLoading,    setActLoading]    = useState(true);
-  const [confirmDelete, setConfirmDelete] = useState(null); 
+
+  const [chartsLoading,  setChartsLoading]  = useState(true);
+  const [trendData,      setTrendData]      = useState({ req: [], borr: [], ret: [] });
+  const [programDist,    setProgramDist]    = useState([]);
+  const [programExpanded, setProgramExpanded] = useState(false);
+  const [selectedSeries, setSelectedSeries] = useState(null);
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -162,100 +578,118 @@ export default function Overview({ onNavigate }) {
     } finally { setLoading(false); }
   }, [campusId]);
 
-  const loadActivity = useCallback(async () => {
-    setActLoading(true);
+  // Loads the data behind the "Borrowing Activity Trend" line chart (last 7
+  // days, one point per day) and the "Visits by Program" pie chart (today's
+  // attendance only) — scoped windows so the Overview widgets need no
+  // period selector of their own.
+  const loadCharts = useCallback(async () => {
+    setChartsLoading(true);
     try {
-      let qBorrows = supabaseAdmin.from('borrowings')
-        .select('id, status, borrowed_at, returned_at, student_name, book_title')
-        .order('borrowed_at', { ascending: false }).limit(500);
-      let qNewProfiles = supabase.from('profiles')
-        .select('id, first_name, last_name, created_at')
-        .order('created_at', { ascending: false }).limit(200);
-      let qVisits = supabase.from('attendance_logs')
-        .select('id, full_name, time_in')
-        .order('time_in', { ascending: false }).limit(200);
-      let qNewBooks = supabase.from('books')
-        .select('id, title, authors, copies, created_at')
-        .order('created_at', { ascending: false }).limit(200);
-      let qCopyChanges = supabaseAdmin.from('book_copies')
-        .select('id, status, updated_at, book_id, books!inner(title, campus_id)')
-        .order('updated_at', { ascending: false }).limit(200);
+      const todayStr = new Date().toISOString().split('T')[0];
+      const since = new Date(Date.now() - 6 * 86400000).toISOString();
+
+      let qReqPeriod = supabase.from('borrow_requests')
+        .select(campusId ? 'id,created_at,books!inner(campus_id)' : 'id,created_at')
+        .gte('created_at', since);
+      let qBorrowingsPeriod = supabase.from('borrowings')
+        .select('id,borrowed_at,returned_at')
+        .gte('borrowed_at', since);
+      let qAttendRaw = supabase.from('attendance_logs')
+        .select('id,program,time_in')
+        .eq('date', todayStr)
+        .order('time_in', { ascending: false })
+        .limit(1000);
+      let qPrograms = supabaseAdmin.from('programs').select('program_name,program_code');
 
       if (campusId) {
-        qBorrows      = qBorrows.eq('campus_id', campusId);
-        qNewProfiles  = qNewProfiles.eq('campus_id', campusId);
-        qVisits       = qVisits.eq('campus_id', campusId);
-        qNewBooks     = qNewBooks.eq('campus_id', campusId);
-        qCopyChanges  = qCopyChanges.eq('books.campus_id', campusId);
+        qReqPeriod        = qReqPeriod.eq('books.campus_id', campusId);
+        qBorrowingsPeriod = qBorrowingsPeriod.eq('campus_id', campusId);
+        qAttendRaw        = qAttendRaw.eq('campus_id', campusId);
       }
 
       const [
-        { data: borrows     },
-        { data: newProfiles },
-        { data: visits      },
-        { data: newBooks    },
-        { data: copyChanges },
-      ] = await Promise.all([qBorrows, qNewProfiles, qVisits, qNewBooks, qCopyChanges]);
+        { data: reqPeriod        },
+        { data: borrowingsPeriod },
+        { data: attendRaw        },
+        { data: programsRaw      },
+      ] = await Promise.all([qReqPeriod, qBorrowingsPeriod, qAttendRaw, qPrograms]);
 
-      const events = [];
-
-      (borrows || []).forEach(b => {
-        const name = b.student_name || 'A student';
-        const book = b.book_title   || 'a book';
-        const statusLower = (b.status || '').toLowerCase();
-        if ((statusLower === 'returned' || statusLower === 'return') && b.returned_at) {
-          events.push({ text: `${name} returned "${book}"`, ts: b.returned_at, color: '#64b5f6', tag: 'Return' });
-          events.push({ text: `${name} borrowed "${book}"`, ts: b.borrowed_at, color: '#81c784', tag: 'Borrow' });
-        } else if (b.borrowed_at) {
-          const overdue = statusLower === 'overdue';
-          events.push({ text: `${name} borrowed "${book}"`, ts: b.borrowed_at, color: overdue ? '#ff8a65' : '#81c784', tag: overdue ? 'Overdue' : 'Borrow' });
+      // Resolve raw program text (scanned off a student ID) to the
+      // university's official program code, same logic as Reports & Analytics.
+      const stripText = s => (s || '').toLowerCase().replace(/[.,;:]/g, '').replace(/\s+/g, ' ').trim();
+      const byStrippedName = {}, byStrippedCode = {}, nameByCode = {};
+      (programsRaw || []).forEach(p => {
+        const code = p.program_code || p.program_name;
+        if (!code) return;
+        if (p.program_name) byStrippedName[stripText(p.program_name)] = code;
+        if (p.program_code) byStrippedCode[stripText(p.program_code)] = code;
+        if (p.program_name) nameByCode[code] = p.program_name;
+      });
+      const resolveProgramCode = raw => {
+        const key = stripText(raw);
+        if (!key) return 'Unknown';
+        if (byStrippedName[key]) return byStrippedName[key];
+        if (byStrippedCode[key]) return byStrippedCode[key];
+        let best = null, bestLen = 0;
+        for (const name in byStrippedName) {
+          if ((key.includes(name) || name.includes(key)) && name.length > bestLen) {
+            best = byStrippedName[name]; bestLen = name.length;
+          }
         }
+        return best || raw;
+      };
+
+      // Daily buckets over the last 7 days (today + 6 days back).
+      const buildTimeline = (rows, dateField, pts, stepDays) => {
+        const now = new Date();
+        const buckets = Array.from({ length: pts }, (_, i) => {
+          const d = new Date(now);
+          d.setDate(d.getDate() - (pts - 1 - i) * stepDays);
+          const label = d.toLocaleDateString('en-PH', { weekday: 'short', month: 'short', day: 'numeric' });
+          return { label, value: 0, date: new Date(d) };
+        });
+        (rows || []).forEach(r => {
+          const rd = new Date(r[dateField]);
+          if (isNaN(rd)) return;
+          let best = 0, bestDiff = Infinity;
+          buckets.forEach((t, i) => { const diff = Math.abs(rd - t.date); if (diff < bestDiff) { bestDiff = diff; best = i; } });
+          buckets[best].value++;
+        });
+        return buckets;
+      };
+
+      const returnPeriod = (borrowingsPeriod || []).filter(b => b.returned_at);
+
+      setTrendData({
+        req:  buildTimeline(reqPeriod || [],        'created_at',  7, 1),
+        borr: buildTimeline(borrowingsPeriod || [],  'borrowed_at', 7, 1),
+        ret:  buildTimeline(returnPeriod,            'returned_at', 7, 1),
       });
 
-      (newProfiles || []).forEach(p => {
-        const name = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'A user';
-        events.push({ text: `${name} registered a new account`, ts: p.created_at, color: '#E8C97A', tag: 'User' });
-      });
-
-      (visits || []).forEach(v => {
-        events.push({ text: `${v.full_name || 'A visitor'} checked in to the library`, ts: v.time_in, color: '#ce93d8', tag: 'Visit' });
-      });
-
-      (newBooks || []).forEach(b => {
-        const title   = b.title   || 'a book';
-        const authors = b.authors ? ` by ${b.authors}` : '';
-        const copies  = b.copies  ? ` (${b.copies} ${b.copies === 1 ? 'copy' : 'copies'})` : '';
-        events.push({ text: `"${title}"${authors} added to catalog${copies}`, ts: b.created_at, color: '#4db6ac', tag: 'Catalog' });
-      });
-
-      (copyChanges || []).forEach(c => {
-        const title = c.books?.title || 'a book';
-        if (c.status === 'Available') {
-          events.push({ text: `A copy of "${title}" became available`, ts: c.updated_at, color: '#aed581', tag: 'Available' });
-        } else if (c.status === 'Overdue') {
-          events.push({ text: `A copy of "${title}" is overdue`, ts: c.updated_at, color: '#ff8a65', tag: 'Overdue' });
-        }
-      });
-
-      events.sort((a, b) => new Date(b.ts) - new Date(a.ts));
-      setActivity(events);
+      const progCount = {};
+      (attendRaw || []).forEach(l => { const p = resolveProgramCode(l.program); progCount[p] = (progCount[p] || 0) + 1; });
+      const byProgram = Object.entries(progCount).sort((a, b) => b[1] - a[1])
+        .map(([program, count]) => ({ program, name: nameByCode[program] || program, count }));
+      setProgramDist(byProgram);
     } catch {
-      setActivity([]);
-    } finally { setActLoading(false); }
+      setTrendData({ req: [], borr: [], ret: [] });
+      setProgramDist([]);
+    } finally { setChartsLoading(false); }
   }, [campusId]);
 
-  useEffect(() => { loadStats(); loadActivity(); }, [loadStats, loadActivity]);
+  useEffect(() => { loadStats(); loadCharts(); }, [loadStats, loadCharts]);
 
   useEffect(() => {
     const ch = supabase.channel('overview-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, () => { loadStats(); loadActivity(); })
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrowings'      }, () => { loadStats(); loadActivity(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles'        }, () => { loadStats(); loadActivity(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books'           }, () => { loadStats(); loadActivity(); })
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'book_copies'     }, () => { loadStats(); loadActivity(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, () => { loadStats(); loadCharts(); })
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrowings'      }, () => { loadStats(); loadCharts(); })
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrow_requests'  }, () => { loadStats(); loadCharts(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles'        }, () => { loadStats(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books'           }, () => { loadStats(); })
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'book_copies'     }, () => { loadStats(); })
       .subscribe();
     return () => supabase.removeChannel(ch);
-  }, [loadStats, loadActivity]);
+  }, [loadStats, loadCharts]);
 
   const STAT_CARDS = [
     { label: 'Total Users',      value: stats.users,      icon: Icon.users,  sub: 'Registered accounts' },
@@ -264,15 +698,15 @@ export default function Overview({ onNavigate }) {
     { label: "Today's Visitors", value: stats.attendance, icon: Icon.attend, sub: 'Attendance today'    },
   ];
 
-  const QUICK_STATS = [
-    { label: 'Available Books',  value: stats.available, color: '#aed581' },
-    { label: 'Overdue Returns',  value: stats.overdue,   color: '#ff8a65' },
-    { label: 'New Users Today',  value: stats.newUsers,  color: '#E8C97A' },
-    { label: 'Pending Requests', value: stats.pending,   color: '#ce93d8' },
-  ];
+  const programTotal = programDist.reduce((s, p) => s + p.count, 0) || 1;
+  const pieData = programDist.slice(0, 6).map((p, i) => ({
+    label: p.program || 'Unknown', name: p.name || p.program || 'Unknown',
+    value: p.count, pct: Math.round((p.count / programTotal) * 100),
+    color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
+  }));
 
   return (
-    <div className="lm-module">
+    <div className="lm-module lm-overview-page">
       <style>{SCROLL_STYLE}</style>
 
       <div className="lm-stats-grid">
@@ -292,108 +726,99 @@ export default function Overview({ onNavigate }) {
 
       <div className="lm-overview-bottom">
 
-        <div className="lm-activity-card">
+        <div className="lm-chart-card" style={{ height: 420 }}>
 
-          <div className="lm-activity-header">
+          <div className="lm-activity-header" style={{ flexWrap: 'wrap', rowGap: 4 }}>
             <span style={{
               fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 700,
               letterSpacing: '0.10em', textTransform: 'uppercase', color: '#F5E4A8',
             }}>
-              Recent Activity
+              Borrowing Activity Trend
             </span>
-            {!actLoading && activity.length > 0 && (
-              <span style={{
-                background: 'rgba(201,168,76,0.22)', border: '1px solid rgba(201,168,76,0.40)',
-                color: '#F5E4A8', fontSize: 10, fontWeight: 700,
-                fontFamily: 'var(--font-sans)', letterSpacing: '0.06em',
-                padding: '2px 8px', borderRadius: 99,
-              }}>
-                {activity.length.toLocaleString()} events
-              </span>
-            )}
+            <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'rgba(245,228,168,0.55)' }}>
+              Compare requests, borrowed, and returned over the last 7 days.
+            </span>
           </div>
 
-          <div className="lm-activity-scroll">
-            {actLoading ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '20px 16px', background: 'var(--cream-light)' }}>
-                <div className="lm-spinner" style={{ width: 16, height: 16 }} />
-                <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>Loading activity…</span>
-              </div>
-            ) : activity.length === 0 ? (
-              <div style={{ padding: '20px 16px', fontSize: 12.5, color: 'var(--text-dim)', background: 'var(--cream-light)' }}>
-                No recent activity found.
-              </div>
-            ) : (
-              activity.map((a, i) => (
-                <div
-                  key={i}
-                  onClick={() => setConfirmDelete({ item: a, index: i })}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 12,
-                    padding: '11px 16px',
-                    borderBottom: '1px solid rgba(139,0,0,0.07)',
-                    backgroundColor: i % 2 === 0 ? 'var(--cream-light)' : 'rgba(139,0,0,0.03)',
-                    transition: 'background 0.14s',
-                    cursor: 'pointer',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
-                  onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? 'var(--cream-light)' : 'rgba(139,0,0,0.03)'}
-                >
-                  <div style={{
-                    width: 7, height: 7, borderRadius: '50%',
-                    background: a.color, flexShrink: 0,
-                    boxShadow: `0 0 5px ${a.color}`,
-                  }} />
-                  {a.tag && (
-                    <span style={{
-                      flexShrink: 0, fontSize: 9.5, fontWeight: 700,
-                      fontFamily: 'var(--font-sans)', letterSpacing: '0.07em',
-                      textTransform: 'uppercase', padding: '2px 7px', borderRadius: 99,
-                      background: `${a.color}22`, color: a.color,
-                      border: `1px solid ${a.color}55`, whiteSpace: 'nowrap',
-                    }}>
-                      {a.tag}
-                    </span>
-                  )}
-                  <div style={{ flex: 1, fontSize: 12.5, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)' }}>
-                    {a.text}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap', flexShrink: 0, fontFamily: 'var(--font-sans)' }}>
-                    {relTime(a.ts)}
-                  </div>
-                </div>
-              ))
-            )}
+          <div style={{ padding: '10px 8px', background: 'var(--cream-light)', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+            <BorrowingActivityTrendChart
+              reqData={trendData.req}
+              borrData={trendData.borr}
+              retData={trendData.ret}
+              loading={chartsLoading}
+              selectedSeries={selectedSeries}
+              onSeriesSelect={setSelectedSeries}
+            />
           </div>
         </div>
 
         <div className="lm-right-col">
 
-          <div className="lm-panel" style={{ marginBottom: 0 }}>
-            <div className="lm-panel-title">Quick Stats</div>
-            <div className="lm-quick-stats">
-              {QUICK_STATS.map(({ label, value, color }) => (
-                <div key={label} className="lm-quick-stat">
-                  <span className="lm-quick-stat-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{
-                      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                      background: color, boxShadow: `0 0 4px ${color}`, display: 'inline-block',
-                    }} />
-                    {label}
+          <div
+            className="lm-chart-card"
+            style={{ marginBottom: 0, flex: '0 0 auto' }}
+            onMouseLeave={() => setProgramExpanded(false)}
+          >
+            <div
+              className="lm-activity-header"
+              style={{ cursor: pieData.length ? 'default' : 'default' }}
+            >
+              <span style={{
+                fontFamily: 'var(--font-sans)', fontSize: 11, fontWeight: 700,
+                letterSpacing: '0.10em', textTransform: 'uppercase', color: '#F5E4A8',
+              }}>
+                Visits by Program
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontFamily: 'var(--font-sans)', fontSize: 10, color: 'rgba(245,228,168,0.55)' }}>
+                  today
+                </span>
+                {pieData.length > 0 && (
+                  <span
+                    onMouseEnter={() => setProgramExpanded(true)}
+                    style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', padding: 4, margin: -4 }}
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="rgba(245,228,168,0.85)" strokeWidth="2.4"
+                      style={{ transform: programExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', flexShrink: 0 }}>
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
                   </span>
-                  <span className="lm-quick-stat-value">
-                    {loading
-                      ? <span style={{ display: 'inline-block', width: 20, height: 10, borderRadius: 4, background: 'rgba(139,0,0,0.10)', verticalAlign: 'middle' }} />
-                      : value.toLocaleString()}
-                  </span>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
+            {programExpanded ? (
+              <div style={{ padding: '8px 14px 10px', background: 'var(--cream-light)', height: 284, overflowY: 'auto' }}>
+                {pieData.map((p, i) => (
+                  <div key={p.label} style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: '10px 0',
+                    borderBottom: i < pieData.length - 1 ? '1px solid rgba(139,0,0,0.08)' : 'none',
+                  }}>
+                    <span style={{ width: 12, height: 12, borderRadius: 3, background: p.color, flexShrink: 0 }} />
+                    <span style={{ fontFamily: 'var(--font-sans)', fontSize: 12.5, color: 'var(--text-primary,#3a1010)', lineHeight: 1.4 }}>
+                      <b style={{ color: 'var(--maroon-mid)', fontWeight: 700 }}>{p.pct}%</b>{' '}{p.name}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ padding: '10px 6px', display: 'flex', alignItems: 'stretch', justifyContent: 'center', height: 284, background: 'var(--cream-light)' }}>
+                {chartsLoading ? (
+                  <div className="lm-ra-sk" style={{ height: 230, width: 230, borderRadius: '50%' }} />
+                ) : pieData.length ? (
+                  <PieChart data={pieData} size={300} showLegend={false} />
+                ) : (
+                  <div className="lm-ra-empty">
+                    <div className="lm-ra-empty-s">No attendance data</div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          <div className="lm-panel" style={{ marginBottom: 0 }}>
+          <div className="lm-panel" style={{ marginBottom: 0, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <div className="lm-panel-title">Quick Actions</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, justifyContent: 'center' }}>
               {[
                 { label: 'Add New Book',  tab: 'catalog' },
                 { label: 'Register User', tab: 'users'   },
@@ -413,69 +838,6 @@ export default function Overview({ onNavigate }) {
 
         </div>
       </div>
-      {confirmDelete && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 3000,
-            background: 'rgba(10,0,0,0.78)', backdropFilter: 'blur(8px)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
-          }}
-          onClick={() => setConfirmDelete(null)}
-        >
-          <div
-            style={{
-              background: '#FAF6EE', borderRadius: 20, width: '100%', maxWidth: 380,
-              border: '2px solid rgba(201,168,76,0.35)',
-              boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
-              overflow: 'hidden',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{
-              background: 'linear-gradient(135deg, #8B0000, #6B0000)',
-              padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', fontWeight: 700 }}>Delete Activity Entry</div>
-                <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>This action cannot be undone</div>
-              </div>
-            </div>
-            <div style={{ padding: '20px 24px' }}>
-              <div style={{
-                padding: '12px 14px', borderRadius: 10, marginBottom: 18,
-                background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
-                textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{confirmDelete.item.text}</div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <button
-                  onClick={() => setConfirmDelete(null)}
-                  style={{
-                    padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
-                    background: 'transparent', cursor: 'pointer',
-                    fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: '#8B0000',
-                  }}
-                >Cancel</button>
-                <button
-                  onClick={() => {
-                    setActivity(prev => prev.filter((_, i) => i !== confirmDelete.index));
-                    setConfirmDelete(null);
-                  }}
-                  style={{
-                    padding: '12px', borderRadius: 10, border: 'none',
-                    background: 'linear-gradient(135deg, #8B0000, #6B0000)',
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: '#F5E4A8',
-                    boxShadow: '0 4px 14px rgba(139,0,0,0.3)',
-                  }}
-                >Delete</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

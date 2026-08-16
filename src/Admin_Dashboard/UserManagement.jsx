@@ -63,7 +63,7 @@ function Toast({ message, isError }) {
   );
 }
 
-function UserModal({ user, onClose, onSave }) {
+function UserModal({ user, existingUsers = [], onClose, onSave }) {
   const isEdit = Boolean(user?.id);
   const [form, setForm] = useState({
     first_name: user?.first_name || '',
@@ -79,13 +79,29 @@ function UserModal({ user, onClose, onSave }) {
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
 
+  // Uniqueness is decided by the ID number embedded in the email
+  // (e.g. 2023313839@pampangastateu.edu.ph), never by name — two different
+  // real students can share the exact same name, so name is not a valid
+  // way to detect duplicate accounts.
+  const normEmail = (e) => (e || '').trim().toLowerCase();
+
+  const isDuplicateEmail = (email) => {
+    const target = normEmail(email);
+    if (!target) return false;
+    return existingUsers.some(u => u.id !== user?.id && normEmail(u.email) === target);
+  };
+
   const validate = () => {
     const errs = {};
     if (!form.first_name.trim()) errs.first_name = 'First name is required.';
     if (!form.last_name.trim())  errs.last_name  = 'Last name is required.';
+
     if (!isEdit) {
       if (!form.email.trim())                                    errs.email    = 'Email is required.';
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))  errs.email    = 'Invalid email format.';
+      // Unique email / student ID check — email is only editable on create,
+      // since it doubles as the account's login and ID number.
+      else if (isDuplicateEmail(form.email))                     errs.email    = 'This ID number / email is already registered.';
       if (!form.password)                                        errs.password = 'Password is required.';
       else if (form.password.length < 8)                         errs.password = 'Minimum 8 characters.';
     } else {
@@ -243,7 +259,6 @@ function UserModal({ user, onClose, onSave }) {
               ...inputStyle(false), appearance: 'none', cursor: 'pointer',
             }}>
               <option value="student">Student</option>
-              <option value="library_manager">Library Manager</option>
               
             </select>
             {(form.role === 'library_manager' || form.role === 'admin') && (
@@ -369,7 +384,6 @@ export default function UserManagement({ onStatsRefresh }) {
   const [users,      setUsers]      = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
-  const [roleFilter, setRoleFilter] = useState('all');
   const [showModal,  setShowModal]  = useState(false);
   const [modalUser,  setModalUser]  = useState(null);
   const [deleteUser, setDeleteUser] = useState(null);
@@ -393,8 +407,10 @@ export default function UserManagement({ onStatsRefresh }) {
       if (campusId) _q = _q.eq('campus_id', campusId);
       const { data, error } = await _q;
       if (error) throw error;
-      // Exclude super_admin from the list shown to librarians
-      setUsers((data || []).filter(u => u.role !== 'super_admin'));
+      // Only Super Admin manages Library Manager accounts, so this panel
+      // (used by Library Managers themselves) only ever shows students —
+      // exclude both super_admin and library_manager from the list.
+      setUsers((data || []).filter(u => u.role !== 'super_admin' && u.role !== 'library_manager'));
     } catch (err) {
       showToast('Failed to load users: ' + err.message, true);
       setUsers([]);
@@ -462,62 +478,12 @@ export default function UserManagement({ onStatsRefresh }) {
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
-    const matchSearch = !q || [u.first_name, u.last_name, u.email].join(' ').toLowerCase().includes(q);
-    const matchRole   = roleFilter === 'all' || u.role === roleFilter;
-    return matchSearch && matchRole;
+    return !q || [u.first_name, u.last_name, u.email].join(' ').toLowerCase().includes(q);
   });
-
-  const counts = {
-    total:   users.length,
-    student: users.filter(u => u.role === 'student').length,
-    manager: users.filter(u => u.role === 'library_manager').length,
-    admin:   users.filter(u => u.role === 'admin').length,
-  };
 
   return (
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Total Users',      value: counts.total   },
-          { label: 'Students',         value: counts.student },
-          { label: 'Library Managers', value: counts.manager },
-          
-        ].map(({ label, value }) => (
-          <div key={label} style={{
-            padding: '8px 16px', borderRadius: 8,
-            background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
-            border: '1px solid rgba(139,0,0,0.12)',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-display)' }}>
-              {loading ? '—' : value}
-            </span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
-          </div>
-        ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button onClick={loadUsers} title="Refresh" style={{
-            padding: '9px 11px', borderRadius: 8, fontSize: 12,
-            border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
-            color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
-            transition: 'all 0.18s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>
-          </button>
-          <button
-            className="lm-btn lm-btn--primary"
-            style={{ gap: 7 }}
-            onClick={() => { setModalUser(null); setShowModal(true); }}
-          >
-            {Icon.plus(14)} Add User
-          </button>
-        </div>
-      </div>
 
       <div style={{
         display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
@@ -536,19 +502,32 @@ export default function UserManagement({ onStatsRefresh }) {
             style={{ paddingLeft: 34 }}
           />
         </div>
-        <select className="lm-select" value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
-          <option value="all">All Roles</option>
-          <option value="student">Students</option>
-          <option value="library_manager">Library Managers</option>
-        </select>
         <span style={{
-          marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',
+          fontSize: 11.5, color: 'var(--text-dim)',
           fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
           padding: '5px 12px', borderRadius: 6,
           background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.12)',
         }}>
           {filtered.length} {filtered.length === 1 ? 'user' : 'users'}
         </span>
+        <button onClick={loadUsers} title="Refresh" style={{
+          padding: '9px 11px', borderRadius: 8, fontSize: 12,
+          border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
+          color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 5,
+          transition: 'all 0.18s',
+        }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>
+        </button>
+        <button
+          className="lm-btn lm-btn--primary"
+          style={{ gap: 7 }}
+          onClick={() => { setModalUser(null); setShowModal(true); }}
+        >
+          {Icon.plus(14)} Add User
+        </button>
       </div>
 
       {loading ? (
@@ -607,7 +586,7 @@ export default function UserManagement({ onStatsRefresh }) {
       )}
 
       {showModal && (
-        <UserModal user={modalUser} onClose={() => { setShowModal(false); setModalUser(null); }} onSave={handleSave} />
+        <UserModal user={modalUser} existingUsers={users} onClose={() => { setShowModal(false); setModalUser(null); }} onSave={handleSave} />
       )}
       {deleteUser && (
         <ConfirmDeleteModal user={deleteUser} loading={deleting}

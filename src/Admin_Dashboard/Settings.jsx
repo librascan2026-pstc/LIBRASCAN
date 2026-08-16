@@ -409,6 +409,424 @@ const CSS = `
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }
   }
+
+ /* =========================================
+    PROFILE BANNER — MATCH STUDENT BANNER
+ ========================================= */
+
+.set-prof-banner {
+  position: relative;
+  background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
+  border: 1px solid rgba(139, 0, 0, 0.14);
+  border-radius: 14px;
+  overflow: hidden;
+  margin-bottom: 21px;
+
+  box-shadow:
+    0 2px 8px rgba(80, 0, 0, 0.07),
+    0 6px 24px rgba(80, 0, 0, 0.05);
+}
+
+
+/* =========================================
+   MAROON TOP
+ ========================================= */
+
+.set-prof-cover {
+  position: relative;
+
+  height: 100px;
+  min-height: 100px;
+
+  padding: 0 20px;
+
+  background: linear-gradient(
+    135deg,
+    var(--maroon-mid) 0%,
+    var(--maroon-deep) 100%
+  );
+
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 10px;
+
+  box-sizing: border-box;
+}
+
+.set-prof-cover::after {
+  content: '';
+
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+
+  height: 1px;
+
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(201,168,76,0.55),
+    transparent
+  );
+}
+
+
+/* =========================================
+   REMOVE PHOTO BUTTON
+ ========================================= */
+
+.set-prof-remove-btn {
+  position: absolute;
+
+  top: 12px;
+  right: 16px;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 6px 14px;
+
+  border: none;
+  border-radius: 8px;
+
+  background: rgba(255,255,255,0.18);
+  color: #F5E4A8;
+
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+
+  cursor: pointer;
+
+  z-index: 20;
+
+  transition: background 0.16s;
+}
+
+.set-prof-remove-btn:disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+
+.set-prof-remove-btn:hover:not(:disabled) {
+  background: rgba(255,255,255,0.28);
+}
+
+
+/* =========================================
+   AVATAR
+ ========================================= */
+
+.set-prof-av-float {
+  position: absolute;
+
+  /* same horizontal position as second screenshot */
+  left: 30px;
+
+  /* puts the avatar across the two sections */
+  top: 49px;
+
+  z-index: 10;
+}
+
+.set-prof-avwrap {
+  width: 100px;
+  height: 100px;
+
+  border-radius: 50%;
+
+  flex-shrink: 0;
+
+  border: 4px solid rgba(201,168,76,0.78);
+
+  background: linear-gradient(
+    135deg,
+    #8B0000,
+    #5A0000
+  );
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  box-shadow:
+    0 5px 16px rgba(0,0,0,0.40);
+}
+
+.set-prof-avwrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.set-prof-avinit {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  color: #F5E4A8;
+}
+
+
+/* =========================================
+   CAMERA BUTTON
+ ========================================= */
+
+.set-prof-cam-btn {
+  position: absolute;
+
+  bottom: -2px;
+  right: -2px;
+
+  width: 30px;
+  height: 30px;
+
+  border-radius: 50%;
+
+  background: linear-gradient(
+    135deg,
+    #8B0000,
+    #5A0000
+  );
+
+  border: 3px solid #FDF6EC;
+
+  cursor: pointer;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: #F5E4A8;
+
+  box-shadow:
+    0 2px 7px rgba(0,0,0,0.30);
+
+  transition: transform 0.16s;
+}
+
+.set-prof-cam-btn:hover:not(:disabled) {
+  transform: scale(1.10);
+}
+
+
+/* =========================================
+   NAME POSITION
+   EXACTLY LIKE SECOND SCREENSHOT
+ ========================================= */
+
+.set-prof-namewrap {
+  min-width: 0;
+
+  /* name starts around x168 */
+  margin-left: 135px;
+
+  padding: 0;
+
+  position: relative;
+  z-index: 3;
+}
+
+
+/* =========================================
+   NAME
+ ========================================= */
+
+.set-prof-name {
+  font-family: var(--font-display);
+
+  font-size: 36px;
+
+  font-weight: 700;
+
+  color: #F5E4A8 !important;
+  -webkit-text-fill-color: #F5E4A8 !important;
+
+  letter-spacing: 0.025em;
+
+  line-height: 1;
+
+  margin: 0;
+
+  padding: 0;
+
+  text-shadow:
+    0 1px 2px rgba(0,0,0,0.35);
+
+  white-space: nowrap;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  max-width: calc(100vw - 260px);
+
+  opacity: 1;
+  visibility: visible;
+  display: block;
+
+  position: relative;
+  z-index: 3;
+}
+
+
+/* =========================================
+   INFORMATION
+   SAME LEFT ALIGNMENT AS NAME
+ ========================================= */
+
+.set-prof-subinfo {
+  padding: 6px 20px 12px 155px;
+
+  display: flex;
+  flex-direction: column;
+
+  gap: 4px;
+
+  text-align: left;
+  align-items: flex-start;
+
+  box-sizing: border-box;
+}
+
+
+/* =========================================
+   ROLE / ID / CAMPUS
+ ========================================= */
+
+.set-prof-role {
+  font-family: var(--font-sans);
+
+  font-size: 14px;
+
+  font-weight: 500;
+
+  color: #7A3030;
+
+  text-align: left;
+
+  line-height: 18px;
+
+  margin: 0;
+}
+
+
+/* =========================================
+   EMAIL
+ ========================================= */
+
+.set-prof-emailrow {
+  display: flex;
+
+  align-items: center;
+
+  gap: 6px;
+
+  font-family: var(--font-sans);
+
+  font-size: 13px;
+
+  color: var(--text-dim);
+
+  text-align: left;
+
+  line-height: 18px;
+
+  margin: 0;
+}
+
+
+/* =========================================
+   MOBILE
+ ========================================= */
+
+@media (max-width: 768px) {
+
+  .set-prof-cover {
+    height: 90px;
+    min-height: 90px;
+  }
+
+  .set-prof-av-float {
+    left: 20px;
+    top: 44px;
+  }
+
+  .set-prof-avwrap {
+    width: 76px;
+    height: 76px;
+  }
+
+  .set-prof-namewrap {
+    margin-left: 105px;
+  }
+
+  .set-prof-name {
+    font-size: 30px;
+    letter-spacing: 0.02em;
+  }
+
+  .set-prof-subinfo {
+    padding-left: 105px;
+  }
+
+  .set-prof-role {
+    font-size: 12px;
+  }
+
+  .set-prof-emailrow {
+    font-size: 11px;
+  }
+}
+  @media (max-width: 520px) {
+    .set-prof-namewrap { margin-left: 64px; }
+    .set-prof-subinfo  { padding-left: 22px; padding-top: 38px; }
+    .set-prof-avwrap   { width: 52px; height: 52px; }
+  }
+
+  .set-prof-panel {
+    background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
+    border: 1px solid rgba(139,0,0,0.14);
+    border-radius: 14px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(80,0,0,0.07), 0 6px 24px rgba(80,0,0,0.05);
+  }
+  .set-prof-panel-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid rgba(139,0,0,0.14);
+  }
+  .set-prof-panel-title {
+    font-family: var(--font-display); font-size: 12px; font-weight: 700;
+    letter-spacing: 0.10em; text-transform: uppercase; color: var(--maroon);
+  }
+  .set-prof-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px 24px;
+  }
+  @media (max-width: 900px) { .set-prof-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .set-prof-grid { grid-template-columns: 1fr; } }
+  .set-prof-field { display: flex; flex-direction: column; min-width: 0; }
+  .set-prof-flabel {
+    font-family: var(--font-sans); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .set-prof-fvalue {
+    font-family: var(--font-sans); font-size: 13px; color: var(--text-secondary);
+    padding: 9px 0; border-bottom: 1px solid rgba(139,0,0,0.12);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .set-prof-fvalue.empty { color: var(--text-dim); font-style: italic; }
+  .set-prof-finput {
+    width: 100%; padding: 8px 11px; border-radius: 8px;
+    border: 1.5px solid rgba(139,0,0,0.20); background: rgba(255,248,240,0.85);
+    color: var(--text-primary); font-family: var(--font-sans); font-size: 12.5px;
+    outline: none; transition: border-color 0.15s, box-shadow 0.15s; box-sizing: border-box;
+  }
+  .set-prof-finput:focus { border-color: rgba(123,0,0,0.5); box-shadow: 0 0 0 3px rgba(123,0,0,0.08); background: #fff8f2; }
+  .set-prof-finput:disabled { background: rgba(139,0,0,0.05); color: var(--text-muted); cursor: not-allowed; }
 `;
 
 const ROLES = {
@@ -572,33 +990,106 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
   const middleName = profile?.middle_name || '';
-  const fullName   = [firstName, middleName, lastName].filter(Boolean).join(' ').trim() || user?.email?.split('@')[0] || 'Library Manager';
   const email      = user?.email || '';
   const role       = profile?.role || user?.user_metadata?.role || 'library_manager';
-  const username   = profile?.username || '—';
+  const roleLabel  = ROLES[role]?.label || 'Library Manager';
   const initials   = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'LM';
-  const memberSince = profile?.created_at
-    ? new Date(profile.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
-    : '—';
 
-  const [form,   setForm]   = useState({
+  // Campus is a foreign key (profiles.campus_id -> campuses.id), so its
+  // display name is resolved separately here — same read-only lookup
+  // pattern used on the Student profile page — instead of living in the
+  // form as free text.
+  const [campusName, setCampusName] = useState('');
+  useEffect(() => {
+    let cancelled = false;
+    if (!profile?.campus_id) { setCampusName(''); return; }
+    supabase.from('campuses').select('campus_name').eq('id', profile.campus_id).single()
+      .then(({ data }) => { if (!cancelled) setCampusName(data?.campus_name || ''); })
+      .catch(() => { if (!cancelled) setCampusName(''); });
+    return () => { cancelled = true; };
+  }, [profile?.campus_id]);
+
+  // Field names below map to the columns that actually exist on
+  // `profiles`: first_name, last_name, middle_name, username.
+  const [form, setForm] = useState({
     first_name:  firstName,
     last_name:   lastName,
     middle_name: middleName,
-    username:    profile?.username    || '',
+    username:    profile?.username || '',
     email:       email,
   });
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-  const isAdmin = role === 'admin';
+  useEffect(() => {
+    setForm(f => ({
+      ...f,
+      first_name:  profile?.first_name  || user?.user_metadata?.first_name || '',
+      last_name:   profile?.last_name   || user?.user_metadata?.last_name  || '',
+      middle_name: profile?.middle_name || '',
+      username:    profile?.username    || '',
+      email:       user?.email          || '',
+    }));
+  }, [profile, user]);
 
+  const [errors, setErrors] = useState({});
+  const [editing, setEditing] = useState(false);
+  const [saving,  setSaving]  = useState(false);
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  const displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || (user?.email ? user.email.split('@')[0] : 'Library Manager');
+  // campus_name already reads e.g. "Santo Tomas Campus", so it's placed
+  // directly before the role label without adding another "Campus" word.
+  const subtitle = ['Pampanga State University', campusName ? `${campusName} ${roleLabel}` : roleLabel]
+    .filter(Boolean).join(', ');
+
+  // Avatar upload / remove — same storage + profiles.avatar_url flow as
+  // the existing AvatarUpload component, wired into the banner below.
+  const [avBusy, setAvBusy] = useState(false);
+  const [avPreview, setAvPreview] = useState(profile?.avatar_url || null);
+  const avRef = useRef();
+  useEffect(() => { setAvPreview(profile?.avatar_url || null); }, [profile?.avatar_url]);
+
+  const handleAvatarFile = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { onToast('Please select an image file (JPG, PNG, WebP).', false); return; }
+    if (file.size > 2 * 1024 * 1024)     { onToast('Image must be under 2 MB.', false); return; }
+
+    setAvPreview(URL.createObjectURL(file));
+    setAvBusy(true);
+    try {
+      const ext  = file.name.split('.').pop();
+      const path = `${uid}/avatar.${ext}`;
+      const { error: upErr } = await supabase.storage.from('avatars').upload(path, file, { upsert: true, contentType: file.type });
+      if (upErr) throw upErr;
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+      const url = `${publicUrl}?t=${Date.now()}`;
+      const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: url, updated_at: new Date().toISOString() }).eq('id', uid);
+      if (dbErr) throw dbErr;
+      setAvPreview(url);
+      onToast('Profile photo updated.', true);
+      onRefresh?.();
+    } catch (err) {
+      onToast(err.message, false);
+      setAvPreview(profile?.avatar_url || null);
+    } finally { setAvBusy(false); e.target.value = ''; }
+  };
+
+  const handleAvatarRemove = async () => {
+    setAvBusy(true);
+    try {
+      const { error } = await supabase.from('profiles').update({ avatar_url: null, updated_at: new Date().toISOString() }).eq('id', uid);
+      if (error) throw error;
+      setAvPreview(null);
+      onToast('Profile photo removed.', true);
+      onRefresh?.();
+    } catch (err) { onToast(err.message, false); }
+    finally { setAvBusy(false); }
+  };
 
   const handleSave = async () => {
     const errs = {};
     if (!form.first_name.trim()) errs.first_name = 'First name is required.';
     if (!form.last_name.trim())  errs.last_name  = 'Last name is required.';
-    if (isAdmin && form.email.trim() !== email) {
+    if (form.email.trim() !== email) {
       if (!form.email.trim()) {
         errs.email = 'Email address is required.';
       } else if (!/^[^\s@]+@pampangastateu\.edu\.ph$/.test(form.email.trim())) {
@@ -617,130 +1108,138 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         updated_at:  new Date().toISOString(),
       }).eq('id', uid);
       if (pErr) throw pErr;
+
+      // Keep auth user_metadata in sync as a best-effort step. A stale or
+      // just-refreshed session can momentarily report "Auth session
+      // missing" here even though the profiles update above already
+      // succeeded, so this step is non-fatal and never blocks the save.
       const metaUpdate = { first_name: form.first_name.trim(), last_name: form.last_name.trim() };
-      if (isAdmin && form.email.trim() && form.email.trim() !== email) {
-        const { error: mErr } = await supabase.auth.updateUser({ email: form.email.trim(), data: metaUpdate });
-        if (mErr) throw mErr;
-        onToast('Profile updated. Check your new email inbox to confirm the change.', true);
-      } else {
-        const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
-        if (mErr) throw mErr;
+      try {
+        if (form.email.trim() && form.email.trim() !== email) {
+          const { error: mErr } = await supabase.auth.updateUser({ email: form.email.trim(), data: metaUpdate });
+          if (mErr) throw mErr;
+          onToast('Profile updated. Check your new email inbox to confirm the change.', true);
+        } else {
+          const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
+          if (mErr) throw mErr;
+          onToast('Profile updated successfully.', true);
+        }
+      } catch (authErr) {
+        console.warn('[Profile save] auth metadata sync skipped:', authErr?.message);
         onToast('Profile updated successfully.', true);
       }
+      setEditing(false);
       onRefresh?.();
     } catch (err) { onToast(err.message, false); }
     finally { setSaving(false); }
   };
 
+  const Field = ({ label, fkey, readOnly = false, type = 'text' }) => (
+    <div className="set-prof-field">
+      <label className="set-prof-flabel">{label}</label>
+      {editing && !readOnly
+        ? <input className="set-prof-finput" type={type} value={form[fkey]} onChange={e => set(fkey, e.target.value)} />
+        : <div className={`set-prof-fvalue${form[fkey] ? '' : ' empty'}`}>{form[fkey] || 'Not set'}</div>
+      }
+      {errors[fkey] && <span className="s-err" style={{ marginTop: 4 }}>{errors[fkey]}</span>}
+    </div>
+  );
+
   return (
-    <div className="s-grid">
-      <div className="s-card">
-        <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Account Information</p>
-        <p className="s-card-sub" style={{ marginBottom: 20 }}>Your current profile at a glance.</p>
-
-        <AvatarUpload
-          avatarUrl={profile?.avatar_url || null}
-          initials={initials}
-          displayName={fullName}
-          roleLabel={ROLES[role]?.label || 'Library Manager'}
-          uid={uid}
-          onToast={onToast}
-          onRefresh={onRefresh}
-        />
-
-        <div className="s-line" style={{ margin: '4px 0 16px' }} />
-        <div className="s-micro" style={{ marginBottom: 14 }}>Profile Details</div>
-
-        {[
-          { k: 'Full Name',    v: fullName },
-          { k: 'Username',     v: username },
-          { k: 'Email',        v: email },
-          { k: 'Role',         v: <RoleBadge role={role} /> },
-          { k: 'Member Since', v: memberSince },
-        ].map(({ k, v }) => (
-          <div key={k} className="s-row">
-            <span className="s-row-k">{k}</span>
-            <span className="s-row-v">{v}</span>
+    <div>
+      {/* Banner */}
+      <div className="set-prof-banner">
+        <div className="set-prof-cover">
+          {avPreview && (
+            <button className="set-prof-remove-btn" onClick={handleAvatarRemove} disabled={avBusy}>
+              {avBusy
+                ? <div className="s-spinner" style={{ width: 11, height: 11, borderWidth: 2 }} />
+                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/>
+                    <path d="M14 11v6"/>
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                  </svg>
+              }
+              {avBusy ? 'Removing…' : 'Remove photo'}
+            </button>
+          )}
+          <div className="set-prof-info">
+            <div className="set-prof-namewrap">
+              <div className="set-prof-name">{displayName.toUpperCase()}</div>
+            </div>
           </div>
-        ))}
+        </div>
+
+        {/* Avatar floats over the cover/subinfo boundary, matching the
+            reference profile-header design. */}
+        <div className="set-prof-av-float">
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div className="set-prof-avwrap">
+              {avPreview
+                ? <img src={avPreview} alt="avatar" onError={e => { e.target.style.display = 'none'; }} />
+                : <span className="set-prof-avinit">{initials}</span>
+              }
+            </div>
+            <button className="set-prof-cam-btn" onClick={() => avRef.current?.click()} disabled={avBusy} title="Change photo">
+              {avBusy
+                ? <div className="s-spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+              }
+            </button>
+            <input ref={avRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
+          </div>
+        </div>
+        <div className="set-prof-subinfo">
+          <div className="set-prof-role">{subtitle}</div>
+          <div className="set-prof-emailrow">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 4h16v16H4z" opacity="0"/><path d="M22 6l-10 7L2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/>
+            </svg>
+            {email}
+          </div>
+        </div>
       </div>
 
-      <div className="s-card">
-        <p className="s-card-h" style={{ fontSize: 15, marginBottom: 3 }}>Edit Profile</p>
-        <p className="s-card-sub" style={{ marginBottom: 20 }}>
-          {isAdmin
-            ? 'Update your name, username, and email address.'
-            : 'Update your name and username. To change your email, contact an administrator.'}
-        </p>
-
-        <div className="s-micro" style={{ marginBottom: 14 }}>Personal Information</div>
-
-        <div className="s-2">
-          <div className="s-field">
-            <label className="s-label">First Name<span className="s-req">*</span></label>
-            <input className={`s-input${errors.first_name ? ' e' : ''}`}
-              value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="First name" />
-            {errors.first_name && <span className="s-err">{errors.first_name}</span>}
-          </div>
-          <div className="s-field">
-            <label className="s-label">Last Name<span className="s-req">*</span></label>
-            <input className={`s-input${errors.last_name ? ' e' : ''}`}
-              value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Last name" />
-            {errors.last_name && <span className="s-err">{errors.last_name}</span>}
-          </div>
+      {/* Personal Information */}
+      <div className="set-prof-panel">
+        <div className="set-prof-panel-hdr">
+          <span className="set-prof-panel-title">Personal Information</span>
+          {editing ? (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="s-btn o" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={() => setEditing(false)} disabled={saving}>
+                Cancel
+              </button>
+              <button className="s-btn p" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <button className="s-btn o" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={() => setEditing(true)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              Edit Profile
+            </button>
+          )}
         </div>
 
-        <div className="s-field">
-          <label className="s-label">Middle Name<span className="s-opt">(optional)</span></label>
-          <input className="s-input" value={form.middle_name}
-            onChange={e => set('middle_name', e.target.value)} placeholder="Middle name" />
-        </div>
-
-        <div className="s-line" style={{ margin: '6px 0 18px' }} />
-        <div className="s-micro" style={{ marginBottom: 14 }}>Account Details</div>
-
-        <div className="s-field">
-          <label className="s-label">Username</label>
-          <input className="s-input" value={form.username}
-            onChange={e => set('username', e.target.value)} placeholder="e.g. librarian_psu" />
-        </div>
-
-        <div className="s-field">
-          <label className="s-label">
-            Email Address
-            {isAdmin && (
-              <span style={{
-                marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
-                textTransform: 'uppercase', padding: '1px 7px', borderRadius: 20,
-                background: 'rgba(201,168,76,0.12)', color: '#7B5500',
-                border: '1px solid rgba(201,168,76,0.30)', verticalAlign: 'middle',
-              }}>Admin</span>
-            )}
-          </label>
-          <input
-            className={`s-input${errors.email ? ' e' : ''}`}
-            value={form.email}
-            onChange={e => isAdmin && set('email', e.target.value)}
-            disabled={!isAdmin}
-            placeholder="username@pampangastateu.edu.ph"
-          />
-          {errors.email
-            ? <span className="s-err">{errors.email}</span>
-            : isAdmin
-              ? <span className="s-hint">Only @pampangastateu.edu.ph addresses are allowed.</span>
-              : <span className="s-hint">Email cannot be changed here. Contact an administrator.</span>
-          }
-        </div>
-
-        <div className="s-line" style={{ margin: '6px 0 18px' }} />
-
-        <div className="s-btn-row">
-          <button className="s-btn p" style={{ paddingLeft: 24, paddingRight: 24 }} onClick={handleSave} disabled={saving}>
-            {saving
-              ? 'Saving…'
-              : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>Save Changes</>
-            }
-          </button>
+        <div className="set-prof-grid">
+          <Field label="First Name"    fkey="first_name" />
+          <Field label="Middle Name"   fkey="middle_name" />
+          <Field label="Last Name"     fkey="last_name" />
+          <Field label="Username"      fkey="username" />
+          <Field label="Email Address" fkey="email" type="email" />
         </div>
       </div>
     </div>
