@@ -441,7 +441,7 @@ function BookFormModal({ book, onClose, onSaved }) {
           <div>
             <h2 style={{
               fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600,
-              color: '#F5E4A8', letterSpacing: '0.05em', 
+              color: '#F5E4A8', letterSpacing: '0.05em', textAlign: 'left', margin: 0,
             }}>
               {isEdit ? 'Edit Book Record' : 'Add New Book'}
             </h2>

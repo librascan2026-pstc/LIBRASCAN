@@ -648,14 +648,6 @@ export default function Overview({ onNavigate }) {
         return best || raw;
       };
 
-      // Daily buckets over the last 7 days (today + 6 days back).
-      // Bucket by calendar day (not raw millisecond distance from "now").
-      // Using the wall-clock time the page happened to load at as the
-      // reference point meant an evening record (e.g. 7:33 PM) could end
-      // up closer in raw time to *tomorrow's* early-morning bucket than
-      // to today's own bucket, pushing it a day ahead. Normalizing both
-      // "now" and each record to local midnight and counting whole days
-      // between them keeps every record in its correct calendar day.
       const buildTimeline = (rows, dateField, pts, stepDays) => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
