@@ -436,6 +436,16 @@ const SCROLL_STYLE = `
   .lm-activity-scroll::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.22); border-radius: 99px; }
   .lm-activity-scroll::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.40); }
 
+  /* Scrollbar-only styling (no flex/overflow rules) for boxes that
+     already manage their own fixed height, e.g. the Visits by Program
+     expanded list. Using .lm-activity-scroll there would override its
+     explicit height via that class's flex:1 rule. */
+  .lm-program-scroll::-webkit-scrollbar { width: 5px; }
+  .lm-program-scroll::-webkit-scrollbar-track { background: rgba(139,0,0,0.04); border-radius: 99px; }
+  .lm-program-scroll::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.22); border-radius: 99px; }
+  .lm-program-scroll::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.40); }
+  .lm-program-scroll { scrollbar-width: thin; scrollbar-color: rgba(139,0,0,0.22) rgba(139,0,0,0.04); }
+
   
   .lm-overview-bottom {
     display: grid;
@@ -648,6 +658,14 @@ export default function Overview({ onNavigate }) {
         return best || raw;
       };
 
+      // Daily buckets over the last 7 days (today + 6 days back).
+      // Bucket by calendar day (not raw millisecond distance from "now").
+      // Using the wall-clock time the page happened to load at as the
+      // reference point meant an evening record (e.g. 7:33 PM) could end
+      // up closer in raw time to *tomorrow's* early-morning bucket than
+      // to today's own bucket, pushing it a day ahead. Normalizing both
+      // "now" and each record to local midnight and counting whole days
+      // between them keeps every record in its correct calendar day.
       const buildTimeline = (rows, dateField, pts, stepDays) => {
         const now = new Date();
         now.setHours(0, 0, 0, 0);
@@ -737,7 +755,7 @@ export default function Overview({ onNavigate }) {
 
   const programTotal = programDist.reduce((s, p) => s + p.count, 0) || 1;
   const todayLabel = new Date().toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
-  const pieData = programDist.slice(0, 6).map((p, i) => ({
+  const pieData = programDist.map((p, i) => ({
     label: p.program || 'Unknown', name: p.name || p.program || 'Unknown',
     value: p.count, pct: Math.round((p.count / programTotal) * 100),
     color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
@@ -825,7 +843,7 @@ export default function Overview({ onNavigate }) {
               </div>
             </div>
             {programExpanded ? (
-              <div style={{ padding: '8px 14px 10px', background: 'var(--cream-light)', height: 284, overflowY: 'auto' }}>
+              <div className="lm-program-scroll" style={{ padding: '8px 14px 10px', background: 'var(--cream-light)', height: 284, overflowY: 'auto' }}>
                 {pieData.map((p, i) => (
                   <div key={p.label} style={{
                     display: 'flex', alignItems: 'center', gap: 12,

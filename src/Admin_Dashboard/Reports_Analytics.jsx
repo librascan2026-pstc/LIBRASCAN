@@ -1753,7 +1753,7 @@ function TabStudents({ data, loading, period }) {
   const [programExpanded, setProgramExpanded] = useState(false);
 
   const programTotal = byProgram.reduce((s,p)=>s+p.count,0)||1;
-  const programPieData = byProgram.slice(0,6).map((p,i)=>({
+  const programPieData = byProgram.map((p,i)=>({
     label: p.program||'N/A', name: p.name||p.program||'N/A',
     value: p.count, pct: Math.round((p.count/programTotal)*100),
     color: CATEGORY_COLORS[i%CATEGORY_COLORS.length],
@@ -1820,7 +1820,7 @@ function TabStudents({ data, loading, period }) {
             </div>
           </div>
           {programExpanded ? (
-            <div className="ra-panel-body" style={{flex:1, padding:'10px 16px 14px', minHeight:380, overflowY:'auto'}}>
+            <div className="ra-panel-body ra-program-list" style={{padding:'10px 16px 14px', maxHeight:380, overflowY:'auto'}}>
               {programPieData.map((p,i)=>(
                 <div key={p.label} style={{
                   display:'flex', alignItems:'center', gap:12,
@@ -2738,7 +2738,7 @@ function TabAttendance({ data, loading, period }) {
   const [programExpanded, setProgramExpanded] = useState(false);
 
   const programTotal = byProgram.reduce((s,p)=>s+p.count,0)||1;
-  const programPieData = byProgram.slice(0,6).map((p,i)=>({
+  const programPieData = byProgram.map((p,i)=>({
     label: p.program||'Unknown', name: p.name||p.program||'Unknown',
     value: p.count, pct: Math.round((p.count/programTotal)*100),
     color: CATEGORY_COLORS[i%CATEGORY_COLORS.length],
@@ -2780,10 +2780,10 @@ function TabAttendance({ data, loading, period }) {
       </div>
 
       {/* ── TWO-PANEL ROW: Line Chart + Pie Chart ── */}
-      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:20, alignItems:'stretch'}}>
+      <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:20, alignItems:'start'}}>
 
         {/* LEFT: Daily Visit Trend panel */}
-        <div className="ra-panel" style={{display:'flex', flexDirection:'column'}}>
+        <div className="ra-panel" style={{display:'flex', flexDirection:'column', alignSelf:'start'}}>
           {/* Maroon header */}
           <div className="ra-panel-hd">
             <span className="ra-panel-title">Daily Visit Trend</span>
@@ -2826,7 +2826,7 @@ function TabAttendance({ data, loading, period }) {
         {/* RIGHT: Visits by Program panel */}
         <div
           className="ra-panel"
-          style={{display:'flex', flexDirection:'column'}}
+          style={{display:'flex', flexDirection:'column', alignSelf:'start'}}
           onMouseLeave={()=>setProgramExpanded(false)}
         >
           {/* Maroon header */}
@@ -2849,7 +2849,7 @@ function TabAttendance({ data, loading, period }) {
           </div>
           {/* Pie chart / expandable percentage list */}
           {programExpanded ? (
-            <div style={{flex:1, padding:'10px 16px 14px', overflowY:'auto', minHeight:300}}>
+            <div className="ra-program-list" style={{padding:'10px 16px 14px', overflowY:'auto', maxHeight:300}}>
               {programPieData.map((p,i)=>(
                 <div key={p.label} style={{
                   display:'flex', alignItems:'center', gap:12,
@@ -3234,7 +3234,7 @@ export default function ReportsAnalytics() {
             ? d.toLocaleDateString('en-PH',{weekday:'short',month:'short',day:'numeric'})
             : stepDays<=7
             ? d.toLocaleDateString('en-PH',{month:'short',day:'numeric'})
-            : d.toLocaleDateString('en-PH',{month:'short',year:'2-digit'});
+            : d.toLocaleDateString('en-PH',{month:'short',year:'numeric'});
           return { label, value:0, date: d };
         });
         (rows||[]).forEach(r=>{

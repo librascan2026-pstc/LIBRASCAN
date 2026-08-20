@@ -635,6 +635,7 @@ a { text-decoration: none; }
   letter-spacing: 0.03em;
   line-height: 1.1;
   text-shadow: 0 1px 3px rgba(255,255,255,0.30);
+  text-align: left;
 }
 
 .lm-breadcrumb {
@@ -1656,6 +1657,15 @@ a { text-decoration: none; }
   border-radius: 10px;
 }
 .lm-notif-list::-webkit-scrollbar-thumb:hover { background: rgba(201,168,76,0.55); }
+
+/* Expandable "By Program / Course" percentage list scrollbar */
+.ra-program-list::-webkit-scrollbar { width: 5px; }
+.ra-program-list::-webkit-scrollbar-track { background: rgba(139,0,0,0.04); }
+.ra-program-list::-webkit-scrollbar-thumb {
+  background: rgba(139,0,0,0.20);
+  border-radius: 10px;
+}
+.ra-program-list::-webkit-scrollbar-thumb:hover { background: rgba(139,0,0,0.30); }
 
 
 

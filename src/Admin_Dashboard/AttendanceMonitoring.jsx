@@ -911,7 +911,7 @@ export default function AttendanceMonitoring() {
   const [loading,     setLoading]     = useState(true);
   const [scanResult,  setScanResult]  = useState(null);
   const [scannerReady]                = useState(true);
-  const [stats,       setStats]       = useState({ today: 0, unique: 0, lastHour: 0 });
+  const [stats,       setStats]       = useState({ today: 0, unique: 0, lastHour: 0, total: 0 });
   const [scannerFocused, setScannerFocused] = useState(true);
   const [delConfirm,  setDelConfirm]  = useState(null);
   const resultTimer                   = useRef(null);
@@ -929,8 +929,15 @@ export default function AttendanceMonitoring() {
       const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000).toISOString();
       const uniqueIds  = new Set((data || []).map(r => r.id_no).filter(Boolean));
       const lastHour   = (data || []).filter(r => r.time_in >= oneHourAgo).length;
+
+      // All-time total visits to the library (not scoped to today).
+      let totalQ = supabase.from('attendance_logs').select('*', { count: 'exact', head: true });
+      if (campusId) totalQ = totalQ.eq('campus_id', campusId);
+      const { count: totalCount, error: totalErr } = await totalQ;
+      if (totalErr) console.error('[Attendance] Total count error:', totalErr);
+
       setRecords(data || []);
-      setStats({ today: (data || []).length, unique: uniqueIds.size, lastHour });
+      setStats({ today: (data || []).length, unique: uniqueIds.size, lastHour, total: totalCount ?? 0 });
     } catch (err) {
       console.error('[Attendance] Load error:', err);
       setRecords([]);
@@ -956,6 +963,7 @@ export default function AttendanceMonitoring() {
             today: s.today + 1,
             unique: isNewUniqueStudent ? s.unique + 1 : s.unique,
             lastHour: s.lastHour + 1,
+            total: s.total + 1,
           }));
           return [rec, ...prev];
         });
@@ -991,6 +999,7 @@ export default function AttendanceMonitoring() {
           today: s.today + 1,
           unique: isNewUnique ? s.unique + 1 : s.unique,
           lastHour: s.lastHour + 1,
+          total: s.total + 1,
         }));
         return [data, ...prev];
       });
@@ -1006,7 +1015,7 @@ export default function AttendanceMonitoring() {
     const { error } = await supabase.from('attendance_logs').delete().eq('id', id);
     if (!error) {
       setRecords(prev => prev.filter(r => r.id !== id));
-      setStats(s => ({ ...s, today: Math.max(0, s.today - 1) }));
+      setStats(s => ({ ...s, today: Math.max(0, s.today - 1), total: Math.max(0, s.total - 1) }));
     }
   }, []);
 
@@ -1016,7 +1025,7 @@ export default function AttendanceMonitoring() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 14, marginBottom: 24 }}>
         <StatCard label="Today's Visitors" value={stats.today}    sub="Total scans today" />
-        <StatCard label="Unique Students"  value={stats.unique}   sub="Distinct IDs scanned" />
+        <StatCard label="Total Library Visits" value={stats.total} sub="All-time attendance logs" />
         <StatCard label="Last Hour"        value={stats.lastHour} sub="Entries in past 60 min" />
       </div>
 

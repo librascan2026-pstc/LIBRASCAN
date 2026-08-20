@@ -21,7 +21,7 @@ const FONT_SANS      = "'DM Sans', 'Josefin Sans', sans-serif";
 const FONT_DISPLAY   = "'Cinzel', 'Cormorant Garamond', serif";
 
 const CSS = `
-  .sas-wrap { max-width: 1100px; }
+  .sas-wrap { max-width: 100%; }
 
   .sas-tabs {
     display: flex;
@@ -203,6 +203,15 @@ const CSS = `
   .sas-btn.d:disabled { opacity: 0.38; cursor: not-allowed; }
   .sas-btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 
+  .s-spinner {
+    width: 14px; height: 14px; border-radius: 50%;
+    border: 2px solid rgba(245,228,168,0.35);
+    border-top-color: #F5E4A8;
+    animation: sas-spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes sas-spin { to { transform: rotate(360deg); } }
+
   .sas-av-wrap {
     display: flex;
     flex-direction: column;
@@ -235,6 +244,160 @@ const CSS = `
   .sas-av-cam:disabled { opacity: 0.5; cursor: not-allowed; }
   .sas-av-name { font-size: 16px; font-weight: 700; color: ${TEXT_PRIMARY}; margin-bottom: 3px; margin-top: 12px; text-align: center; }
   .sas-av-role { font-size: 12px; color: ${TEXT_MUTED}; text-align: center; margin-bottom: 14px; }
+
+  /* ---------- Profile banner (matches the Librarian/Admin Settings
+     page's profile header — maroon cover, floating avatar, large
+     transparent-gold name, role/email subinfo) ---------- */
+  .sas-prof-banner {
+    position: relative;
+    background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
+    border: 1px solid rgba(139,0,0,0.14);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 21px;
+    box-shadow: 0 2px 8px rgba(80,0,0,0.07), 0 6px 24px rgba(80,0,0,0.05);
+  }
+  .sas-prof-cover {
+    position: relative;
+    height: 100px;
+    min-height: 100px;
+    padding: 0 20px;
+    background: linear-gradient(135deg, ${MAROON_MID} 0%, ${MAROON_DEEP} 100%);
+    display: flex;
+    align-items: flex-end;
+    padding-bottom: 10px;
+    box-sizing: border-box;
+  }
+  .sas-prof-cover::after {
+    content: '';
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(201,168,76,0.55), transparent);
+  }
+  .sas-prof-remove-btn {
+    position: absolute;
+    top: 12px; right: 16px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 14px;
+    border: none; border-radius: 8px;
+    background: rgba(255,255,255,0.18);
+    color: #F5E4A8;
+    font-family: ${FONT_SANS};
+    font-size: 11px; font-weight: 600;
+    cursor: pointer;
+    z-index: 20;
+    transition: background 0.16s;
+  }
+  .sas-prof-remove-btn:disabled { cursor: default; opacity: 0.75; }
+  .sas-prof-remove-btn:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+  .sas-prof-av-float {
+    position: absolute;
+    left: 30px;
+    top: 49px;
+    z-index: 10;
+  }
+  .sas-prof-avwrap {
+    width: 100px; height: 100px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: 4px solid rgba(201,168,76,0.78);
+    background: linear-gradient(135deg, ${MAROON_MID}, ${MAROON_DEEP});
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden;
+    box-shadow: 0 5px 16px rgba(0,0,0,0.40);
+  }
+  .sas-prof-avwrap img { width: 100%; height: 100%; object-fit: cover; }
+  .sas-prof-avinit { font-family: ${FONT_DISPLAY}; font-size: 28px; font-weight: 700; color: #F5E4A8; }
+  .sas-prof-cam-btn {
+    position: absolute;
+    bottom: -2px; right: -2px;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, ${MAROON_MID}, ${MAROON_DEEP});
+    border: 3px solid #FDF6EC;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    color: #F5E4A8;
+    box-shadow: 0 2px 7px rgba(0,0,0,0.30);
+    transition: transform 0.16s;
+  }
+  .sas-prof-cam-btn:hover:not(:disabled) { transform: scale(1.10); }
+  .sas-prof-namewrap { min-width: 0; margin-left: 135px; padding: 0; position: relative; z-index: 3; }
+  .sas-prof-name {
+    font-family: ${FONT_DISPLAY};
+    font-size: 36px;
+    font-weight: 700;
+    color: #F5E4A8 !important;
+    -webkit-text-fill-color: #F5E4A8 !important;
+    letter-spacing: 0.025em;
+    line-height: 1;
+    margin: 0; padding: 0;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.35);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: calc(100vw - 260px);
+    display: block;
+    position: relative;
+    z-index: 3;
+  }
+  .sas-prof-subinfo {
+    padding: 6px 20px 12px 155px;
+    display: flex; flex-direction: column; gap: 4px;
+    text-align: left; align-items: flex-start;
+    box-sizing: border-box;
+  }
+  .sas-prof-role { font-family: ${FONT_SANS}; font-size: 14px; font-weight: 500; color: ${TEXT_MUTED}; text-align: left; line-height: 18px; margin: 0; }
+  .sas-prof-emailrow { display: flex; align-items: center; gap: 6px; font-family: ${FONT_SANS}; font-size: 13px; color: ${TEXT_DIM}; text-align: left; line-height: 18px; margin: 0; }
+
+  @media (max-width: 768px) {
+    .sas-prof-cover { height: 90px; min-height: 90px; }
+    .sas-prof-av-float { left: 20px; top: 44px; }
+    .sas-prof-avwrap { width: 76px; height: 76px; }
+    .sas-prof-namewrap { margin-left: 105px; }
+    .sas-prof-name { font-size: 30px; letter-spacing: 0.02em; }
+    .sas-prof-subinfo { padding-left: 105px; }
+    .sas-prof-role { font-size: 12px; }
+    .sas-prof-emailrow { font-size: 11px; }
+  }
+  @media (max-width: 520px) {
+    .sas-prof-namewrap { margin-left: 64px; }
+    .sas-prof-subinfo  { padding-left: 22px; padding-top: 38px; }
+    .sas-prof-avwrap   { width: 52px; height: 52px; }
+  }
+
+  .sas-prof-panel {
+    background: linear-gradient(160deg, #FDF6EC 0%, #FAF0E4 100%);
+    border: 1px solid rgba(139,0,0,0.14);
+    border-radius: 14px;
+    padding: 20px 24px;
+    box-shadow: 0 2px 8px rgba(80,0,0,0.07), 0 6px 24px rgba(80,0,0,0.05);
+  }
+  .sas-prof-panel-hdr {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 16px; padding-bottom: 12px;
+    border-bottom: 1px solid rgba(139,0,0,0.14);
+  }
+  .sas-prof-panel-title { font-family: ${FONT_DISPLAY}; font-size: 12px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: ${MAROON}; }
+  .sas-prof-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px 24px; }
+  @media (max-width: 900px) { .sas-prof-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .sas-prof-grid { grid-template-columns: 1fr; } }
+  .sas-prof-field { display: flex; flex-direction: column; min-width: 0; }
+  .sas-prof-flabel { font-family: ${FONT_SANS}; font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: ${TEXT_DIM}; margin-bottom: 6px; }
+  .sas-prof-fvalue {
+    font-family: ${FONT_SANS}; font-size: 13px; color: ${TEXT_SECONDARY};
+    padding: 9px 0; border-bottom: 1px solid rgba(139,0,0,0.12);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .sas-prof-fvalue.empty { color: ${TEXT_DIM}; font-style: italic; }
+  .sas-prof-finput {
+    width: 100%; padding: 8px 11px; border-radius: 8px;
+    border: 1.5px solid rgba(139,0,0,0.20); background: rgba(255,248,240,0.85);
+    color: ${TEXT_PRIMARY}; font-family: ${FONT_SANS}; font-size: 12.5px;
+    outline: none; transition: border-color 0.15s, box-shadow 0.15s; box-sizing: border-box;
+  }
+  .sas-prof-finput:focus { border-color: rgba(123,0,0,0.5); box-shadow: 0 0 0 3px rgba(123,0,0,0.08); background: #fff8f2; }
+  .sas-prof-finput:disabled { background: rgba(139,0,0,0.05); color: ${TEXT_MUTED}; cursor: not-allowed; }
 
   .sas-badge {
     display: inline-block;
@@ -606,19 +769,58 @@ function Toggle({ id, checked, onChange, disabled }) {
   );
 }
 
-function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToast, onRefresh }) {
-  const [busy,    setBusy]    = useState(false);
-  const [preview, setPreview] = useState(avatarUrl || null);
-  const ref = useRef();
+function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
+  const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
+  const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
+  const middleName = profile?.middle_name || '';
+  const email      = user?.email || '';
+  const role       = profile?.role || user?.user_metadata?.role || 'super_admin';
+  const roleLabel  = ROLES[role]?.label || 'Super Administrator';
+  const initials   = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'SA';
 
-  const handleFile = async (e) => {
+  // Field names below map to the columns that actually exist on
+  // `profiles`: first_name, last_name, middle_name, username.
+  const [form, setForm] = useState({
+    first_name:  firstName,
+    last_name:   lastName,
+    middle_name: middleName,
+    username:    profile?.username || '',
+    email:       email,
+  });
+  useEffect(() => {
+    setForm(f => ({
+      ...f,
+      first_name:  profile?.first_name  || user?.user_metadata?.first_name || '',
+      last_name:   profile?.last_name   || user?.user_metadata?.last_name  || '',
+      middle_name: profile?.middle_name || '',
+      username:    profile?.username    || '',
+      email:       user?.email          || '',
+    }));
+  }, [profile, user]);
+
+  const [errors, setErrors] = useState({});
+  const [editing, setEditing] = useState(false);
+  const [saving,  setSaving]  = useState(false);
+  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  const displayName = [firstName, lastName].filter(Boolean).join(' ').trim() || (user?.email ? user.email.split('@')[0] : 'Super Admin');
+  const subtitle = ['Pampanga State University', roleLabel].filter(Boolean).join(', ');
+
+  // Avatar upload / remove — same storage + profiles.avatar_url flow the
+  // rest of the app uses, wired into the banner below.
+  const [avBusy, setAvBusy] = useState(false);
+  const [avPreview, setAvPreview] = useState(profile?.avatar_url || null);
+  const avRef = useRef();
+  useEffect(() => { setAvPreview(profile?.avatar_url || null); }, [profile?.avatar_url]);
+
+  const handleAvatarFile = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/'))  { onToast('Please select an image file (JPG, PNG, WebP).', false); return; }
+    if (!file.type.startsWith('image/')) { onToast('Please select an image file (JPG, PNG, WebP).', false); return; }
     if (file.size > 2 * 1024 * 1024)     { onToast('Image must be under 2 MB.', false); return; }
 
-    setPreview(URL.createObjectURL(file));
-    setBusy(true);
+    setAvPreview(URL.createObjectURL(file));
+    setAvBusy(true);
     try {
       const ext  = file.name.split('.').pop();
       const path = `${uid}/avatar.${ext}`;
@@ -628,87 +830,26 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
       const url = `${publicUrl}?t=${Date.now()}`;
       const { error: dbErr } = await supabase.from('profiles').update({ avatar_url: url, updated_at: new Date().toISOString() }).eq('id', uid);
       if (dbErr) throw dbErr;
-      setPreview(url);
+      setAvPreview(url);
       onToast('Profile photo updated.', true);
       onRefresh?.();
     } catch (err) {
       onToast(err.message, false);
-      setPreview(avatarUrl || null);
-    } finally { setBusy(false); e.target.value = ''; }
+      setAvPreview(profile?.avatar_url || null);
+    } finally { setAvBusy(false); e.target.value = ''; }
   };
 
-  const handleRemove = async () => {
-    setBusy(true);
+  const handleAvatarRemove = async () => {
+    setAvBusy(true);
     try {
       const { error } = await supabase.from('profiles').update({ avatar_url: null, updated_at: new Date().toISOString() }).eq('id', uid);
       if (error) throw error;
-      setPreview(null);
+      setAvPreview(null);
       onToast('Profile photo removed.', true);
       onRefresh?.();
     } catch (err) { onToast(err.message, false); }
-    finally { setBusy(false); }
+    finally { setAvBusy(false); }
   };
-
-  return (
-    <div className="sas-av-wrap">
-      <div style={{ position: 'relative', display: 'inline-block' }}>
-        <div className="sas-av-ring">
-          {preview ? <img src={preview} alt="avatar" /> : <span className="sas-av-init">{initials}</span>}
-        </div>
-        <button className="sas-av-cam" onClick={() => ref.current?.click()} disabled={busy} title="Change photo">
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-            <circle cx="12" cy="13" r="4"/>
-          </svg>
-        </button>
-        <input ref={ref} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFile} />
-      </div>
-
-      <div className="sas-av-name">{displayName}</div>
-      <div className="sas-av-role">{roleLabel}</div>
-
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'center' }}>
-        <button className="sas-btn o" style={{ padding: '6px 16px', fontSize: 12 }} onClick={() => ref.current?.click()} disabled={busy}>
-          {busy ? 'Uploading…' : 'Upload Photo'}
-        </button>
-        {preview && (
-          <button className="sas-btn d" style={{ padding: '6px 16px', fontSize: 12 }} onClick={handleRemove} disabled={busy}>
-            Remove
-          </button>
-        )}
-      </div>
-
-      <span className="sas-hint" style={{ marginTop: 8, display: 'block', textAlign: 'center' }}>
-        JPG, PNG or WebP · Max 2 MB
-      </span>
-    </div>
-  );
-}
-
-function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
-  const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
-  const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
-  const middleName = profile?.middle_name || '';
-  const fullName   = [firstName, middleName, lastName].filter(Boolean).join(' ').trim() || user?.email?.split('@')[0] || 'Super Admin';
-  const email      = user?.email || '';
-  const role       = profile?.role || user?.user_metadata?.role || 'super_admin';
-  const username   = profile?.username || '—';
-  const initials   = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'SA';
-  const memberSince = profile?.created_at
-    ? new Date(profile.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
-    : '—';
-
-  const [form,   setForm]   = useState({
-    first_name:  firstName,
-    last_name:   lastName,
-    middle_name: middleName,
-    username:    profile?.username || '',
-    email:       email,
-  });
-  const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
-
-  const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
 
   const handleSave = async () => {
     const errs = {};
@@ -743,111 +884,116 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         if (mErr) throw mErr;
         onToast('Profile updated successfully.', true);
       }
+      setEditing(false);
       onRefresh?.();
     } catch (err) { onToast(err.message, false); }
     finally { setSaving(false); }
   };
 
+  const Field = ({ label, fkey, readOnly = false, type = 'text' }) => (
+    <div className="sas-prof-field">
+      <label className="sas-prof-flabel">{label}</label>
+      {editing && !readOnly
+        ? <input className="sas-prof-finput" type={type} value={form[fkey]} onChange={e => set(fkey, e.target.value)} />
+        : <div className={`sas-prof-fvalue${form[fkey] ? '' : ' empty'}`}>{form[fkey] || 'Not set'}</div>
+      }
+      {errors[fkey] && <span className="sas-err" style={{ marginTop: 4 }}>{errors[fkey]}</span>}
+    </div>
+  );
+
   return (
-    <div className="sas-grid">
-      <div className="sas-card">
-        <p className="sas-card-h">Account Information</p>
-        <p className="sas-card-sub">Your current profile at a glance.</p>
-
-        <AvatarUpload
-          avatarUrl={profile?.avatar_url || null}
-          initials={initials}
-          displayName={fullName}
-          roleLabel={ROLES[role]?.label || 'Super Administrator'}
-          uid={uid}
-          onToast={onToast}
-          onRefresh={onRefresh}
-        />
-
-        <div className="sas-line" style={{ margin: '4px 0 16px' }} />
-        <div className="sas-micro">Profile Details</div>
-
-        {[
-          { k: 'Full Name',    v: fullName },
-          { k: 'Username',     v: username },
-          { k: 'Email',        v: email },
-          { k: 'Role',         v: <RoleBadge role={role} /> },
-          { k: 'Member Since', v: memberSince },
-        ].map(({ k, v }) => (
-          <div key={k} className="sas-row">
-            <span className="sas-row-k">{k}</span>
-            <span className="sas-row-v">{v}</span>
+    <div>
+      {/* Banner */}
+      <div className="sas-prof-banner">
+        <div className="sas-prof-cover">
+          {avPreview && (
+            <button className="sas-prof-remove-btn" onClick={handleAvatarRemove} disabled={avBusy}>
+              {avBusy
+                ? <div className="s-spinner" style={{ width: 11, height: 11, borderWidth: 2 }} />
+                : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6"/>
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+                    <path d="M10 11v6"/>
+                    <path d="M14 11v6"/>
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+                  </svg>
+              }
+              {avBusy ? 'Removing…' : 'Remove photo'}
+            </button>
+          )}
+          <div className="sas-prof-namewrap">
+            <div className="sas-prof-name">{displayName.toUpperCase()}</div>
           </div>
-        ))}
+        </div>
+
+        {/* Avatar floats over the cover/subinfo boundary, matching the
+            reference profile-header design. */}
+        <div className="sas-prof-av-float">
+          <div style={{ position: 'relative', flexShrink: 0 }}>
+            <div className="sas-prof-avwrap">
+              {avPreview
+                ? <img src={avPreview} alt="avatar" onError={e => { e.target.style.display = 'none'; }} />
+                : <span className="sas-prof-avinit">{initials}</span>
+              }
+            </div>
+            <button className="sas-prof-cam-btn" onClick={() => avRef.current?.click()} disabled={avBusy} title="Change photo">
+              {avBusy
+                ? <div className="s-spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+              }
+            </button>
+            <input ref={avRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAvatarFile} />
+          </div>
+        </div>
+        <div className="sas-prof-subinfo">
+          <div className="sas-prof-role">{subtitle}</div>
+          <div className="sas-prof-emailrow">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M4 4h16v16H4z" opacity="0"/><path d="M22 6l-10 7L2 6"/><rect x="2" y="4" width="20" height="16" rx="2"/>
+            </svg>
+            {email}
+          </div>
+        </div>
       </div>
 
-      <div className="sas-card">
-        <p className="sas-card-h">Edit Profile</p>
-        <p className="sas-card-sub">Update your name, username, and email address.</p>
-
-        <div className="sas-micro">Personal Information</div>
-
-        <div className="sas-2">
-          <div className="sas-field">
-            <label className="sas-label">First Name<span className="sas-req">*</span></label>
-            <input className={`sas-input${errors.first_name ? ' e' : ''}`}
-              value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="First name" />
-            {errors.first_name && <span className="sas-err">{errors.first_name}</span>}
-          </div>
-          <div className="sas-field">
-            <label className="sas-label">Last Name<span className="sas-req">*</span></label>
-            <input className={`sas-input${errors.last_name ? ' e' : ''}`}
-              value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Last name" />
-            {errors.last_name && <span className="sas-err">{errors.last_name}</span>}
-          </div>
+      {/* Personal Information */}
+      <div className="sas-prof-panel">
+        <div className="sas-prof-panel-hdr">
+          <span className="sas-prof-panel-title">Personal Information</span>
+          {editing ? (
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button className="sas-btn o" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={() => setEditing(false)} disabled={saving}>
+                Cancel
+              </button>
+              <button className="sas-btn p" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={handleSave} disabled={saving}>
+                {saving ? 'Saving…' : (
+                  <>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}><polyline points="20 6 9 17 4 12"/></svg>
+                    Save Changes
+                  </>
+                )}
+              </button>
+            </div>
+          ) : (
+            <button className="sas-btn o" style={{ padding: '6px 14px', fontSize: 11.5 }} onClick={() => setEditing(true)}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 4 }}>
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+              </svg>
+              Edit Profile
+            </button>
+          )}
         </div>
 
-        <div className="sas-field">
-          <label className="sas-label">Middle Name<span className="sas-opt">(optional)</span></label>
-          <input className="sas-input" value={form.middle_name}
-            onChange={e => set('middle_name', e.target.value)} placeholder="Middle name" />
-        </div>
-
-        <div className="sas-line" style={{ margin: '6px 0 18px' }} />
-        <div className="sas-micro">Account Details</div>
-
-        <div className="sas-field">
-          <label className="sas-label">Username</label>
-          <input className="sas-input" value={form.username}
-            onChange={e => set('username', e.target.value)} placeholder="e.g. superadmin_psu" />
-        </div>
-
-        <div className="sas-field">
-          <label className="sas-label">
-            Email Address
-            <span style={{
-              marginLeft: 8, fontSize: 10, fontWeight: 700, letterSpacing: '0.07em',
-              textTransform: 'uppercase', padding: '1px 7px', borderRadius: 20,
-              background: 'rgba(201,168,76,0.12)', color: '#7B5500',
-              border: '1px solid rgba(201,168,76,0.30)', verticalAlign: 'middle',
-            }}>Super Admin</span>
-          </label>
-          <input
-            className={`sas-input${errors.email ? ' e' : ''}`}
-            value={form.email}
-            onChange={e => set('email', e.target.value)}
-            placeholder="username@pampangastateu.edu.ph"
-          />
-          {errors.email
-            ? <span className="sas-err">{errors.email}</span>
-            : <span className="sas-hint">Only @pampangastateu.edu.ph addresses are allowed.</span>
-          }
-        </div>
-
-        <div className="sas-line" style={{ margin: '6px 0 18px' }} />
-
-        <div className="sas-btn-row">
-          <button className="sas-btn p" style={{ paddingLeft: 24, paddingRight: 24 }} onClick={handleSave} disabled={saving}>
-            {saving
-              ? 'Saving…'
-              : <><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>Save Changes</>
-            }
-          </button>
+        <div className="sas-prof-grid">
+          <Field label="First Name"    fkey="first_name" />
+          <Field label="Middle Name"   fkey="middle_name" />
+          <Field label="Last Name"     fkey="last_name" />
+          <Field label="Username"      fkey="username" />
+          <Field label="Email Address" fkey="email" type="email" />
         </div>
       </div>
     </div>
@@ -1008,4 +1154,4 @@ export default function SuperAdminSettings({ user, onSignOut }) {
       <FloatingLogout onSignOut={onSignOut} />
     </div>
   );
-}
+} 
