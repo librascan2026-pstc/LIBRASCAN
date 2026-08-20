@@ -28,10 +28,7 @@ export function AuthProvider({ children }) {
       .eq('id', userId)
       .single();
     setProfile(data || null);
-    // Role ALWAYS comes from the DB — never from Supabase Auth user_metadata,
-    // which can be stale (e.g. an account promoted to super_admin after
-    // creation still has metadata.role = "admin"). Using that stale value to
-    // pick a dashboard is what caused the wrong-dashboard flash on login.
+
     setRole(data?.role || null);
     setRoleResolving(false);
   }, []);
@@ -59,7 +56,7 @@ export function AuthProvider({ children }) {
         }
         const u = session?.user ?? null;
         setUser(u);
-        if (u) await fetchProfile(u.id); // resolves the real role from DB
+        if (u) await fetchProfile(u.id); 
         else setRole(null);
         setLoading(false);
       })
@@ -89,10 +86,20 @@ export function AuthProvider({ children }) {
   }, [fetchProfile]);
 
   const signOut = async () => {
-    await supabase.auth.signOut();
-    setUser(null);
-    setRole(null);
-    setProfile(null);
+    try {
+
+      const { error } = await supabase.auth.signOut({ scope: 'local' });
+      if (error) {
+        console.warn('[AuthContext] signOut warning (non-fatal):', error.message);
+      }
+    } catch (err) {
+      console.warn('[AuthContext] signOut threw (non-fatal):', err);
+    } finally {
+  
+      setUser(null);
+      setRole(null);
+      setProfile(null);
+    }
   };
 
   const signIn = async (email, password) => {
@@ -102,7 +109,7 @@ export function AuthProvider({ children }) {
 
   const commitUser = async (sessionUser) => {
     setUser(sessionUser);
-    await fetchProfile(sessionUser.id); // resolves the real role from DB — no guessing
+    await fetchProfile(sessionUser.id); 
   };
 
   const refreshProfile = useCallback(async () => {
