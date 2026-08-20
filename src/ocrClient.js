@@ -1,4 +1,3 @@
-
 function getTesseract() {
   return new Promise((resolve, reject) => {
     if (window.Tesseract) return resolve(window.Tesseract);
@@ -142,10 +141,24 @@ function structureOcrText(rawText) {
 }
 
 
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload  = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read the selected file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 export async function extractAbstractText(file, onProgress) {
   const Tesseract = await getTesseract();
 
-  const result = await Tesseract.recognize(file, 'eng', {
+  // Mobile browsers can fail to hand a raw File/Blob to Tesseract's OCR
+  // engine ("File could not be read! Code=0"). Converting to a data URL
+  // first avoids that.
+  const imageSource = await fileToDataUrl(file);
+
+  const result = await Tesseract.recognize(imageSource, 'eng', {
     logger: ({ status, progress }) => {
       if (onProgress) {
         const pct = Math.round((progress || 0) * 100);
