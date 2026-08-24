@@ -11,7 +11,7 @@ const FONT_SANS  = "'Josefin Sans', sans-serif";
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
 const USERNAME_REGEX    = /^[A-Za-z0-9_\-]+$/;
-const STUDENT_NO_REGEX  = /^\d{11}$/;
+const STUDENT_NO_REGEX  = /^\d{10,}$/;
 
 const validators = {
   firstName: (v) => {
@@ -43,7 +43,7 @@ const validators = {
   },
   studentNumber: (v) => {
     if (!v.trim())                        return 'Student number is required.';
-    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Format must be YYYYNNNNNNN (e.g. 20239293210).';
+    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Must be at least 10 digits (e.g. 2023929321).';
     return '';
   },
   campus:  (v) => (!v ? 'Please select your campus.'  : ''),
@@ -539,7 +539,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         <Field label="Last Name" value={form.lastName} onChange={handleChange('lastName')} onBlur={handleBlur('lastName')} placeholder="Enter your last name" error={fieldErrors.lastName} disabled={loading} />
         <Field label="Middle Name (Optional)" value={form.middleName} onChange={handleChange('middleName')} onBlur={handleBlur('middleName')} placeholder="Enter your middle name" error={fieldErrors.middleName} disabled={loading} />
         <Field label="Username" value={form.username} onChange={handleChange('username')} onBlur={handleBlur('username')} placeholder="Enter your username" error={fieldErrors.username} autoComplete="username" disabled={loading} />
-        <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 20239293210" error={fieldErrors.studentNumber} disabled={loading} />
+        <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 2023929321" error={fieldErrors.studentNumber} disabled={loading} />
         {checkingStudentNumber && (
           <div style={{ marginTop: -4, marginBottom: 7, fontSize: 9.5, fontFamily: FONT_BODY, color: '#8B4513', fontStyle: 'italic' }}>
             Checking availability…
