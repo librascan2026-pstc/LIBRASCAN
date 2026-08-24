@@ -183,18 +183,6 @@ const RA_STYLES = `
     min-width:0;
     box-sizing:border-box;
   }
-  .ra-carousel-wrap::before,
-  .ra-carousel-wrap::after {
-    content:'';
-    position:absolute;
-    top:0; bottom:0;
-    width:clamp(24px,6vw,64px);
-    z-index:3;
-    pointer-events:none;
-  }
-  .ra-carousel-wrap::before { left:0;  background:linear-gradient(90deg, var(--cream-light,#FDF8F0) 0%, rgba(253,248,240,0) 100%); }
-  .ra-carousel-wrap::after  { right:0; background:linear-gradient(270deg, var(--cream-light,#FDF8F0) 0%, rgba(253,248,240,0) 100%); }
-
   /* The outer viewport must ONLY clip content — it must never be natively
      scrollable, because native scroll (scrollLeft) fights the JS-driven
      transform below. That conflict is exactly what made the strip look
@@ -745,7 +733,6 @@ const RA_STYLES = `
     .ra-sh-title   { font-size:11px; }
     .ra-mod-title  { font-size:16px; }
     .ra-carousel-track { padding:0 14px; gap:10px; }
-    .ra-carousel-wrap::before, .ra-carousel-wrap::after { width:28px; }
   }
   @media(max-width:360px) {
     .ra-stat-grid { grid-template-columns:1fr 1fr; gap:6px; }
