@@ -2597,8 +2597,7 @@ function TabAttendance({ data, loading, period }) {
 // MAIN COMPONENT
 // ─────────────────────────────────────────────────────────────────────────────
 export default function ReportsAnalytics() {
-  // Phase 9 — campus isolation: every report/analytics query below is
-  // scoped to the signed-in librarian's campus_id.
+
   const { profile } = useAuth();
   const campusId = profile?.campus_id ?? null;
 
@@ -2619,12 +2618,7 @@ export default function ReportsAnalytics() {
   const [txData,      setTxData]      = useState({ transactions:[] });
   const [attendData,  setAttendData]  = useState({ logs:[], byProgram:[], dailyCounts:[] });
 
-  // ── Stat counters ──
-  // borrow_requests: pending count
-  // borrowings: currently borrowed (returned_at IS NULL)
-  // borrowings: returned (returned_at IS NOT NULL)
-  // books: total titles
-  // profiles: registered students
+
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
     try {
@@ -2661,10 +2655,7 @@ export default function ReportsAnalytics() {
       const periodDays = period==='7d'?7:period==='30d'?30:365;
       const since = new Date(Date.now() - periodDays * 86400000).toISOString();
 
-      // Fetch all data sources in parallel — every query scoped to this
-      // librarian's campus_id (Phase 9). borrow_requests / book_copies have
-      // no campus_id column of their own, so they're scoped through an
-      // inner join on their related book's campus_id.
+
       let qBorrowings = supabase.from('borrowings')
         .select('id,student_id,student_number,student_name,student_program,book_id,book_title,status,borrowed_at,returned_at,date')
         .order('borrowed_at',{ascending:false})
@@ -2699,17 +2690,8 @@ export default function ReportsAnalytics() {
       let qCopiesRaw = supabase.from('book_copies')
         .select(campusId ? 'book_id,status,books!inner(campus_id)' : 'book_id,status');
 
-      // Canonical program list (id, name, code) — used to resolve the free-text
-      // program strings stored on attendance_logs/borrowings to the university's
-      // actual program codes, so records for the same real course are grouped
-      // together even if the stored text varies slightly.
-      // Uses supabaseAdmin (not the anon client) because the programs table is
-      // otherwise only readable via the admin client elsewhere in the app
-      // (see CampusManagementHub.jsx) — under the same RLS policy, an anon
-      // read here would silently come back empty and no code would ever match.
-      // Not campus-scoped: program codes (BSIT, BSCS, etc.) are shared
-      // reference data across the university, not per-campus.
-      let qPrograms = supabaseAdmin.from('programs').select('program_name,program_code');
+
+      let qPrograms = supabaseAdmin.from('programs').select('id,program_name,program_code,college_id');
 
       if (campusId) {
         qBorrowings       = qBorrowings.eq('campus_id', campusId);
@@ -2771,19 +2753,7 @@ export default function ReportsAnalytics() {
       const getCover   = title => (bookByTitle[norm(title)]||{}).cover_image_url||null;
       const getBookRec = title => bookByTitle[norm(title)] || {};
 
-      // Resolve any raw program string (as stored on attendance_logs /
-      // borrowings) to this university's official program code, so that
-      // records for the same real course are always counted together —
-      // even if the stored text has different spacing/casing — and charts
-      // show the short code (e.g. "BSCS") instead of the full program name.
-      //
-      // Two different raw sources feed this: profile.program_legacy (set
-      // from the exact programs.program_name at signup — should match
-      // cleanly) and attendance_logs.program (whatever text is printed on
-      // the student's physical ID and scanned via QR — e.g. "BS INFORMATION
-      // TECHNOLOGY" instead of "Bachelor of Science in Information
-      // Technology"). A strict exact match misses that second case, so this
-      // also tries the program code itself and a fuzzy substring match.
+
       const stripText = s => (s||'')
         .toLowerCase()
         .replace(/[.,;:]/g, '')
@@ -2792,25 +2762,69 @@ export default function ReportsAnalytics() {
       const programByStrippedName = {};
       const programByStrippedCode = {};
       const programNameByCode = {};
+
+      const namesSeenByCode = {};       
       (programsRaw||[]).forEach(p => {
         const code = p.program_code || p.program_name;
         if (!code) return;
         if (p.program_name) programByStrippedName[stripText(p.program_name)] = code;
         if (p.program_code) programByStrippedCode[stripText(p.program_code)] = code;
-        if (p.program_name) programNameByCode[code] = p.program_name;
+        if (p.program_name) {
+          programNameByCode[code] = p.program_name;
+          const seen = namesSeenByCode[code] || (namesSeenByCode[code] = new Map());
+          const key = stripText(p.program_name);
+          const entry = seen.get(key) || { display: p.program_name, count: 0 };
+          entry.count += 1;
+
+          if (p.program_name.length > entry.display.length) entry.display = p.program_name;
+          seen.set(key, entry);
+        }
+      });
+
+      Object.entries(namesSeenByCode).forEach(([code, seen]) => {
+        const variants = [...seen.values()].sort((a, b) => b.count - a.count);
+        const totalRows = variants.reduce((s, v) => s + v.count, 0);
+        const winner = variants[0];
+        const runnerUp = variants[1];
+        const isTie = runnerUp && runnerUp.count === winner.count;
+
+        if (variants.length === 1) {
+
+          programNameByCode[code] = winner.display;
+          return;
+        }
+
+        if (!isTie) {
+
+          programNameByCode[code] = winner.display;
+          console.warn(
+            `[Reports_Analytics] program_code "${code}" has ${totalRows} rows in ` +
+            `\`programs\` with disagreeing names — using "${winner.display}" ` +
+            `(${winner.count}/${totalRows} rows agree). Outlier name(s): ` +
+            `${variants.slice(1).map(v=>`"${v.display}" (${v.count} row${v.count>1?'s':''})`).join(', ')}. ` +
+            `Consider fixing the outlier row(s) in Super Admin → Campuses.`
+          );
+        } else {
+
+          const alphabetical = [...variants].sort((a, b) => a.display.localeCompare(b.display));
+          programNameByCode[code] = alphabetical[0].display;
+          console.warn(
+            `[Reports_Analytics] program_code "${code}" is tied between ` +
+            `${variants.length} equally-common names in \`programs\`: ` +
+            `${variants.map(v=>`"${v.display}" (${v.count})`).join(', ')}. ` +
+            `Using "${alphabetical[0].display}" as a stable default — consider ` +
+            `picking the correct one and fixing the other row(s) in Super Admin → Campuses.`
+          );
+        }
       });
       const resolveProgramCode = raw => {
         const key = stripText(raw);
         if (!key) return 'Unknown';
-        // 1. Exact match against the full program name.
+
         if (programByStrippedName[key]) return programByStrippedName[key];
-        // 2. Exact match against the code itself (ID may already show it).
+
         if (programByStrippedCode[key]) return programByStrippedCode[key];
-        // 3. Fuzzy fallback — scanned ID text often drops/reorders words
-        //    ("BS Information Technology" vs "Bachelor of Science in
-        //    Information Technology"), so check if either string contains
-        //    the other, keeping the longest (most specific) match.
-        let best = null, bestLen = 0;
+
         for (const name in programByStrippedName) {
           if ((key.includes(name) || name.includes(key)) && name.length > bestLen) {
             best = programByStrippedName[name];
@@ -2820,17 +2834,13 @@ export default function ReportsAnalytics() {
         return best || raw; // still no match — show the raw text as-is
       };
 
-      // ──────────────────────────────────────────────────
-      // BOOK POPULARITY
-      // Only count borrows whose borrowed_at falls within the selected
-      // period (7d / 30d / 1y) so "Top 10 Most Borrowed" matches the
-      // 7 Days / 30 Days / 1 Year toggle above.
+
       const sinceTime = new Date(since).getTime();
       const periodBorrowings = (borrowings||[]).filter(
         b => b.borrowed_at && new Date(b.borrowed_at).getTime() >= sinceTime
       );
 
-      // ── Count borrows per book_id (most accurate), fall back to title ──
+
       const idCount    = {};  // book_id -> {count, title, sampleRow}
       const titleCount2= {};  // for books without book_id
       periodBorrowings.forEach(b=>{
@@ -2883,9 +2893,6 @@ export default function ReportsAnalytics() {
       const categoryBorrows = Object.entries(genreCount).sort((a,b)=>b[1]-a[1]).map(([genre,count])=>({genre,count}));
       setBookData({ topBooks, categoryBorrows });
 
-      // ──────────────────────────────────────────────────
-      // STUDENT ACTIVITY  (from borrowings — filtered to selected period)
-      // ──────────────────────────────────────────────────
       const periodBorrowingsForStudents = (borrowings||[]).filter(
         b => b.borrowed_at && new Date(b.borrowed_at).getTime() >= sinceTime
       );
@@ -2917,20 +2924,9 @@ export default function ReportsAnalytics() {
         .map(([program,count])=>({program,count,name:programNameByCode[program]||program}));
       setStuData({ topStudents, byProgram });
 
-      // ──────────────────────────────────────────────────
-      // TRENDS
-      // req_  = borrow_requests count by period
-      // borrow_ = borrowings.borrowed_at by period
-      // return_ = borrowings.returned_at by period
-      // ──────────────────────────────────────────────────
+
       const buildTimeline = (rows, dateField, pts, stepDays) => {
-        // Bucket by calendar day (not raw millisecond distance from "now").
-        // Using the wall-clock time the page happened to load at as the
-        // reference point meant an evening record (e.g. 7:33 PM) could end
-        // up closer in raw time to *tomorrow's* early-morning bucket than
-        // to today's own bucket, pushing it a day ahead. Normalizing both
-        // "now" and each record to local midnight and counting whole days
-        // between them keeps every record in its correct calendar day.
+
         const now = new Date();
         now.setHours(0,0,0,0);
         const buckets = Array.from({length:pts},(_,i)=>{

@@ -60,7 +60,7 @@ const NavIcons = {
 };
 
 const NAV = [
-  { id: 'overview',    label: 'Overview',             icon: 'overview',   section: '' },
+  { id: 'overview',    label: 'Dashboard',             icon: 'overview',   section: '' },
   { id: 'attendance',  label: 'Attendance Monitoring', icon: 'attendance', section: '' },
   { id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: '' },
   { id: 'catalog',  label: 'Book Catalog',      icon: 'catalog',  section: '' },
