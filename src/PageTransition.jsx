@@ -189,7 +189,7 @@ export function AppLoader() {
           animation: 'pt-shimmer 2.5s linear infinite',
           marginBottom: 6,
         }}>
-          PSU Library
+          PAMPANGA STATE UNIVERSITY Library
         </div>
 
     

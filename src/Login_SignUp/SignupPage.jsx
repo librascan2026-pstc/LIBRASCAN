@@ -488,7 +488,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         college_id:     selectedCollege,
         program_id:     selectedProgram,
         major_id:       selectedMajor || null,
-        program_legacy: programName,
+        
         role:           'student',
         updated_at:     new Date().toISOString(),
       }, { onConflict: 'id' });

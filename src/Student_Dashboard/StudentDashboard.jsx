@@ -1833,17 +1833,23 @@ function PageProfile({ user, profile, onProfileUpdate }) {
   const { toast, show } = useToast();
 
   // Field names below are mapped to the columns that actually exist on
-  // `profiles`: first_name, last_name, student_number, program_legacy.
-  // There is no `phone` column yet, so it stays local-only (typeable, but
-  // not persisted) until that column is added. `campus` is resolved
-  // read-only from campus_id (see effect below), and `middle_name` is a
-  // real, existing `profiles` column so it's fully editable + saved.
+  // `profiles`: first_name, last_name, student_number, program_id (a
+  // foreign key into `programs`, not a free-text column — there is no
+  // `program_legacy` column on this table; sending that key is what used
+  // to make every save fail with "Could not find the 'program_legacy'
+  // column of 'profiles' in the schema cache"). There is no `phone` column
+  // yet, so it stays local-only (typeable, but not persisted) until that
+  // column is added. `campus` and `course` are both resolved read-only
+  // display labels for foreign keys (campus_id / program_id) — see the two
+  // lookup effects below — and `middle_name` is a real, existing `profiles`
+  // column so it's fully editable + saved.
   const [form, setForm] = useState({
     first_name:  profile?.first_name     || user?.user_metadata?.first_name || '',
     middle_name: profile?.middle_name    || user?.user_metadata?.middle_name || '',
     last_name:   profile?.last_name      || user?.user_metadata?.last_name  || '',
     student_id:  profile?.student_number || '',
-    course:      profile?.program_legacy || '',
+    program_id:  profile?.program_id     || '',
+    course:      '', // display name for program_id, resolved async below
     campus:      '',
     email:       user?.email             || '',
     phone:       profile?.phone          || '',
@@ -1856,7 +1862,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
       middle_name: profile?.middle_name    || user?.user_metadata?.middle_name || '',
       last_name:   profile?.last_name      || user?.user_metadata?.last_name  || '',
       student_id:  profile?.student_number || '',
-      course:      profile?.program_legacy || '',
+      program_id:  profile?.program_id     || '',
       email:       user?.email             || '',
       phone:       profile?.phone          || '',
     }));
@@ -1873,6 +1879,44 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     supabase.from('campuses').select('campus_name').eq('id', profile.campus_id).single()
       .then(({ data }) => { if (!cancelled) setForm(f => ({ ...f, campus: data?.campus_name || '' })); })
       .catch(() => { if (!cancelled) setForm(f => ({ ...f, campus: '' })); });
+    return () => { cancelled = true; };
+  }, [profile?.campus_id]);
+
+  // Course / Program is also a foreign key (profiles.program_id ->
+  // programs.id) — resolved to its display name the same way Campus is
+  // above, so the read-only view always shows the real program name even
+  // before the editable dropdown (below) has finished loading.
+  useEffect(() => {
+    let cancelled = false;
+    if (!profile?.program_id) { setForm(f => ({ ...f, course: '' })); return; }
+    supabase.from('programs').select('program_name').eq('id', profile.program_id).single()
+      .then(({ data }) => { if (!cancelled) setForm(f => ({ ...f, course: data?.program_name || '' })); })
+      .catch(() => { if (!cancelled) setForm(f => ({ ...f, course: '' })); });
+    return () => { cancelled = true; };
+  }, [profile?.program_id]);
+
+  // Programs selectable in the edit dropdown, scoped to the student's own
+  // campus only — `programs.college_id` links to `colleges.id`, and
+  // `colleges.campus_id` links to the campus, so filtering on the joined
+  // colleges.campus_id keeps the dropdown to "courses this campus actually
+  // offers" instead of every program in the system.
+  const [programs,        setPrograms]        = useState([]);
+  const [loadingPrograms, setLoadingPrograms]  = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    if (!profile?.campus_id) { setPrograms([]); return; }
+    setLoadingPrograms(true);
+    supabase
+      .from('programs')
+      .select('id, program_name, colleges!inner(campus_id)')
+      .eq('colleges.campus_id', profile.campus_id)
+      .order('program_name')
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { console.error('[Profile] programs fetch error:', error.message); setPrograms([]); }
+        else setPrograms((data || []).map(p => ({ id: p.id, name: p.program_name })));
+        setLoadingPrograms(false);
+      });
     return () => { cancelled = true; };
   }, [profile?.campus_id]);
 
@@ -1913,7 +1957,8 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     setSaving(true);
     try {
       // IMPORTANT: only send columns that actually exist on `profiles`.
-      // student_id -> student_number, course -> program_legacy.
+      // student_id -> student_number, course -> program_id (a foreign key,
+      // not free text — see the note above the form's initial state).
       // phone has no column yet, so it's intentionally left out of the
       // payload — sending it causes Postgrest to reject the whole upsert
       // ("column not found in schema cache"), which is why saving used to
@@ -1925,11 +1970,16 @@ function PageProfile({ user, profile, onProfileUpdate }) {
         middle_name:     form.middle_name,
         last_name:       form.last_name,
         student_number:  form.student_id,
-        program_legacy:  form.course,
+        program_id:      form.program_id || null,
         updated_at:      new Date().toISOString(),
       };
       const { error } = await supabase.from('profiles').upsert(payload);
       if (error) throw error;
+      // Keep the read-only display name in sync immediately, rather than
+      // waiting on the program-name lookup effect to re-fire off the
+      // updated `profile` prop.
+      const pickedName = programs.find(p => p.id === form.program_id)?.name || '';
+      setForm(f => ({ ...f, course: pickedName }));
       if (onProfileUpdate) onProfileUpdate({...profile,...payload});
       setEditing(false);
       show('Profile updated successfully!');
@@ -1947,6 +1997,47 @@ function PageProfile({ user, profile, onProfileUpdate }) {
         ? <input className="sdb-input" type={type} value={form[fkey]} onChange={e=>set(fkey,e.target.value)} />
         : <div style={{ fontFamily:'var(--font-sans)', fontSize:13, color:'var(--text-secondary)', padding:'9px 0', borderBottom:'1px solid rgba(139,0,0,.12)' }}>
             {form[fkey] || <span style={{ color:'var(--text-dim)', fontStyle:'italic' }}>Not set</span>}
+          </div>
+      }
+    </div>
+  );
+
+  // Course / Program gets its own field: unlike the plain-text Fields
+  // above, editing it must update `program_id` (the real FK column that
+  // actually gets saved) rather than the free-text `course` label. The
+  // dropdown is pre-scoped to the student's own campus by the `programs`
+  // fetch effect above, so it only ever lists courses that campus offers.
+  // Picking an option updates `course` in the same change so the banner
+  // subtitle (which reads form.course) stays in sync immediately, not
+  // just after Save resolves it from the `programs` list again.
+  const CourseField = () => (
+    <div className="sdb-form-group">
+      <label className="sdb-label">Course / Program</label>
+      {editing
+        ? (
+          <select
+            className="sdb-input sdb-select"
+            style={{ width:'100%' }}
+            value={form.program_id}
+            disabled={loadingPrograms || programs.length === 0}
+            onChange={e => {
+              const id = e.target.value;
+              const name = programs.find(p => p.id === id)?.name || '';
+              setForm(f => ({ ...f, program_id: id, course: name }));
+            }}
+          >
+            <option value="">
+              {loadingPrograms
+                ? 'Loading courses…'
+                : (programs.length ? 'Select a course' : 'No courses available for your campus')}
+            </option>
+            {programs.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        )
+        : <div style={{ fontFamily:'var(--font-sans)', fontSize:13, color:'var(--text-secondary)', padding:'9px 0', borderBottom:'1px solid rgba(139,0,0,.12)' }}>
+            {form.course || <span style={{ color:'var(--text-dim)', fontStyle:'italic' }}>Not set</span>}
           </div>
       }
     </div>
@@ -2031,7 +2122,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
           <Field label="Middle Name"       fkey="middle_name" />
           <Field label="Last Name"         fkey="last_name"   />
           <Field label="Student ID"        fkey="student_id"  />
-          <Field label="Course / Program"  fkey="course"      />
+          <CourseField />
           <Field label="Campus"            fkey="campus"      readOnly />
           <Field label="Email Address"     fkey="email"  type="email" readOnly />
           <Field label="Contact Number"    fkey="phone"  type="tel"   />

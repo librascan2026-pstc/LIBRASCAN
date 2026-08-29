@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
       .select(
         'id, first_name, last_name, middle_name, username, email, role, ' +
         'avatar_url, campus_id, college_id, program_id, major_id, ' +
-        'student_number, program_legacy, created_at, updated_at'
+        'student_number,  created_at, updated_at'
       )
       .eq('id', userId)
       .single();
