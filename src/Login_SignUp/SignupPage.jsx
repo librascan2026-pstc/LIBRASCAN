@@ -460,6 +460,15 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           username:       form.username.trim(),
           student_number: form.studentNumber.trim(),
           role:           'student',
+          // Passed through so the handle_new_user() DB trigger can populate
+          // these FK columns on the profiles row it creates immediately on
+          // signup, instead of relying solely on the app-side upsert below
+          // (step 2) to fill them in a moment later. Keeps the row complete
+          // from the very first insert if any of these columns are NOT NULL.
+          campus_id:      selectedCampus || null,
+          college_id:     selectedCollege || null,
+          program_id:     selectedProgram || null,
+          major_id:       selectedMajor || null,
         },
         emailRedirectTo: `${window.location.origin}/`,
       },
