@@ -1,7 +1,22 @@
 // src/Student_Dashboard/StudentDashboard.jsx
 // ─── 100% Visual-consistent with Admin Dashboard (Dashboard.css / Dashboard.jsx) ───
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '../supabaseClient';
+import {
+  getNotifPrefs,
+  setNotifPref,
+  getNotifPrefTypesForRole,
+  getNotifSoundEnabled,
+  NOTIF_PREFS_EVENT,
+} from '../Admin_Dashboard/notificationPrefs';
+import {
+  getNotifHistory,
+  addNotifHistory,
+  markNotifHistoryRead,
+  markAllNotifHistoryRead,
+  clearNotifHistory,
+} from '../Admin_Dashboard/notificationHistory';
 
 /* ═══════════════════════════════════════════════════════════════
    INLINE STYLES  — mirrors every token in Dashboard.css exactly
@@ -50,6 +65,17 @@ const CSS = `
   --shadow-sidebar:    4px 0 24px rgba(30,0,0,0.40);
   --ease:              0.22s cubic-bezier(0.4,0,0.2,1);
   --ease-bounce:       0.3s cubic-bezier(0.34,1.56,0.64,1);
+  --cream-light:       #FDF8F0;
+  /* Notification bell/panel-specific tokens (same values as Dashboard.css :root) */
+  --notif-maroon:      #8B0000;
+  --notif-maroon-dark: #720000;
+  --notif-cream:       #FFF9F1;
+  --notif-unread:      #FFF3D6;
+  --notif-gold:        #C99A2E;
+  --notif-border:      #E8CFC0;
+  --notif-text:        #4A1717;
+  --notif-secondary:   #9B6F68;
+  --notif-header-text: #FFF8ED;
 }
 
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
@@ -759,7 +785,856 @@ button { cursor:pointer; }
 @media (max-width:360px) {
   .sdb-book-grid { grid-template-columns:1fr !important; }
 }
+
+/* ════════════════════════════════════════════════════════════════
+   NOTIFICATIONS — ported 1:1 from Dashboard.css (Librarian dashboard)
+   so the Student bell dropdown + notification history page match the
+   Librarian dashboard notification UI exactly (layout, spacing,
+   typography, item structure, unread indicator, timestamp, icon
+   treatment, hover, read/unread behavior). Class names kept as
+   lm-notif-* on purpose -- same unmodified rules, reused here so the
+   two dashboards never visually drift apart.
+   ════════════════════════════════════════════════════════════════ */
+.lm-notif-wrap {
+  position: relative;
+  overflow: visible;
+}
+
+.lm-notif-badge {
+  position: absolute;
+  top: -4px; right: -4px;
+  min-width: 18px;
+  height: 18px;
+  background: linear-gradient(135deg, #E4C468, #C9A84C);
+  color: #3A0000;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  font-family: var(--font-sans);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  border: 1.5px solid var(--cream, #FAF6EE);
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.28);
+  animation: lm-badge-pop 0.28s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes lm-badge-pop {
+  0%   { transform: scale(0.3); opacity: 0; }
+  60%  { transform: scale(1.18); opacity: 1; }
+  100% { transform: scale(1); }
+}
+
+/* Invisible click-catcher behind the dropdown — closes it on outside click,
+   same as any anchored menu (Gmail/Facebook-style). No dark dimming here on
+   purpose: a small anchored dropdown shouldn't blackout the whole screen
+   the way a true full-page modal would. Portaled to <body> right alongside
+   .lm-notif-panel so it sits above everything else too. */
+.lm-notif-backdrop {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 1999;
+}
+
+.lm-notif-panel {
+  /* Portaled straight into <body> (see Dashboard.jsx). Rendering it outside
+     the sticky topbar is what actually fixes the "panel goes blank" bug —
+     see the comment above notifBtnRef in Dashboard.jsx for why.
+     Anchored directly under the bell (top/right set inline from the
+     button's real position — see notifPanelPos in Dashboard.jsx) instead of
+     a full-height drawer docked to the edge of the screen, so it reads as
+     something that belongs to the icon rather than a box floating alone in
+     the corner. Light parchment body + a maroon/gold header band gives it
+     some contrast against the all-maroon chrome elsewhere in the app. */
+  position: fixed;
+  top: 68px;
+  right: 24px;
+  width: 368px; /* keep in sync with NOTIF_PANEL_WIDTH in Dashboard.jsx */
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - var(--topbar-h, 72px) - 32px);
+  background: var(--notif-cream);
+  border: 1px solid var(--notif-border);
+  border-radius: 16px;
+  box-shadow: 0 18px 38px rgba(40,0,0,0.22), 0 4px 12px rgba(40,0,0,0.12), 0 0 0 1px rgba(139,0,0,0.05);
+  z-index: 2000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transform-origin: top right;
+  animation: lm-notif-panel-in 0.2s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes lm-notif-panel-in {
+  0%   { opacity: 0; transform: scale(0.96) translateY(-6px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Little caret that points back at the bell, positioned dynamically via
+   notifPanelPos.arrowRight so it lines up with the button even as the
+   topbar reflows across breakpoints. Sits half-behind the panel's top edge
+   (same z-index stack, same fill color as the header) so the bottom half
+   blends into the header and only the top half peeks up as a clean arrow
+   against the topbar. */
+.lm-notif-caret {
+  position: fixed;
+  top: 58px;
+  width: 16px;
+  height: 16px;
+  background: var(--notif-maroon);
+  border: none;
+  border-radius: 3px 0 0 0;
+  box-shadow: none;
+  z-index: 2001;
+  pointer-events: none;
+  transform-origin: center;
+  animation: lm-notif-caret-in 0.2s cubic-bezier(0.22,1,0.36,1) both;
+}
+@keyframes lm-notif-caret-in {
+  0%   { opacity: 0; transform: rotate(45deg) scale(0.8); }
+  100% { opacity: 1; transform: rotate(45deg) scale(1); }
+}
+
+.lm-notif-head {
+  padding: 16px 20px 12px;
+  background: linear-gradient(180deg, var(--notif-maroon) 0%, var(--notif-maroon-dark) 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.lm-notif-head-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.lm-notif-head-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--notif-header-text);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.lm-notif-head-title svg { flex-shrink: 0; width: 14px; height: 14px; }
+.lm-notif-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255,248,237,0.45);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lm-notif-live-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: rgba(245,228,168,0.35);
+  flex-shrink: 0;
+}
+.lm-notif-live.is-live { color: #7CDB8A; }
+.lm-notif-live.is-live .lm-notif-live-dot {
+  background: #4CAF50;
+  box-shadow: 0 0 6px rgba(76,175,80,0.85);
+  animation: lm-pulse-dot 1.8s infinite;
+}
+
+.lm-notif-action-btn {
+  background: rgba(201,168,76,0.14);
+  border: 1px solid rgba(201,168,76,0.32);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 10.5px;
+  color: var(--notif-header-text);
+  font-family: var(--font-sans);
+  font-weight: 600;
+  padding: 5px 10px;
+  transition: background 0.15s, border-color 0.15s, transform 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lm-notif-action-btn:hover  { background: rgba(201,168,76,0.26); transform: translateY(-1px); }
+.lm-notif-action-btn:active { transform: translateY(0) scale(0.97); }
+.lm-notif-action-btn:focus-visible {
+  outline: 2px solid var(--notif-gold);
+  outline-offset: 2px;
+}
+
+/* Facebook-style All / Unread filter tabs. */
+.lm-notif-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.lm-notif-tab {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: rgba(255,248,237,0.62);
+  padding: 6px 14px;
+  border-radius: 20px;
+  transition: background 0.15s, color 0.15s;
+  white-space: nowrap;
+}
+.lm-notif-tab:hover { background: rgba(255,248,237,0.08); color: var(--notif-header-text); }
+.lm-notif-tab.active {
+  background: var(--notif-gold);
+  color: var(--notif-maroon-dark);
+}
+.lm-notif-tab:focus-visible {
+  outline: 2px solid var(--notif-gold);
+  outline-offset: 2px;
+}
+
+/* "New" / "Earlier" section headings inside the list. "See all" is
+   attached ONLY to whichever heading renders first (see Dashboard.jsx) so
+   it never competes visually with "Mark all as read" up in the header. */
+.lm-notif-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 18px 6px;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--notif-secondary);
+  background: var(--notif-cream);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.lm-notif-see-all {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  color: var(--notif-maroon);
+  padding: 2px 4px;
+  transition: color 0.15s;
+}
+.lm-notif-see-all:hover { color: var(--notif-gold); text-decoration: underline; }
+
+.lm-notif-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201,168,76,0.30) rgba(0,0,0,0.15);
+}
+
+.lm-notif-empty {
+  padding: 40px 20px;
+  text-align: center;
+  font-family: var(--font-sans);
+}
+.lm-notif-empty-title {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--notif-text);
+  margin-bottom: 5px;
+}
+.lm-notif-empty-sub { font-size: 11px; color: var(--notif-secondary); max-width: 240px; margin: 0 auto; line-height: 1.55; }
+
+.lm-notif-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 13px 18px 13px 20px;
+  border-bottom: 1px solid var(--notif-border);
+  cursor: pointer;
+  transition: background 0.18s ease, transform 0.18s ease;
+  background: transparent;
+  position: relative;
+  animation: lm-notif-row-in 0.28s ease both;
+}
+@keyframes lm-notif-row-in {
+  0%   { opacity: 0; transform: translateX(6px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.lm-notif-row.unread { background: var(--notif-unread); }
+.lm-notif-row:hover  { background: rgba(139,0,0,0.05); }
+.lm-notif-row:active { transform: scale(0.995); }
+.lm-notif-row:last-child { border-bottom: none; }
+.lm-notif-row:focus-visible {
+  outline: 2px solid var(--notif-gold);
+  outline-offset: -2px;
+}
+
+/* Permanent, formal accent marker — full-strength color while unread,
+   fades to a quiet tint once read, rather than appearing/disappearing.
+   This is the only per-type visual cue now that the row icon is gone. */
+.lm-notif-row-bar {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  transition: background 0.2s ease;
+}
+
+.lm-notif-body { flex: 1; min-width: 0; }
+.lm-notif-row-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.lm-notif-type {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  font-family: var(--font-sans);
+}
+.lm-notif-time {
+  font-size: 9.5px;
+  color: var(--notif-secondary);
+  font-family: var(--font-sans);
+  flex-shrink: 0;
+}
+.lm-notif-msg {
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  line-height: 1.5;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--notif-secondary);
+  font-weight: 400;
+}
+.lm-notif-msg.is-unread {
+  color: var(--notif-text);
+  font-weight: 600;
+}
+.lm-notif-unread-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 6px;
+  animation: lm-pulse-dot 2s infinite;
+}
+
+.lm-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.lm-notif-foot {
+  padding: 10px 16px;
+  border-top: 1px solid var(--notif-border);
+  background: rgba(139,0,0,0.035);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.lm-notif-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  padding: 3px 4px;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.lm-notif-settings-link:hover { color: var(--maroon-mid); }
+.lm-notif-foot-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.lm-notif-foot-count {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+.lm-notif-clear-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-weight: 500;
+  padding: 3px 6px;
+  border-radius: 6px;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.lm-notif-clear-btn:hover { color: var(--maroon-mid); }
+
+/* Rows that can't (or only partly can) take the librarian to a specific
+   record — see getNotifTarget() in Dashboard.jsx. */
+.lm-notif-row.unlinked { cursor: default; }
+.lm-notif-row.unlinked:hover { background: transparent; }
+.lm-notif-row.unlinked .lm-notif-icon { opacity: 0.7; }
+.lm-notif-link-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: 20px;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+.lm-notif-link-tag--area {
+  color: var(--gold-dim);
+  background: rgba(201,168,76,0.16);
+  border: 1px solid rgba(201,168,76,0.35);
+}
+.lm-notif-link-tag--none {
+  color: var(--text-dim);
+  background: rgba(139,0,0,0.05);
+  border: 1px solid rgba(139,0,0,0.12);
+}
+
+/* ============================================================
+   "See all" — full notification history, rendered as a real in-page
+   section (module header + stat cards + filters + panel), the same way
+   every other page in the app is composed — not a floating overlay.
+   ============================================================ */
+.lm-notif-hist-page .lm-module-header { align-items: center; }
+
+.lm-notif-hist-panel {
+  background: linear-gradient(175deg, #FFFDF9 0%, #FBF3DE 100%);
+  border: 1px solid rgba(201,168,76,0.45);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+.lm-notif-hist-panel .lm-panel-title {
+  padding: 16px 22px;
+  margin: 0;
+  border-bottom: 1px solid rgba(201,168,76,0.35);
+  background: linear-gradient(135deg, var(--maroon-mid), var(--maroon-deep));
+  color: var(--gold-pale);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+.lm-notif-hist-count {
+  font-size: 10px;
+  font-weight: 700;
+  background: rgba(201,168,76,0.20);
+  color: #F5E4A8;
+  padding: 2px 9px;
+  border-radius: 20px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  margin-left: auto;
+}
+.lm-notif-hist-list {
+  max-height: 560px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(201,168,76,0.30) rgba(139,0,0,0.05);
+}
+.lm-notif-hist-foot {
+  padding: 12px 22px;
+  border-top: 1px solid rgba(201,168,76,0.25);
+  background: rgba(139,0,0,0.035);
+  flex-shrink: 0;
+}
+.lm-notif-hist-foot-note {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-family: var(--font-sans);
+}
+
+/* Deep-link highlight used by BookManagement / UserManagement /
+   AttendanceMonitoring when a notification is opened and scrolls a
+   specific row into view. */
+@keyframes lm-notif-target-glow {
+  0%   { box-shadow: 0 0 0 0 rgba(201,168,76,0.55); }
+  50%  { box-shadow: 0 0 0 6px rgba(201,168,76,0.16); }
+  100% { box-shadow: 0 0 0 0 rgba(201,168,76,0); }
+}
+.lm-notif-target {
+  animation: lm-notif-target-glow 1.4s ease-out 2;
+  outline: 2px solid rgba(201,168,76,0.55) !important;
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .lm-notif-hist-list { max-height: none; }
+}
+
+/* Phones — panel becomes a fixed, near-full-width sheet anchored under
+   the top bar instead of a right-aligned dropdown, so it never runs off
+   the edge of small screens. */
+@media (max-width: 768px) {
+  .lm-notif-panel { width: 340px; }
+}
+
+/* Phones — the side drawer becomes a fixed, near-full-width sheet anchored
+   under the top bar instead of a right-docked drawer, so it never runs off
+   the edge of small screens. */
+@media (max-width: 560px) {
+  .lm-notif-panel {
+    position: fixed;
+    top: calc(var(--topbar-h, 60px) + 8px);
+    bottom: auto;
+    left: 10px;
+    right: 10px;
+    height: auto;
+    width: auto;
+    max-width: none;
+    max-height: calc(100vh - var(--topbar-h, 60px) - 24px);
+    border-radius: 18px;
+    animation: lm-notif-panel-in-mobile 0.24s cubic-bezier(0.22,1,0.36,1) both;
+  }
+  @keyframes lm-notif-panel-in-mobile {
+    0%   { opacity: 0; transform: translateY(-10px); }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+  .lm-notif-list { max-height: calc(100vh - var(--topbar-h, 60px) - 180px); }
+  .lm-notif-head { padding: 12px 14px 10px; gap: 10px; }
+  .lm-notif-head-top { flex-wrap: wrap; row-gap: 6px; }
+  .lm-notif-head-title { font-size: 13.5px; }
+  .lm-notif-tabs { width: 100%; }
+  .lm-notif-tab { flex: 1; text-align: center; padding: 6px 8px; }
+  .lm-notif-section-head { padding: 8px 14px 6px; }
+  .lm-notif-row { padding: 11px 14px; }
+  .lm-notif-msg { -webkit-line-clamp: 3; line-clamp: 3; }
+  .lm-notif-caret { display: none; }
+}
+
+@media (max-width: 360px) {
+  .lm-notif-panel { left: 6px; right: 6px; }
+  .lm-notif-foot { padding: 8px 12px; flex-direction: column; align-items: stretch; gap: 8px; }
+  .lm-notif-foot-right { margin-left: 0; justify-content: space-between; }
+}
+
+/* -- Notification-history page shell (module header / stat cards / filters / search / select / buttons), ported 1:1 from Dashboard.css -- */
+.lm-module-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.lm-module-title {
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--maroon-deep);
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+}
+
+.lm-module-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 5px;
+  line-height: 1.55;
+}
+
+
+.lm-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.lm-stat-card {
+  background: linear-gradient(145deg, #8B0000 0%, #680000 100%);
+  border: 1px solid rgba(201,168,76,0.42);
+  border-radius: var(--radius-lg);
+  padding: 22px 22px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--ease), box-shadow var(--ease), border-color var(--ease);
+  box-shadow: var(--shadow-card);
+  cursor: default;
+}
+
+
+.lm-stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--gold-dim), var(--gold-light), var(--gold));
+}
+
+
+.lm-stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: -20px; right: -20px;
+  width: 80px; height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,168,76,0.08) 0%, transparent 70%);
+  pointer-events: none;
+}
+
+.lm-stat-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 32px rgba(40,0,0,0.45);
+  border-color: rgba(201,168,76,0.60);
+}
+
+.lm-stat-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px;
+  border-radius: 11px;
+  background: rgba(201,168,76,0.14);
+  border: 1px solid rgba(201,168,76,0.25);
+  color: var(--gold);
+  margin-bottom: 4px;
+  flex-shrink: 0;
+  transition: background var(--ease), transform var(--ease);
+}
+.lm-stat-card:hover .lm-stat-icon {
+  background: rgba(201,168,76,0.22);
+  transform: scale(1.08);
+}
+
+.lm-stat-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: rgba(255,230,150,0.72);
+  font-family: var(--font-sans);
+}
+
+.lm-stat-value {
+  font-family: var(--font-display);
+  font-size: 32px;
+  color: #FFE97A;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 10px rgba(0,0,0,0.35);
+}
+
+.lm-stat-sub {
+  font-size: 11px;
+  color: rgba(255,225,140,0.55);
+  font-family: var(--font-sans);
+  margin-top: 2px;
+}
+.lm-panel-title {
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gold);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  margin-bottom: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(201,168,76,0.18);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border-radius: var(--radius);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: all var(--ease);
+  white-space: nowrap;
+  letter-spacing: 0.01em;
+}
+
+.lm-btn--primary {
+  background: linear-gradient(135deg, var(--maroon-mid), var(--maroon-deep));
+  color: var(--gold-pale);
+  border-color: rgba(201,168,76,0.30);
+  box-shadow: 0 2px 10px rgba(40,0,0,0.30);
+}
+.lm-btn--primary:hover {
+  background: linear-gradient(135deg, var(--maroon-light), var(--maroon-mid));
+  border-color: rgba(201,168,76,0.50);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(40,0,0,0.40);
+}
+.lm-btn--primary:active { transform: translateY(0); }
+
+.lm-btn--ghost {
+  background: transparent;
+  color: var(--gold);
+  border-color: rgba(201,168,76,0.38);
+}
+.lm-btn--ghost:hover {
+  background: rgba(201,168,76,0.10);
+  border-color: rgba(201,168,76,0.58);
+  transform: translateY(-1px);
+  color: var(--gold-light);
+}
+
+.lm-btn--danger {
+  background: linear-gradient(135deg, rgba(139,0,0,0.5), rgba(80,0,0,0.5));
+  color: #ef9a9a;
+  border-color: rgba(239,154,154,0.25);
+}
+.lm-btn--danger:hover {
+  background: linear-gradient(135deg, rgba(180,0,0,0.65), rgba(110,0,0,0.65));
+  border-color: rgba(239,154,154,0.42);
+  transform: translateY(-1px);
+}
+
+
+.lm-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.lm-search-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 200px;
+}
+.lm-search-icon {
+  position: absolute;
+  left: 12px; top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  display: flex;
+  pointer-events: none;
+}
+.lm-search {
+  width: 100%;
+  padding: 9px 14px 9px 38px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(139,0,0,0.22);
+  background: var(--cream-light);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--ease), box-shadow var(--ease), background var(--ease);
+}
+.lm-search::placeholder { color: var(--text-dim); }
+.lm-search:focus {
+  border-color: rgba(139,0,0,0.45);
+  box-shadow: 0 0 0 3px rgba(139,0,0,0.09);
+  background: #F5ECD0;
+}
+
+.lm-select {
+  padding: 8.5px 12px;
+  border-radius: var(--radius);
+  border: 1px solid rgba(139,0,0,0.22);
+  background: var(--cream-light);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color var(--ease), box-shadow var(--ease);
+}
+.lm-select:focus {
+  border-color: rgba(139,0,0,0.45);
+  box-shadow: 0 0 0 3px rgba(139,0,0,0.09);
+}
+.lm-select--sm { padding: 8px 12px; font-size: 12px; }
+
+
 `;
+
+/* ═══════════════════════════════════════════════
+   NOTIFICATIONS — module-scope helpers
+   Mirrors Dashboard.jsx (Librarian) exactly: same shape, same "New"/
+   "Earlier" grouping, same read/unread model — just scoped to this
+   student's own borrow requests instead of a campus's.
+═══════════════════════════════════════════════ */
+const STUDENT_NOTIF_MAX = 15;
+const STUDENT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // last 24h shown on first load, same as Dashboard.jsx
+
+// Only the notification types a student can actually receive. Kept as a
+// subset of the same keys used in notificationPrefs.js / Dashboard.jsx so
+// icon/color/label never drift between the two dashboards.
+const STUDENT_NOTIF_TYPES = {
+  BORROW_APPROVED:  { label: 'Approved',  color: '#3F6B4A' },
+  BORROW_CANCELLED: { label: 'Rejected',  color: '#8B3A3A' },
+  SYSTEM_ALERT:     { label: 'System',    color: '#9C5A2E' },
+};
+
+function buildStudentNotification({ id, type, title, message, createdAt, extra = {} }) {
+  return { id, type, title, message, createdAt, extra, read: false };
+}
+
+// Where a clicked notification takes the student. A rejected/approved
+// request doesn't correspond to one fixed row anywhere (same reasoning as
+// Dashboard.jsx's getNotifTarget for BORROW_APPROVED/BORROW_CANCELLED), so
+// this only opens the general History tab rather than pointing at an exact record.
+function getStudentNotifTarget(n) {
+  switch (n?.type) {
+    case 'BORROW_APPROVED':
+    case 'BORROW_CANCELLED':
+      return { kind: 'area', tab: 'history' };
+    default:
+      return null; // SYSTEM_ALERT and anything unrecognized
+  }
+}
+
+function fmtNotifAgo(iso) {
+  if (!iso) return '';
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (diff < 60)    return 'Just now';
+  if (diff < 3600)  return `${Math.floor(diff / 60)} min ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)} hr ago`;
+  return new Date(iso).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+}
 
 /* ═══════════════════════════════════════════════
    NAVIGATION CONFIG
@@ -2143,6 +3018,23 @@ function PageSettings({ user, onSignOut }) {
   const [notif,    setNotif]    = useState({ email:true, due_reminders:true, new_arrivals:false });
   const { toast, show } = useToast();
 
+  // Real, persisted notification preferences (shared with the bell) —
+  // separate from the `notif` state above, which only drives the three
+  // unrelated email/reminder toggles further down this page.
+  const [notifPrefs, setNotifPrefs] = useState(() => getNotifPrefs(user?.id));
+  const notifPrefTypes = getNotifPrefTypesForRole('student');
+
+  useEffect(() => {
+    setNotifPrefs(getNotifPrefs(user?.id));
+  }, [user?.id]);
+
+  const handleNotifPrefToggle = (key, label) => {
+    const next = notifPrefs[key] === false;
+    setNotifPrefs(p => ({ ...p, [key]: next }));
+    setNotifPref(user?.id, key, next);
+    show(`${label} notifications ${next ? 'enabled' : 'turned off'}.`);
+  };
+
   const changePw = async () => {
     if (!pwForm.oldPw)           { show('Enter your current password.',true); return; }
     if (!pwForm.newPw)           { show('Enter a new password.',true); return; }
@@ -2226,6 +3118,16 @@ function PageSettings({ user, onSignOut }) {
         <Toggle label="Email Notifications"  desc="Receive library updates via email"         value={notif.email}         onChange={v=>setNotif(p=>({...p,email:v}))} />
         <Toggle label="Due Date Reminders"   desc="Get reminded before your books are due"   value={notif.due_reminders} onChange={v=>setNotif(p=>({...p,due_reminders:v}))} />
         <Toggle label="New Arrivals"         desc="Notify me when new books are added"        value={notif.new_arrivals}  onChange={v=>setNotif(p=>({...p,new_arrivals:v}))} />
+        {/* Real, bell-connected preferences (Approved / Canceled-Rejected) */}
+        {notifPrefTypes.map(t => (
+          <Toggle
+            key={t.key}
+            label={t.label}
+            desc={t.desc}
+            value={notifPrefs[t.key] !== false}
+            onChange={() => handleNotifPrefToggle(t.key, t.label)}
+          />
+        ))}
       </div>
 
       {/* Privacy */}
@@ -2265,6 +3167,512 @@ export default function StudentDashboard({ user, onSignOut }) {
     try { return localStorage.getItem('sdb-theme') === 'dark'; } catch { return false; }
   });
   const profileMenuRef = useRef(null);
+
+  /* ═══════════════ NOTIFICATIONS ═══════════════
+     Mirrors Dashboard.jsx's architecture: live bell list (max 15, in
+     state) backed by a fuller persisted history (localStorage, via
+     notificationHistory.js) for "See all". The only notification type a
+     student currently receives is a canceled/rejected (or approved) borrow
+     request, synthesized the same way Dashboard.jsx synthesizes the
+     Librarian's equivalent — from a realtime UPDATE on borrow_requests —
+     just filtered to this student's own requests instead of a campus. */
+  const [notifications, setNotifications] = useState([]);
+  const [notifOpen,     setNotifOpen]     = useState(false);
+  const [notifTab,      setNotifTab]      = useState('all'); // 'all' | 'unread'
+  const [realtimeStatus, setRealtimeStatus] = useState('connecting');
+
+  const [notifHistory, setNotifHistory] = useState(() => getNotifHistory(user?.id));
+  const [historyOpen,  setHistoryOpen]  = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
+
+  const notifBtnRef = useRef(null);
+  const [notifPanelPos, setNotifPanelPos] = useState(null);
+  const NOTIF_PANEL_WIDTH = 368;
+  const NOTIF_PANEL_EDGE_GAP = 24;
+
+  const computeNotifPanelPos = useCallback(() => {
+    if (!notifBtnRef.current) return null;
+    if (window.innerWidth <= 560) return null; // mobile sheet handled entirely by CSS
+    const r = notifBtnRef.current.getBoundingClientRect();
+    const right = NOTIF_PANEL_EDGE_GAP;
+    const bellCenterX = r.left + r.width / 2;
+    const rawArrowRight = (window.innerWidth - bellCenterX) - 8;
+    const arrowRight = Math.min(
+      right + NOTIF_PANEL_WIDTH - 34,
+      Math.max(right + 18, rawArrowRight)
+    );
+    return { top: r.bottom + 14, right, arrowRight };
+  }, []);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onReposition = () => setNotifPanelPos(computeNotifPanelPos());
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [notifOpen, computeNotifPanelPos]);
+
+  const seenNotifIdsRef = useRef(new Set());
+  const seenNotifIdsInStateRef = useRef(new Set());
+  const isFirstNotifLoad = useRef(true);
+
+  const notifPrefsRef = useRef(getNotifPrefs(user?.id));
+  const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
+
+  useEffect(() => {
+    const syncNotifPrefs = () => {
+      notifPrefsRef.current = getNotifPrefs(user?.id);
+      notifSoundRef.current = getNotifSoundEnabled(user?.id);
+    };
+    syncNotifPrefs();
+    window.addEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+    window.addEventListener('storage', syncNotifPrefs);
+    return () => {
+      window.removeEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+      window.removeEventListener('storage', syncNotifPrefs);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    setNotifHistory(getNotifHistory(user?.id));
+  }, [user?.id]);
+
+  const playStudentNotifSound = useCallback(() => {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const beep = (freq, start, dur, vol = 0.18) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+        gain.gain.setValueAtTime(vol, ctx.currentTime + start);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + start + dur);
+        osc.start(ctx.currentTime + start);
+        osc.stop(ctx.currentTime + start + dur + 0.05);
+      };
+      beep(880, 0, 0.12);
+      beep(1100, 0.14, 0.12);
+      beep(1320, 0.28, 0.22);
+    } catch { }
+  }, []);
+
+  const addStudentNotifications = useCallback((incoming, isRealtime = false) => {
+    if (!incoming.length) return;
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] !== false);
+
+    if (allowed.length) {
+      const existingIds = new Set(seenNotifIdsInStateRef.current);
+      const fresh = allowed.filter(n => !existingIds.has(n.id));
+      if (fresh.length) {
+        fresh.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+        setNotifications(prev => [...fresh, ...prev].slice(0, STUDENT_NOTIF_MAX));
+        if (isRealtime && !isFirstNotifLoad.current && notifSoundRef.current) {
+          playStudentNotifSound();
+        }
+      }
+      setNotifHistory(addNotifHistory(user?.id, allowed));
+    }
+
+    incoming.forEach(n => seenNotifIdsRef.current.add(n.id));
+    isFirstNotifLoad.current = false;
+  }, [playStudentNotifSound, user?.id]);
+
+  const showInitialStudentBatch = useCallback((notifs) => {
+    if (!notifs.length) return;
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] !== false);
+    if (!allowed.length) return;
+
+    const readIds = new Set(getNotifHistory(user?.id).filter(h => h.read).map(h => h.id));
+    const withReadState = allowed.map(n => (readIds.has(n.id) ? { ...n, read: true } : n));
+
+    const existingIds = new Set(seenNotifIdsInStateRef.current);
+    const fresh = withReadState.filter(n => !existingIds.has(n.id));
+    if (fresh.length) {
+      fresh.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+      setNotifications(prev =>
+        [...fresh, ...prev]
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, STUDENT_NOTIF_MAX)
+      );
+    }
+    setNotifHistory(addNotifHistory(user?.id, allowed));
+  }, [user?.id]);
+
+  // Recent decisions (approved/rejected) on THIS student's own borrow
+  // requests. Same query shape as Dashboard.jsx's fetchRecentDecisions,
+  // just scoped by student_id instead of campus_id.
+  const isFirstStudentDecisionLoad = useRef(true);
+  const fetchStudentRequestDecisions = useCallback(async (isRealtime = false) => {
+    if (!user?.id) return;
+    const { data, error } = await supabase
+      .from('borrow_requests')
+      .select('id, book_title, created_at, reviewed_at, status')
+      .eq('student_id', user.id)
+      .in('status', ['approved', 'rejected'])
+      .order('created_at', { ascending: false })
+      .limit(STUDENT_NOTIF_MAX);
+
+    if (error) { console.error('[StudentDashboard] decisions fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstStudentDecisionLoad.current) {
+      rows.forEach(r => seenNotifIdsRef.current.add(`borrow_dec_${r.id}_${r.status}`));
+      isFirstStudentDecisionLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.reviewed_at || r.created_at).getTime() <= STUDENT_RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildStudentNotification({
+        id:        `borrow_dec_${r.id}_${r.status}`,
+        type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+        title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+        message:   r.status === 'approved'
+          ? `Your request for "${r.book_title || 'a book'}" has been approved and is ready for pickup.`
+          : `Your request for "${r.book_title || 'a book'}" has been rejected.`,
+        createdAt: r.reviewed_at || r.created_at,
+        extra:     { borrowId: r.id },
+      }));
+      showInitialStudentBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenNotifIdsRef.current.has(`borrow_dec_${r.id}_${r.status}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildStudentNotification({
+      id:        `borrow_dec_${r.id}_${r.status}`,
+      type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+      title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+      message:   r.status === 'approved'
+        ? `Your request for "${r.book_title || 'a book'}" has been approved and is ready for pickup.`
+        : `Your request for "${r.book_title || 'a book'}" has been rejected.`,
+      createdAt: r.reviewed_at || r.created_at,
+      extra:     { borrowId: r.id },
+    }));
+
+    addStudentNotifications(newNotifs, isRealtime);
+  }, [addStudentNotifications, showInitialStudentBatch, user?.id]);
+
+  const studentNotifChannelRef = useRef(`student-notif-${Math.random().toString(36).slice(2)}`);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    let resubscribeTimer = null;
+    let ch = null;
+
+    const load = () => { fetchStudentRequestDecisions(false); };
+    load();
+
+    const subscribe = () => {
+      ch = supabase
+        .channel(studentNotifChannelRef.current)
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'borrow_requests',
+          filter: `student_id=eq.${user.id}`,
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && (r.status === 'approved' || r.status === 'rejected')) {
+            addStudentNotifications([buildStudentNotification({
+              id:        `borrow_dec_${r.id}_${r.status}`,
+              type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+              title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+              message:   r.status === 'approved'
+                ? `Your request for "${r.book_title || 'a book'}" has been approved and is ready for pickup.`
+                : `Your request for "${r.book_title || 'a book'}" has been rejected.`,
+              createdAt: r.reviewed_at || r.created_at,
+              extra:     { borrowId: r.id },
+            })], true);
+          }
+          fetchStudentRequestDecisions(true);
+        })
+        .subscribe((status) => {
+          if (cancelled) return;
+          setRealtimeStatus(status);
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            supabase.removeChannel(ch);
+            resubscribeTimer = setTimeout(() => { if (!cancelled) subscribe(); }, 2000);
+          }
+        });
+    };
+    subscribe();
+
+    // Safety-net poll — same reasoning as Dashboard.jsx: guarantees new
+    // activity still shows up even if Realtime replication happens to be
+    // switched off for this table on this Supabase project.
+    const pollId = setInterval(() => { fetchStudentRequestDecisions(true); }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+      if (resubscribeTimer) clearTimeout(resubscribeTimer);
+      if (ch) supabase.removeChannel(ch);
+    };
+  }, [user?.id, fetchStudentRequestDecisions, addStudentNotifications]);
+
+  const unreadNotifCount = useMemo(
+    () => notifications.reduce((n, item) => (item.read ? n : n + 1), 0),
+    [notifications]
+  );
+
+  const NOTIF_NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
+  const visibleNotifications = useMemo(
+    () => (notifTab === 'unread' ? notifications.filter(n => !n.read) : notifications),
+    [notifications, notifTab]
+  );
+  const notifNewGroup = useMemo(
+    () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() <= NOTIF_NEW_WINDOW_MS),
+    [visibleNotifications]
+  );
+  const notifEarlierGroup = useMemo(
+    () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() > NOTIF_NEW_WINDOW_MS),
+    [visibleNotifications]
+  );
+
+  const markStudentNotifRead = (id) => {
+    const prevSnapshot = notifications;
+    setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    try {
+      setNotifHistory(markNotifHistoryRead(user?.id, id));
+    } catch (err) {
+      console.error('[StudentDashboard] failed to persist mark-read:', err);
+      setNotifications(prevSnapshot);
+    }
+  };
+
+  const markAllStudentNotifRead = () => {
+    const prevSnapshot = notifications;
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    try {
+      setNotifHistory(markAllNotifHistoryRead(user?.id));
+    } catch (err) {
+      console.error('[StudentDashboard] failed to persist mark-all-read:', err);
+      setNotifications(prevSnapshot);
+    }
+  };
+
+  const dismissAllStudentNotif = () => {
+    setNotifications([]);
+    seenNotifIdsInStateRef.current = new Set();
+    setNotifOpen(false);
+  };
+
+  const clearStudentNotifHistory = () => {
+    setNotifHistory(clearNotifHistory(user?.id));
+  };
+
+  const openStudentNotification = (n) => {
+    markStudentNotifRead(n.id);
+    const target = getStudentNotifTarget(n);
+    if (!target) return;
+    navigate(target.tab);
+    setNotifOpen(false);
+    setHistoryOpen(false);
+  };
+
+  const handleBellClick = () => {
+    setNotifOpen(o => {
+      const next = !o;
+      if (next) setNotifPanelPos(computeNotifPanelPos());
+      return next;
+    });
+  };
+
+  const renderStudentNotifRow = (n) => {
+    const typeInfo = STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
+    const isUnread = !n.read;
+    const target   = getStudentNotifTarget(n);
+    const canOpen  = !!target;
+
+    return (
+      <div
+        key={n.id}
+        className={`lm-notif-row${isUnread ? ' unread' : ''}${canOpen ? '' : ' unlinked'}`}
+        onClick={canOpen ? () => openStudentNotification(n) : () => markStudentNotifRead(n.id)}
+        style={canOpen ? undefined : { cursor: 'default' }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            canOpen ? openStudentNotification(n) : markStudentNotifRead(n.id);
+          }
+        }}
+      >
+        <div
+          className="lm-notif-row-bar"
+          style={{ background: isUnread ? typeInfo.color : `${typeInfo.color}55` }}
+        />
+        <div className="lm-notif-body">
+          <div className="lm-notif-row-top">
+            <span className="lm-notif-type" style={{ color: isUnread ? typeInfo.color : 'var(--notif-secondary)' }}>
+              {typeInfo.label}
+            </span>
+            <span className="lm-notif-time">{fmtNotifAgo(n.createdAt)}</span>
+          </div>
+          <div className={`lm-notif-msg${isUnread ? ' is-unread' : ''}`}>
+            {n.message}
+          </div>
+          {target?.kind === 'area' && (
+            <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section.">
+              General area only
+            </div>
+          )}
+          {!canOpen && (
+            <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
+              No linked page
+            </div>
+          )}
+        </div>
+        {isUnread && (
+          <div
+            className="lm-notif-unread-dot"
+            style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const renderStudentNotifHistoryPage = () => {
+    const q = historySearch.trim().toLowerCase();
+    const rows = notifHistory.filter(n => {
+      const matchType = historyTypeFilter === 'all' || n.type === historyTypeFilter;
+      const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
+      return matchType && matchQ;
+    });
+    const unreadTotal = notifHistory.filter(n => !n.read).length;
+    const todayTotal = notifHistory.filter(n => {
+      const d = new Date(n.createdAt);
+      const now = new Date();
+      return d.toDateString() === now.toDateString();
+    }).length;
+
+    return (
+      <div className="lm-module lm-notif-hist-page">
+        <div className="lm-module-header">
+          <div>
+            <div className="lm-module-title">Notification History</div>
+            <div className="lm-module-subtitle">Every notification the bell has shown, kept locally on this device.</div>
+          </div>
+          <button className="sdb-btn sdb-btn-ghost" onClick={() => setHistoryOpen(false)}>
+            Back to Dashboard
+          </button>
+        </div>
+
+        <div className="lm-stats-grid">
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Total Logged</div>
+            <div className="lm-stat-value">{notifHistory.length}</div>
+            <div className="lm-stat-sub">Up to 300 kept</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Unread</div>
+            <div className="lm-stat-value">{unreadTotal}</div>
+            <div className="lm-stat-sub">Awaiting review</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Today</div>
+            <div className="lm-stat-value">{todayTotal}</div>
+            <div className="lm-stat-sub">Since midnight</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Showing</div>
+            <div className="lm-stat-value">{rows.length}</div>
+            <div className="lm-stat-sub">Matches current filter</div>
+          </div>
+        </div>
+
+        <div className="lm-filters">
+          <div className="lm-search-wrap">
+            <input
+              type="text"
+              className="lm-search"
+              placeholder="Search notifications…"
+              value={historySearch}
+              onChange={e => setHistorySearch(e.target.value)}
+              style={{ paddingLeft: 14 }}
+            />
+          </div>
+          <select
+            className="lm-select"
+            value={historyTypeFilter}
+            onChange={e => setHistoryTypeFilter(e.target.value)}
+          >
+            <option value="all">All types</option>
+            {Object.entries(STUDENT_NOTIF_TYPES).map(([key, t]) => (
+              <option key={key} value={key}>{t.label}</option>
+            ))}
+          </select>
+          {notifHistory.length > 0 && (
+            <button className="lm-btn lm-btn--danger" onClick={clearStudentNotifHistory}>Clear history</button>
+          )}
+        </div>
+
+        <div className="lm-notif-hist-panel">
+          <div className="lm-panel-title">
+            Activity Log
+            <span className="lm-notif-hist-count">{rows.length}</span>
+          </div>
+          <div className="lm-notif-hist-list">
+            {rows.length === 0 ? (
+              <div className="lm-notif-empty">
+                <div className="lm-notif-empty-title">
+                  {notifHistory.length === 0 ? 'No notifications yet' : 'No matches'}
+                </div>
+                <div className="lm-notif-empty-sub">
+                  {notifHistory.length === 0
+                    ? 'Everything that comes in will be kept here, even after it scrolls out of the bell.'
+                    : 'Try a different search term or type filter.'}
+                </div>
+              </div>
+            ) : (
+              rows.map((n, i) => {
+                const typeInfo = STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
+                const isUnread = !n.read;
+                const target   = getStudentNotifTarget(n);
+                const canOpen  = !!target;
+                return (
+                  <div
+                    key={n.id || i}
+                    className={`lm-notif-row${isUnread ? ' unread' : ''}${canOpen ? '' : ' unlinked'}`}
+                    onClick={canOpen ? () => openStudentNotification(n) : () => markStudentNotifRead(n.id)}
+                    style={canOpen ? undefined : { cursor: 'default' }}
+                  >
+                    <div
+                      className="lm-notif-row-bar"
+                      style={{ background: isUnread ? typeInfo.color : `${typeInfo.color}55` }}
+                    />
+                    <div className="lm-notif-body">
+                      <div className="lm-notif-row-top">
+                        <span className="lm-notif-type" style={{ color: isUnread ? typeInfo.color : 'var(--notif-secondary)' }}>
+                          {typeInfo.label}
+                        </span>
+                        <span className="lm-notif-time">{fmtNotifAgo(n.createdAt)}</span>
+                      </div>
+                      <div className={`lm-notif-msg${isUnread ? ' is-unread' : ''}`}>{n.message}</div>
+                    </div>
+                    {isUnread && (
+                      <div
+                        className="lm-notif-unread-dot"
+                        style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
+                      />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+
 
   /* Load profile */
   useEffect(() => {
@@ -2352,10 +3760,139 @@ export default function StudentDashboard({ user, onSignOut }) {
             <button className="sdb-hamburger" onClick={()=>setMobileOpen(v=>!v)} title="Menu">{Ic.menu}</button>
 
             {/* Bell */}
-            <button className="sdb-bell-btn" onClick={()=>navigate('history')} title="Notifications">
-              {Ic.bell}
-              <span className="sdb-bell-dot" />
-            </button>
+            <div className="lm-notif-wrap">
+              <button
+                ref={notifBtnRef}
+                className="sdb-bell-btn"
+                onClick={handleBellClick}
+                title="Notifications"
+                aria-label="Notifications"
+              >
+                {Ic.bell}
+                {unreadNotifCount > 0 && (
+                  <span className="lm-notif-badge" aria-hidden="true">
+                    {unreadNotifCount > 99 ? '99+' : unreadNotifCount}
+                  </span>
+                )}
+                {unreadNotifCount > 0 && (
+                  <span className="lm-sr-only">{unreadNotifCount} unread notification{unreadNotifCount === 1 ? '' : 's'}</span>
+                )}
+              </button>
+
+              {notifOpen && createPortal(
+                <>
+                  <div className="lm-notif-backdrop" onClick={() => setNotifOpen(false)} />
+                  {notifPanelPos && (
+                    <div className="lm-notif-caret" style={{ right: notifPanelPos.arrowRight, top: notifPanelPos.top - 8 }} />
+                  )}
+                  <div
+                    className="lm-notif-panel"
+                    style={notifPanelPos ? { top: notifPanelPos.top, right: notifPanelPos.right } : undefined}
+                    onClick={e => e.stopPropagation()}
+                  >
+                    <div className="lm-notif-head">
+                      <div className="lm-notif-head-top">
+                        <div className="lm-notif-head-title">
+                          Notifications
+                          <span
+                            className={`lm-notif-live${realtimeStatus === 'SUBSCRIBED' ? ' is-live' : ''}`}
+                            title={realtimeStatus === 'SUBSCRIBED' ? 'Live — updates instantly' : 'Reconnecting…'}
+                          >
+                            <i className="lm-notif-live-dot" />
+                            {realtimeStatus === 'SUBSCRIBED' ? 'Live' : 'Syncing'}
+                          </span>
+                        </div>
+                        {unreadNotifCount > 0 && (
+                          <button
+                            className="lm-notif-action-btn"
+                            onClick={markAllStudentNotifRead}
+                            title="Mark all as read"
+                            aria-label="Mark all notifications as read"
+                          >
+                            Mark all as read
+                          </button>
+                        )}
+                      </div>
+                      <div className="lm-notif-tabs" role="tablist" aria-label="Filter notifications">
+                        <button
+                          type="button" role="tab" aria-selected={notifTab === 'all'}
+                          className={`lm-notif-tab${notifTab === 'all' ? ' active' : ''}`}
+                          onClick={() => setNotifTab('all')}
+                        >All</button>
+                        <button
+                          type="button" role="tab" aria-selected={notifTab === 'unread'}
+                          className={`lm-notif-tab${notifTab === 'unread' ? ' active' : ''}`}
+                          onClick={() => setNotifTab('unread')}
+                        >
+                          Unread{unreadNotifCount > 0 ? ` (${unreadNotifCount > 99 ? '99+' : unreadNotifCount})` : ''}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="lm-notif-list">
+                      {visibleNotifications.length === 0 ? (
+                        <div className="lm-notif-empty">
+                          <div className="lm-notif-empty-title">
+                            {notifTab === 'unread' ? "You're all caught up" : 'No notifications yet'}
+                          </div>
+                          <div className="lm-notif-empty-sub">
+                            {notifTab === 'unread'
+                              ? 'No unread notifications right now.'
+                              : "New activity will appear here instantly — no refresh needed."}
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          {notifNewGroup.length > 0 && (
+                            <>
+                              <div className="lm-notif-section-head">
+                                <span>New</span>
+                                <button
+                                  type="button" className="lm-notif-see-all"
+                                  onClick={() => { setNotifOpen(false); setHistoryOpen(true); }}
+                                >See all →</button>
+                              </div>
+                              {notifNewGroup.map(renderStudentNotifRow)}
+                            </>
+                          )}
+                          {notifEarlierGroup.length > 0 && (
+                            <>
+                              <div className="lm-notif-section-head">
+                                <span>Earlier</span>
+                                {notifNewGroup.length === 0 && (
+                                  <button
+                                    type="button" className="lm-notif-see-all"
+                                    onClick={() => { setNotifOpen(false); setHistoryOpen(true); }}
+                                  >See all →</button>
+                                )}
+                              </div>
+                              {notifEarlierGroup.map(renderStudentNotifRow)}
+                            </>
+                          )}
+                        </>
+                      )}
+                    </div>
+
+                    <div className="lm-notif-foot">
+                      <button
+                        type="button" className="lm-notif-settings-link"
+                        onClick={() => { navigate('settings'); setNotifOpen(false); setHistoryOpen(false); }}
+                        title="Manage notification preferences"
+                      >Preferences</button>
+                      <div className="lm-notif-foot-right">
+                        {notifications.length > 0 && (
+                          <>
+                            <span className="lm-notif-foot-count">{notifications.length} of {STUDENT_NOTIF_MAX} max</span>
+                            <button className="lm-notif-clear-btn" onClick={dismissAllStudentNotif} title="Clears this dropdown only — full history stays in See all">Clear all</button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </>,
+                document.body
+              )}
+            </div>
 
             {/* Profile chip + dropdown */}
             <div ref={profileMenuRef} style={{ position:'relative' }}>
@@ -2420,7 +3957,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
         {/* ═══ MAIN ═══ */}
         <div className="sdb-main">
-          <main className="sdb-content">{content()}</main>
+          <main className="sdb-content">{historyOpen ? renderStudentNotifHistoryPage() : content()}</main>
         </div>
       </div>
 
