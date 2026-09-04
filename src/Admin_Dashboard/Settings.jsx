@@ -1,6 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/AuthContext';
+import {
+  getNotifPrefTypesForRole,
+  getNotifPrefs,
+  setNotifPref,
+  setAllNotifPrefs,
+  getNotifSoundEnabled,
+  setNotifSoundEnabled,
+} from './notificationPrefs';
+
+// This Settings page is the Librarian/Admin dashboard's settings — see the
+// `role` fallback below and NotificationsTab's usage of this constant.
+const NOTIF_SETTINGS_ROLE = 'library_manager';
 
 const CSS = `
   
@@ -258,6 +270,45 @@ const CSS = `
   .s-pill.on  { background: rgba(46,125,50,0.10); color: #2E7D32; border: 1px solid rgba(46,125,50,0.22); }
   .s-pill.off { background: rgba(139,0,0,0.08); color: #8B0000; border: 1px solid rgba(139,0,0,0.20); }
   .s-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ---------- Notification preferences ---------- */
+  .s-notif-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; margin: 22px 0 10px;
+  }
+  .s-notif-toolbar-label {
+    font-size: 11px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--text-muted); font-family: var(--font-sans);
+  }
+  .s-notif-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+  .s-notif-link {
+    background: none; border: none; cursor: pointer; padding: 2px 3px;
+    font-family: var(--font-sans); font-size: 11.5px; font-weight: 700;
+    color: var(--maroon); transition: opacity 0.15s;
+  }
+  .s-notif-link:hover { opacity: 0.65; }
+  .s-notif-sep { color: var(--border); font-size: 11px; }
+
+  .s-notif-list { display: flex; flex-direction: column; gap: 8px; }
+  .s-notif-row {
+    display: flex; align-items: center; gap: 13px;
+    padding: 12px 14px;
+    background: rgba(139,0,0,0.03);
+    border: 1px solid rgba(139,0,0,0.09);
+    border-radius: 10px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .s-notif-row:hover { background: rgba(139,0,0,0.06); border-color: rgba(139,0,0,0.16); }
+  .s-notif-icon {
+    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .s-notif-copy { flex: 1; min-width: 0; }
+  @media (max-width: 560px) {
+    .s-notif-row { gap: 10px; padding: 11px 12px; }
+    .s-notif-icon { width: 32px; height: 32px; }
+    .s-notif-toolbar { flex-wrap: wrap; }
+  }
 
   
   .s-toggle { position: relative; width: 44px; height: 24px; cursor: pointer; display: inline-block; }
@@ -907,6 +958,138 @@ function Toggle({ id, checked, onChange, disabled }) {
   );
 }
 
+// Small glyph per notification type — keys line up with Dashboard.jsx's
+// own notification-bell icon set so both places feel like one system.
+function NotifTypeIcon({ icon, color }) {
+  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 2 };
+  switch (icon) {
+    case 'book':
+      return <svg {...common} strokeWidth={1.8}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>;
+    case 'check':
+      return <svg {...common}><polyline points="20 6 9 17 4 12"/></svg>;
+    case 'cancel':
+      return <svg {...common}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
+    case 'return':
+      return <svg {...common}><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>;
+    case 'user':
+      return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>;
+    case 'scan':
+      return <svg {...common}><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/></svg>;
+    case 'alert':
+      return <svg {...common}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+    default:
+      return <svg {...common}><circle cx="12" cy="12" r="9"/></svg>;
+  }
+}
+
+function NotificationsTab({ uid, onToast }) {
+  const [prefs, setPrefs] = useState(() => getNotifPrefs(uid));
+  const [sound, setSound] = useState(() => getNotifSoundEnabled(uid));
+
+  // Only the preference toggles this dashboard (Librarian/Admin) should
+  // show — Canceled/Rejected Request, Scanner Activity, and Approved
+  // Requests are intentionally excluded (see notificationPrefs.js `roles`).
+  const visibleTypes = getNotifPrefTypesForRole(NOTIF_SETTINGS_ROLE);
+
+  useEffect(() => {
+    setPrefs(getNotifPrefs(uid));
+    setSound(getNotifSoundEnabled(uid));
+  }, [uid]);
+
+  const handleToggle = (key, label) => {
+    const next = !prefs[key];
+    setPrefs(p => ({ ...p, [key]: next }));
+    setNotifPref(uid, key, next);
+    onToast(`${label} notifications ${next ? 'enabled' : 'turned off'}.`, true);
+  };
+
+  const handleSoundToggle = () => {
+    const next = !sound;
+    setSound(next);
+    setNotifSoundEnabled(uid, next);
+    onToast(`Notification sound ${next ? 'enabled' : 'turned off'}.`, true);
+  };
+
+  const enableAll = () => {
+    setAllNotifPrefs(uid, true, NOTIF_SETTINGS_ROLE);
+    setPrefs(getNotifPrefs(uid));
+    onToast('All notification types enabled.', true);
+  };
+  const disableAll = () => {
+    setAllNotifPrefs(uid, false, NOTIF_SETTINGS_ROLE);
+    setPrefs(getNotifPrefs(uid));
+    onToast('All notification types turned off.', true);
+  };
+
+  const onCount = visibleTypes.filter(t => prefs[t.key] !== false).length;
+
+  return (
+    <div className="s-grid">
+      <div className="s-card" style={{ gridColumn: '1 / -1' }}>
+        <p className="s-card-h">Notification Preferences</p>
+        <p className="s-card-sub">
+          Choose what shows up in your notification bell, and whether a sound plays when something new comes in.
+        </p>
+
+        <div className="s-mfa-bar">
+          <div>
+            <div className="s-mfa-label">Notification Sound</div>
+            <div className="s-mfa-desc">Play a short chime for new alerts while you're on the dashboard.</div>
+          </div>
+          <div className="s-mfa-right">
+            <span className={`s-pill ${sound ? 'on' : 'off'}`}>
+              <span className="s-dot" />
+              {sound ? 'On' : 'Off'}
+            </span>
+            <Toggle id="notif-sound-toggle" checked={sound} onChange={handleSoundToggle} />
+          </div>
+        </div>
+
+        <div className="s-notif-toolbar">
+          <span className="s-notif-toolbar-label">Alert Types · {onCount}/{visibleTypes.length} on</span>
+          <div className="s-notif-toolbar-actions">
+            <button type="button" className="s-notif-link" onClick={enableAll}>Enable all</button>
+            <span className="s-notif-sep">·</span>
+            <button type="button" className="s-notif-link" onClick={disableAll}>Turn all off</button>
+          </div>
+        </div>
+
+        <div className="s-notif-list">
+          {visibleTypes.map(t => {
+            const checked = prefs[t.key] !== false;
+            return (
+              <div key={t.key} className="s-notif-row">
+                <div
+                  className="s-notif-icon"
+                  style={{
+                    background: checked ? `${t.color}22` : 'rgba(139,0,0,0.06)',
+                    border: `1px solid ${checked ? `${t.color}55` : 'rgba(139,0,0,0.14)'}`,
+                  }}
+                >
+                  <NotifTypeIcon icon={t.icon} color={checked ? t.color : '#B8A79E'} />
+                </div>
+                <div className="s-notif-copy">
+                  <div className="s-mfa-label">{t.label}</div>
+                  <div className="s-mfa-desc">{t.desc}</div>
+                </div>
+                <Toggle
+                  id={`notif-pref-${t.key}`}
+                  checked={checked}
+                  onChange={() => handleToggle(t.key, t.label)}
+                />
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="s-tip" style={{ marginTop: 18, marginBottom: 0 }}>
+          These preferences are saved on this device for your account and apply to the notification bell on your dashboard right away — no need to refresh.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToast, onRefresh }) {
   const [busy,    setBusy]    = useState(false);
   const [preview, setPreview] = useState(avatarUrl || null);
@@ -1431,6 +1614,8 @@ export default function Settings({ user, onSignOut }) {
       icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg> },
     { id: 'security', label: 'Security',
       icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
+    { id: 'notifications', label: 'Notifications',
+      icon: <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg> },
   ];
 
   return (
@@ -1448,8 +1633,9 @@ export default function Settings({ user, onSignOut }) {
         ))}
       </div>
 
-      {tab === 'profile'  && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
-      {tab === 'security' && <SecurityTab onToast={toast} />}
+      {tab === 'profile'       && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
+      {tab === 'security'      && <SecurityTab onToast={toast} />}
+      {tab === 'notifications' && <NotificationsTab uid={user?.id} onToast={toast} />}
     </div>
   );
 }

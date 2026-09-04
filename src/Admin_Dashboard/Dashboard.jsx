@@ -1,24 +1,96 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuth } from '../Login_SignUp/AuthContext';
-import { supabase } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
+import {
+  getNotifPrefs,
+  getNotifSoundEnabled,
+  NOTIF_PREFS_EVENT,
+} from './notificationPrefs';
+import {
+  getNotifHistory,
+  addNotifHistory,
+  markNotifHistoryRead,
+  markAllNotifHistoryRead,
+  clearNotifHistory,
+} from './notificationHistory';
 import './Dashboard.css';
 
 
 const NOTIF_MAX = 15; 
+// On first load, "pending requests" always show (they're still actionable
+// regardless of age). Every other type only used to silently mark existing
+// rows as "seen" and show nothing — so anything that happened before the
+// dashboard was last opened/refreshed (a new user registering, a book
+// coming back, a scan at the desk) could never show up in the bell at all.
+// This window makes those recent events (last 24h) show up on load too,
+// the same way Facebook still shows you "earlier today" activity.
+const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 
 const NOTIF_TYPES = {
-  BORROW_REQUEST:  { label: 'Borrow Request',  color: '#C9A84C',  icon: 'book'   },
-  BORROW_APPROVED: { label: 'Approved',         color: '#4CAF50',  icon: 'check'  },
-  BORROW_CANCELLED:{ label: 'Cancelled',        color: '#EF5350',  icon: 'cancel' },
-  BOOK_RETURNED:   { label: 'Returned',         color: '#42A5F5',  icon: 'return' },
-  SCANNER_ACTIVITY:{ label: 'Scanner',          color: '#AB47BC',  icon: 'scan'   },
-  SYSTEM_ALERT:    { label: 'System',           color: '#FF7043',  icon: 'alert'  },
+  BORROW_REQUEST:  { label: 'Borrow Request', color: '#B08D3E' },
+  BORROW_APPROVED: { label: 'Approved',       color: '#3F6B4A' },
+  BORROW_CANCELLED:{ label: 'Cancelled',      color: '#8B3A3A' },
+  BOOK_RETURNED:   { label: 'Returned',       color: '#3B5878' },
+  NEW_USER:        { label: 'New User',       color: '#3E6E6B' },
+  SCANNER_ACTIVITY:{ label: 'Scanner',        color: '#5C4B7A' },
+  SYSTEM_ALERT:    { label: 'System',         color: '#9C5A2E' },
+  REGISTRATION_APPROVED: { label: 'Registration Approved', color: '#3F6B4A' },
+  REGISTRATION_REJECTED: { label: 'Registration Rejected', color: '#8B3A3A' },
 };
 
 
 function buildNotification({ id, type, title, message, createdAt, extra = {} }) {
   return { id, type, title, message, createdAt, extra, read: false };
+}
+
+
+// Where a notification can take the librarian, and how precisely:
+//   'exact' — jumps straight to the specific record and highlights/scrolls
+//             to it (we have a real row id to look for).
+//   'area'  — there's no single record to point at (e.g. an approved or
+//             rejected request doesn't correspond to a fixed row anywhere
+//             once it's decided), so it opens the relevant section instead
+//             and is visibly labeled as a general link, not an exact one.
+//   null    — nothing to open at all (e.g. a system alert). These never
+//             navigate and are shown with a "No linked page" tag.
+function getNotifTarget(n) {
+  const extra = n?.extra || {};
+  switch (n?.type) {
+    case 'BORROW_REQUEST':
+      return extra.borrowId != null
+        ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'pending', focusProp: 'focusBorrowId', focusValue: extra.borrowId }
+        : null;
+    case 'BOOK_RETURNED':
+      return extra.borrowingId != null
+        ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'history', focusProp: 'focusBorrowingId', focusValue: extra.borrowingId }
+        : null;
+    case 'NEW_USER':
+      return extra.userId != null
+        ? { kind: 'exact', tab: 'users', focusProp: 'focusUserId', focusValue: extra.userId }
+        : null;
+    case 'SCANNER_ACTIVITY':
+      return extra.attendanceId != null
+        ? { kind: 'exact', tab: 'attendance', focusProp: 'focusAttendanceId', focusValue: extra.attendanceId }
+        : null;
+    case 'BORROW_APPROVED':
+    case 'BORROW_CANCELLED':
+      // The decision itself doesn't live at a fixed row anywhere in the UI
+      // (a rejected request has no borrowing record at all, and an approved
+      // one's borrowing id isn't something the notification carries) — so
+      // this can only point at the general History area, not the exact row.
+      return { kind: 'area', tab: 'bookmanage', bookManageTab: 'history' };
+    case 'REGISTRATION_APPROVED':
+    case 'REGISTRATION_REJECTED':
+      // A rejected registration has no row left anywhere (the books row is
+      // deleted the moment Super Admin rejects it), and an approved one's
+      // exact id isn't guaranteed to still be visible under any one filter
+      // — so, same as a system alert, this is informational only.
+      return null;
+    default:
+      return null; // SYSTEM_ALERT and anything unrecognized
+  }
 }
 
 
@@ -99,9 +171,139 @@ export default function Dashboard({ user, onSignOut }) {
 
 
   const [notifications, setNotifications] = useState([]);
-  const [unreadCount,   setUnreadCount]   = useState(0);
+  const [realtimeStatus, setRealtimeStatus] = useState('CONNECTING');
+
+  // Facebook-style "All / Unread" filter tabs in the bell dropdown. Purely a
+  // display filter — it never touches unreadCount or the underlying data.
+  const [notifTab, setNotifTab] = useState('all'); // 'all' | 'unread'
+
+  // SINGLE SOURCE OF TRUTH for the unread badge: derived directly from each
+  // notification's own `read` flag instead of a hand-maintained counter.
+  // Previously `unreadCount` was a separate piece of state that every call
+  // site (realtime insert, mark-read, mark-all-read, clear, initial load…)
+  // had to remember to increment/decrement in lockstep with `notifications`.
+  // Any place that forgot — or that ran in a different order than expected
+  // (e.g. a realtime event landing while a fetch was still in flight) — left
+  // the badge showing a number that didn't match reality until a full page
+  // refresh recomputed it from scratch. Deriving it here means the badge is
+  // *structurally* incapable of disagreeing with the notification list: it
+  // updates the instant `notifications` does, every time, with no manual
+  // bookkeeping anywhere else in this file.
+  const unreadCount = useMemo(
+    () => notifications.reduce((n, item) => (item.read ? n : n + 1), 0),
+    [notifications]
+  );
+
+  // Facebook-style "New" vs "Earlier" grouping — purely about *when* a
+  // notification happened, completely independent from its read/unread
+  // state (a read notification from 2 minutes ago is still "New").
+  const NOTIF_NEW_WINDOW_MS = 3 * 60 * 60 * 1000; // last 3 hours = "New"
+  const visibleNotifications = useMemo(
+    () => (notifTab === 'unread' ? notifications.filter(n => !n.read) : notifications),
+    [notifications, notifTab]
+  );
+  const notifNewGroup = useMemo(
+    () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() <= NOTIF_NEW_WINDOW_MS),
+    [visibleNotifications]
+  );
+  const notifEarlierGroup = useMemo(
+    () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() > NOTIF_NEW_WINDOW_MS),
+    [visibleNotifications]
+  );
+
+  // Full persisted notification history ("See all"), independent from the
+  // 15-item live bell list above so older activity is never lost.
+  const [notifHistory, setNotifHistory] = useState(() => getNotifHistory(user?.id));
+  const [historyOpen,  setHistoryOpen]  = useState(false);
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
+
+  // Which record (if any) a clicked notification should scroll to/highlight
+  // once its tab mounts. `nonce` forces the target tab to re-run its focus
+  // effect even if the same id is clicked again.
+  const [notifFocus, setNotifFocus] = useState({ prop: null, value: null, nonce: 0 });
+
+  // The panel is rendered through a portal straight into <body> (see
+  // handleBellClick / the render below). Root cause of the "notifications
+  // disappear / panel shows blank" bug: .lm-topbar is `position: sticky`,
+  // and .lm-notif-panel combines `backdrop-filter` with a `transform`
+  // animation — WebKit/Safari has a well-known rendering bug where that
+  // combination, nested inside a sticky/fixed ancestor, paints the panel
+  // as blank/white instead of its actual maroon background. Portaling the
+  // panel out to <body> removes it from that sticky ancestor entirely, so
+  // the bug can't trigger. React still bubbles its click events through
+  // the normal component tree, so the existing "click outside closes it"
+  // behavior keeps working unchanged.
+  const notifBtnRef  = useRef(null);
+  const [notifPanelPos, setNotifPanelPos] = useState(null);
+
+  const NOTIF_PANEL_WIDTH = 368; // keep in sync with .lm-notif-panel width in Dashboard.css
+  const NOTIF_PANEL_EDGE_GAP = 24; // fixed inset from the screen's right edge — matches where the topbar's own right padding sits, so the panel lines up with the avatar chip rather than trailing off wherever the bell happens to sit
+
+  const computeNotifPanelPos = useCallback(() => {
+    if (!notifBtnRef.current) return null;
+    if (window.innerWidth <= 560) return null; // mobile sheet is handled entirely by CSS
+    const r = notifBtnRef.current.getBoundingClientRect();
+    // Docked to the screen's right edge (like a proper side panel) instead
+    // of being tucked directly under the bell — the bell sits to the left
+    // of the avatar in the topbar, so anchoring purely to the bell's own
+    // rect left an odd gap between the panel and the actual corner of the
+    // screen where the avatar/profile chip live.
+    const right = NOTIF_PANEL_EDGE_GAP;
+    const bellCenterX = r.left + r.width / 2;
+    const rawArrowRight = (window.innerWidth - bellCenterX) - 8; // 8 = half the 16px caret
+    const arrowRight = Math.min(
+      right + NOTIF_PANEL_WIDTH - 34,   // don't overshoot the panel's left edge
+      Math.max(right + 18, rawArrowRight) // don't undershoot the panel's right edge
+    );
+    return { top: r.bottom + 14, right, arrowRight };
+  }, []);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    const onReposition = () => setNotifPanelPos(computeNotifPanelPos());
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [notifOpen, computeNotifPanelPos]);
+
   const seenIdsRef  = useRef(new Set());
+  // Ids currently represented in the `notifications` state array (the live
+  // 15-item bell list). Kept separate from `seenIdsRef` — that one tracks
+  // every row a fetch has ever looked at (including ones filtered out by
+  // notification preferences); this one tracks only what's actually in
+  // state right now, which is what de-duping *inserts* needs.
+  const seenNotifIdsInStateRef = useRef(new Set());
   const isFirstLoad = useRef(true);
+  const isFirstDecisionLoad = useRef(true);
+  const isFirstUserLoad     = useRef(true);
+
+  // Settings → Notifications preferences (which types show up / whether the
+  // chime plays). Read from localStorage and kept in a ref so the realtime
+  // callbacks below always see the latest value without re-subscribing.
+  const notifPrefsRef = useRef(getNotifPrefs(user?.id));
+  const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
+
+  useEffect(() => {
+    const syncNotifPrefs = () => {
+      notifPrefsRef.current = getNotifPrefs(user?.id);
+      notifSoundRef.current = getNotifSoundEnabled(user?.id);
+    };
+    syncNotifPrefs();
+    window.addEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+    window.addEventListener('storage', syncNotifPrefs);
+    return () => {
+      window.removeEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+      window.removeEventListener('storage', syncNotifPrefs);
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    setNotifHistory(getNotifHistory(user?.id));
+  }, [user?.id]);
 
 
   
@@ -130,22 +332,86 @@ export default function Dashboard({ user, onSignOut }) {
   const addNotifications = useCallback((incoming, isRealtime = false) => {
     if (!incoming.length) return;
 
-    setNotifications(prev => {
-      
-      const existingIds = new Set(prev.map(n => n.id));
-      const fresh = incoming.filter(n => !existingIds.has(n.id));
-      const merged = [...fresh, ...prev].slice(0, NOTIF_MAX);
-      return merged;
-    });
+    // Respect Settings → Notifications: a disabled type never enters the
+    // bell, but we still remember its id so it isn't re-evaluated later.
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] !== false);
 
-    if (isRealtime && !isFirstLoad.current) {
-      playNotifSound();
-      setUnreadCount(c => Math.min(c + incoming.filter(n => !seenIdsRef.current.has(n.id)).length, NOTIF_MAX));
+    if (allowed.length) {
+      // De-dupe against the CURRENT id set (a plain ref-tracked set the
+      // realtime effect already maintains) rather than doing this dedupe
+      // check inside the setState updater — updater functions aren't
+      // guaranteed to run synchronously, so a flag set inside one can't be
+      // safely read on the next line. `notifications` is the same
+      // de-dupe-by-id list the badge count is derived from (see
+      // `unreadCount` above), so once this setState commits the badge is
+      // automatically correct; nothing else needs to touch it.
+      const existingIds = new Set(seenNotifIdsInStateRef.current);
+      const fresh = allowed.filter(n => !existingIds.has(n.id));
+
+      if (fresh.length) {
+        fresh.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+        setNotifications(prev => [...fresh, ...prev].slice(0, NOTIF_MAX));
+        if (isRealtime && !isFirstLoad.current && notifSoundRef.current) {
+          playNotifSound();
+        }
+      }
+
+      setNotifHistory(addNotifHistory(user?.id, allowed));
     }
 
     incoming.forEach(n => seenIdsRef.current.add(n.id));
     isFirstLoad.current = false;
-  }, [playNotifSound]);
+  }, [playNotifSound, user?.id]);
+
+  // Removes notifications by id (used by realtime DELETE events — e.g. a
+  // student withdraws a pending borrow request before it's reviewed). If a
+  // removed notification was unread, the badge decrements automatically
+  // since unreadCount is derived from `notifications`.
+  const removeNotifications = useCallback((ids) => {
+    if (!ids || !ids.length) return;
+    const idSet = new Set(ids);
+    setNotifications(prev => prev.filter(n => !idSet.has(n.id)));
+    idSet.forEach(id => seenNotifIdsInStateRef.current.delete(id));
+  }, []);
+
+  // Shared by every "first load / catch-up" branch below. Uses a functional
+  // setState update so it can never race with — or get silently wiped out
+  // by — one of the other fetches (pending / decisions / new users / returns
+  // / scans) resolving at nearly the same time on page load. That race was
+  // the actual bug behind "only pending requests show up": whichever fetch's
+  // network response landed last was overwriting the notification list
+  // outright instead of merging into it, discarding everything the others
+  // had already added a moment earlier.
+  const showInitialBatch = useCallback((notifs) => {
+    if (!notifs.length) return;
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] !== false);
+    if (!allowed.length) return;
+
+    // Bug fix: a notification the person already opened/read in a previous
+    // session must stay read here too. Previously this always marked every
+    // "recent" (last 24h) item as unread on every load, so re-opening the
+    // account (or simply refreshing) would resurrect the unread badge for
+    // things already read — the persisted history (which does track read
+    // state correctly) was never consulted before counting. We look each
+    // item up by id against that persisted history and carry its read flag
+    // over before it ever reaches state or the unread counter.
+    const readIds = new Set(getNotifHistory(user?.id).filter(h => h.read).map(h => h.id));
+    const withReadState = allowed.map(n => (readIds.has(n.id) ? { ...n, read: true } : n));
+
+    const existingIds = new Set(seenNotifIdsInStateRef.current);
+    const fresh = withReadState.filter(n => !existingIds.has(n.id));
+    if (fresh.length) {
+      fresh.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+      setNotifications(prev =>
+        [...fresh, ...prev]
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, NOTIF_MAX)
+      );
+    }
+    setNotifHistory(addNotifHistory(user?.id, allowed));
+    // unreadCount is derived from `notifications` (see the useMemo near the
+    // top of the component) — nothing to update manually here.
+  }, [user?.id]);
 
   
   // Phase 9 — campus isolation: notifications should only surface borrow
@@ -176,9 +442,8 @@ export default function Dashboard({ user, onSignOut }) {
         extra:     { borrowId: r.id },
       }));
       notifs.forEach(n => seenIdsRef.current.add(n.id));
-      setNotifications(notifs.slice(0, NOTIF_MAX));
-      setUnreadCount(notifs.length);
       isFirstLoad.current = false;
+      showInitialBatch(notifs);
       return;
     }
 
@@ -196,57 +461,580 @@ export default function Dashboard({ user, onSignOut }) {
     }));
 
     addNotifications(newNotifs, isRealtime);
-  }, [addNotifications, campusId]);
+  }, [addNotifications, showInitialBatch, campusId]);
 
+
+  // Approved / rejected borrow requests — surfaces once a decision has been
+  // made (whether by this librarian or elsewhere), so "Approved Requests"
+  // and "Cancelled / Rejected" toggles in Settings have something real to
+  // switch on and off.
+  const fetchRecentDecisions = useCallback(async (isRealtime = false) => {
+    let q = supabase
+      .from('borrow_requests')
+      .select(campusId
+        ? 'id, student_name, book_title, created_at, reviewed_at, status, books!inner(campus_id)'
+        : 'id, student_name, book_title, created_at, reviewed_at, status')
+      .in('status', ['approved', 'rejected'])
+      .order('created_at', { ascending: false })
+      .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('books.campus_id', campusId);
+    const { data, error } = await q;
+
+    if (error) { console.error('[Dashboard] decisions fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstDecisionLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`borrow_dec_${r.id}_${r.status}`));
+      isFirstDecisionLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.reviewed_at || r.created_at).getTime() <= RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildNotification({
+        id:        `borrow_dec_${r.id}_${r.status}`,
+        type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+        title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+        message:   r.status === 'approved'
+          ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
+          : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
+        createdAt: r.reviewed_at || r.created_at,
+        extra:     { borrowId: r.id },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`borrow_dec_${r.id}_${r.status}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `borrow_dec_${r.id}_${r.status}`,
+      type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+      title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+      message:   r.status === 'approved'
+        ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
+        : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
+      createdAt: r.reviewed_at || r.created_at,
+      extra:     { borrowId: r.id },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, campusId]);
+
+  // New student accounts on this librarian's campus.
+  const fetchRecentNewUsers = useCallback(async (isRealtime = false) => {
+    let q = supabaseAdmin
+      .from('profiles')
+      .select('id, first_name, last_name, role, created_at, campus_id')
+      .order('created_at', { ascending: false })
+      .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('campus_id', campusId);
+    const { data, error } = await q;
+
+    if (error) { console.error('[Dashboard] new-user fetch error:', error.message); return; }
+
+    const rows = (data || []).filter(r => r.role !== 'super_admin' && r.role !== 'library_manager');
+
+    if (isFirstUserLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`new_user_${r.id}`));
+      isFirstUserLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.created_at).getTime() <= RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildNotification({
+        id:        `new_user_${r.id}`,
+        type:      'NEW_USER',
+        title:     'New User Registered',
+        message:   `${[r.first_name, r.last_name].filter(Boolean).join(' ') || 'A new student'} just created an account.`,
+        createdAt: r.created_at,
+        extra:     { userId: r.id },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`new_user_${r.id}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `new_user_${r.id}`,
+      type:      'NEW_USER',
+      title:     'New User Registered',
+      message:   `${[r.first_name, r.last_name].filter(Boolean).join(' ') || 'A new student'} just created an account.`,
+      createdAt: r.created_at,
+      extra:     { userId: r.id },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, campusId]);
+
+  // Books checked back in at the front desk. Lives in `borrowings` (not
+  // `borrow_requests`) — that table is where BookManagement's scanner flow
+  // writes `status: 'Returned'` once a copy is handed back.
+  const isFirstReturnLoad = useRef(true);
+  const fetchRecentReturns = useCallback(async (isRealtime = false) => {
+    let q = supabaseAdmin
+      .from('borrowings')
+      .select('id, student_name, book_title, returned_at, status, campus_id')
+      .eq('status', 'Returned')
+      .order('returned_at', { ascending: false })
+      .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('campus_id', campusId);
+    const { data, error } = await q;
+
+    if (error) { console.error('[Dashboard] returns fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstReturnLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`book_ret_${r.id}`));
+      isFirstReturnLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.returned_at).getTime() <= RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildNotification({
+        id:        `book_ret_${r.id}`,
+        type:      'BOOK_RETURNED',
+        title:     'Book Returned',
+        message:   `"${r.book_title || 'A book'}" was checked back in by ${r.student_name || 'a student'}.`,
+        createdAt: r.returned_at,
+        extra:     { borrowingId: r.id },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`book_ret_${r.id}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `book_ret_${r.id}`,
+      type:      'BOOK_RETURNED',
+      title:     'Book Returned',
+      message:   `"${r.book_title || 'A book'}" was checked back in by ${r.student_name || 'a student'}.`,
+      createdAt: r.returned_at,
+      extra:     { borrowingId: r.id },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, campusId]);
+
+  // Live QR check-in / check-out activity at the front desk (attendance_logs).
+  const isFirstScanLoad = useRef(true);
+  const fetchRecentScans = useCallback(async (isRealtime = false) => {
+    let q = supabase
+      .from('attendance_logs')
+      .select('id, full_name, status, time_in, campus_id')
+      .order('time_in', { ascending: false })
+      .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('campus_id', campusId);
+    const { data, error } = await q;
+
+    if (error) { console.error('[Dashboard] scan fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstScanLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`scan_${r.id}`));
+      isFirstScanLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.time_in).getTime() <= RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildNotification({
+        id:        `scan_${r.id}`,
+        type:      'SCANNER_ACTIVITY',
+        title:     'Scanner Activity',
+        message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
+        createdAt: r.time_in,
+        extra:     { attendanceId: r.id },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`scan_${r.id}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `scan_${r.id}`,
+      type:      'SCANNER_ACTIVITY',
+      title:     'Scanner Activity',
+      message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
+      createdAt: r.time_in,
+      extra:     { attendanceId: r.id },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, campusId]);
+
+  // Super Admin approval/rejection of this librarian's book registration
+  // requests. Unlike every other notification type above, these rows come
+  // from a real, persisted `notifications` table (see migration_notifications_table.sql)
+  // rather than being synthesized from an existing operational table —
+  // the decision is made on a different device (Super Admin's), and a
+  // rejection deletes the underlying `books` row outright, so there's
+  // nothing left afterward for a client-side synthesis approach to read.
+  const isFirstRegistrationLoad = useRef(true);
+  const fetchRecentRegistrationDecisions = useCallback(async (isRealtime = false) => {
+    if (!user?.id) return;
+    const { data, error } = await supabase
+      .from('notifications')
+      .select('id, type, title, message, book_title, created_at, read')
+      .eq('recipient_id', user.id)
+      .in('type', ['REGISTRATION_APPROVED', 'REGISTRATION_REJECTED'])
+      .order('created_at', { ascending: false })
+      .limit(NOTIF_MAX);
+
+    if (error) { console.error('[Dashboard] registration notif fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstRegistrationLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`reg_${r.id}`));
+      isFirstRegistrationLoad.current = false;
+      const recent = rows.filter(r => Date.now() - new Date(r.created_at).getTime() <= RECENT_WINDOW_MS);
+      const recentNotifs = recent.map(r => buildNotification({
+        id:        `reg_${r.id}`,
+        type:      r.type,
+        title:     r.title,
+        message:   r.message,
+        createdAt: r.created_at,
+        extra:     { notificationId: r.id, read: r.read },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`reg_${r.id}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `reg_${r.id}`,
+      type:      r.type,
+      title:     r.title,
+      message:   r.message,
+      createdAt: r.created_at,
+      extra:     { notificationId: r.id, read: r.read },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, user?.id]);
+
+
+  // Unique per-mount channel name — reusing a fixed string like
+  // 'dashboard-borrow-notif' causes Supabase-js to silently drop the second
+  // subscribe() when React re-invokes effects (e.g. Strict Mode's mount →
+  // unmount → mount in dev), which is one of the classic reasons realtime
+  // updates never arrive even though the code "looks" correct.
+  const channelNameRef = useRef(`dashboard-borrow-notif-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
-    fetchPendingRequests(false);
+    let cancelled = false;
+    let resubscribeTimer = null;
 
-    const ch = supabase
-      .channel('dashboard-borrow-notif')
-      .on('postgres_changes', {
-        event: 'INSERT', schema: 'public', table: 'borrow_requests',
-      }, () => fetchPendingRequests(true))
-      .on('postgres_changes', {
-        event: 'UPDATE', schema: 'public', table: 'borrow_requests',
-      }, () => fetchPendingRequests(false))
-      .subscribe();
+    const load = () => {
+      fetchPendingRequests(false);
+      fetchRecentDecisions(false);
+      fetchRecentNewUsers(false);
+      fetchRecentReturns(false);
+      fetchRecentScans(false);
+      fetchRecentRegistrationDecisions(false);
+    };
+    load();
 
-    return () => supabase.removeChannel(ch);
-  }, [fetchPendingRequests]);
+    // Instant, zero-round-trip fast path: Supabase's realtime payload already
+    // carries the full new/updated row, so for the (common) non-campus-scoped
+    // case we push a notification straight into the bell the moment the
+    // event arrives instead of waiting on a follow-up SELECT. The existing
+    // fetch* calls still run right after as a reconciliation pass (needed
+    // for campus-scoped accounts, which require the `books` join) — since
+    // addNotifications de-dupes by id, this never double-adds or double-counts.
+    let ch = null;
 
+    const subscribe = () => {
+      ch = supabase
+        .channel(channelNameRef.current)
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'borrow_requests',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && !campusId && r.status === 'pending') {
+            addNotifications([buildNotification({
+              id:        `borrow_req_${r.id}`,
+              type:      'BORROW_REQUEST',
+              title:     'Borrow Request',
+              message:   `${r.student_name || 'A student'} wants to borrow "${r.book_title || 'a book'}"`,
+              createdAt: r.created_at,
+              extra:     { borrowId: r.id },
+            })], true);
+          }
+          fetchPendingRequests(true);
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'borrow_requests',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && !campusId && (r.status === 'approved' || r.status === 'rejected')) {
+            addNotifications([buildNotification({
+              id:        `borrow_dec_${r.id}_${r.status}`,
+              type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
+              title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
+              message:   r.status === 'approved'
+                ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
+                : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
+              createdAt: r.reviewed_at || r.created_at,
+              extra:     { borrowId: r.id },
+            })], true);
+          }
+          fetchPendingRequests(false);
+          fetchRecentDecisions(true);
+        })
+        .on('postgres_changes', {
+          event: 'DELETE', schema: 'public', table: 'borrow_requests',
+        }, (payload) => {
+          // Realtime DELETE payloads only reliably carry the primary key
+          // (`old.id`), not the full row, so we just drop the matching
+          // synthesized notification rather than trying to rebuild it.
+          const oldId = payload?.old?.id;
+          if (oldId == null) return;
+          removeNotifications([`borrow_req_${oldId}`]);
+        })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'profiles',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && r.role !== 'super_admin' && r.role !== 'library_manager' && (!campusId || r.campus_id === campusId)) {
+            addNotifications([buildNotification({
+              id:        `new_user_${r.id}`,
+              type:      'NEW_USER',
+              title:     'New User Registered',
+              message:   `${[r.first_name, r.last_name].filter(Boolean).join(' ') || 'A new student'} just created an account.`,
+              createdAt: r.created_at,
+              extra:     { userId: r.id },
+            })], true);
+          }
+          fetchRecentNewUsers(true);
+        })
+        .on('postgres_changes', {
+          event: 'UPDATE', schema: 'public', table: 'borrowings',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && r.status === 'Returned' && (!campusId || r.campus_id === campusId)) {
+            addNotifications([buildNotification({
+              id:        `book_ret_${r.id}`,
+              type:      'BOOK_RETURNED',
+              title:     'Book Returned',
+              message:   `"${r.book_title || 'A book'}" was checked back in by ${r.student_name || 'a student'}.`,
+              createdAt: r.returned_at,
+              extra:     { borrowingId: r.id },
+            })], true);
+          }
+          fetchRecentReturns(true);
+        })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'attendance_logs',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && (!campusId || r.campus_id === campusId)) {
+            addNotifications([buildNotification({
+              id:        `scan_${r.id}`,
+              type:      'SCANNER_ACTIVITY',
+              title:     'Scanner Activity',
+              message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
+              createdAt: r.time_in,
+              extra:     { attendanceId: r.id },
+            })], true);
+          }
+          fetchRecentScans(true);
+        })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'notifications',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && r.recipient_id === user?.id && (r.type === 'REGISTRATION_APPROVED' || r.type === 'REGISTRATION_REJECTED')) {
+            addNotifications([buildNotification({
+              id:        `reg_${r.id}`,
+              type:      r.type,
+              title:     r.title,
+              message:   r.message,
+              createdAt: r.created_at,
+              extra:     { notificationId: r.id, read: r.read },
+            })], true);
+          }
+          fetchRecentRegistrationDecisions(false);
+        })
+        .subscribe((status) => {
+          if (cancelled) return;
+          setRealtimeStatus(status);
+          if (import.meta?.env?.DEV) console.log('[Dashboard] realtime channel status:', status);
+
+          // If the socket drops or the initial handshake fails (bad network,
+          // a proxy timing it out, the tab waking from sleep, etc.), rebuild
+          // the channel instead of silently staying dead in the water.
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+            supabase.removeChannel(ch);
+            resubscribeTimer = setTimeout(() => { if (!cancelled) subscribe(); }, 2000);
+          }
+        });
+    };
+    subscribe();
+
+    // Safety-net poll: some Supabase projects have Realtime replication
+    // switched off for a table (Database → Replication in the dashboard),
+    // in which case postgres_changes never fires no matter how correct the
+    // subscription code is. Polling quietly in the background guarantees
+    // new activity still shows up even in that case, while the realtime
+    // path above keeps things instant whenever the socket is up.
+    const pollId = setInterval(() => {
+      fetchPendingRequests(true);
+      fetchRecentDecisions(true);
+      fetchRecentNewUsers(true);
+      fetchRecentReturns(true);
+      fetchRecentScans(true);
+      fetchRecentRegistrationDecisions(true);
+    }, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+      if (resubscribeTimer) clearTimeout(resubscribeTimer);
+      if (ch) supabase.removeChannel(ch);
+    };
+  }, [fetchPendingRequests, fetchRecentDecisions, fetchRecentNewUsers, fetchRecentReturns, fetchRecentScans, fetchRecentRegistrationDecisions, addNotifications, removeNotifications, campusId, user?.id]);
+
+  // Optimistic: flip local state first (badge updates instantly), then
+  // persist. Persistence here is localStorage (notificationHistory.js) —
+  // this app's notification feed is synthesized client-side from several
+  // tables (see fetchPendingRequests/fetchRecentDecisions/etc. above), not
+  // a single Supabase `notifications` row with an `is_read` column, so
+  // there's no network round trip that can fail here the way a Supabase
+  // UPDATE could. The try/catch still guards against a full/blocked
+  // localStorage (private browsing, quota) so a storage failure can never
+  // silently desync the UI from what's persisted — it rolls the optimistic
+  // update back and surfaces it instead of leaving the badge lying.
   const markAllRead = () => {
+    const prevSnapshot = notifications;
     setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-    setUnreadCount(0);
+    try {
+      setNotifHistory(markAllNotifHistoryRead(user?.id));
+    } catch (err) {
+      console.error('[Dashboard] failed to persist mark-all-read:', err);
+      setNotifications(prevSnapshot);
+    }
   };
 
-  
   const markRead = (id) => {
+    const prevSnapshot = notifications;
     setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-    setUnreadCount(c => Math.max(0, c - 1));
+    try {
+      setNotifHistory(markNotifHistoryRead(user?.id, id));
+    } catch (err) {
+      console.error('[Dashboard] failed to persist mark-read:', err);
+      setNotifications(prevSnapshot);
+    }
   };
 
- 
   const dismissAll = () => {
+    // Clears the live bell list only — the full history ("See all") is kept
+    // so nothing actually gets lost, it's just tucked out of the dropdown.
     setNotifications([]);
-    setUnreadCount(0);
+    seenNotifIdsInStateRef.current = new Set();
     setNotifOpen(false);
+  };
+
+  const clearHistory = () => {
+    setNotifHistory(clearNotifHistory(user?.id));
+  };
+
+  // Shared by both the bell dropdown and the "See all" history modal.
+  // Marks the notification read, then — only if we actually have somewhere
+  // to send the librarian — switches tabs and hands the target component a
+  // focus id so it can scroll to and highlight the exact record. Anything
+  // without a target (see getNotifTarget) simply marks read and stops;
+  // those rows are rendered non-clickable with a "No linked page" tag so
+  // this branch is really just a safety net.
+  const openNotification = (n) => {
+    markRead(n.id);
+    const target = getNotifTarget(n);
+    if (!target) return;
+
+    if (target.tab === 'bookmanage') setBookManageTab(target.bookManageTab || 'scanner');
+    setActiveTab(target.tab);
+    if (window.location.hash !== `#${target.tab}`) window.location.hash = target.tab;
+
+    setNotifFocus({
+      prop:  target.kind === 'exact' ? target.focusProp : null,
+      value: target.kind === 'exact' ? target.focusValue : null,
+      nonce: Date.now(),
+    });
+
+    setNotifOpen(false);
+    setHistoryOpen(false);
   };
 
  
   const handleBellClick = () => {
     setNotifOpen(o => {
-      if (!o) {
-        
-        setTimeout(() => {
-          setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-          setUnreadCount(0);
-        }, 600);
-      }
-      return !o;
+      const next = !o;
+      if (next) setNotifPanelPos(computeNotifPanelPos());
+      return next;
     });
   };
  
+
+  // Shared row renderer — used for both the "New" and "Earlier" groups in
+  // the dropdown list so the markup only exists in one place.
+  const renderNotifRow = (n) => {
+    const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
+    const isUnread = !n.read;
+    const target   = getNotifTarget(n);
+    const canOpen  = !!target;
+
+    return (
+      <div
+        key={n.id}
+        className={`lm-notif-row${isUnread ? ' unread' : ''}${canOpen ? '' : ' unlinked'}`}
+        onClick={canOpen ? () => openNotification(n) : () => markRead(n.id)}
+        style={canOpen ? undefined : { cursor: 'default' }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={e => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            canOpen ? openNotification(n) : markRead(n.id);
+          }
+        }}
+      >
+        <div
+          className="lm-notif-row-bar"
+          style={{ background: isUnread ? typeInfo.color : `${typeInfo.color}55` }}
+        />
+
+        <div className="lm-notif-body">
+          <div className="lm-notif-row-top">
+            <span className="lm-notif-type" style={{ color: isUnread ? typeInfo.color : 'var(--notif-secondary)' }}>
+              {typeInfo.label}
+            </span>
+            <span className="lm-notif-time">{fmtAgo(n.createdAt)}</span>
+          </div>
+
+          <div className={`lm-notif-msg${isUnread ? ' is-unread' : ''}`}>
+            {n.message}
+          </div>
+
+          {target?.kind === 'area' && (
+            <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section — the exact record can't be pinpointed.">
+              General area only
+            </div>
+          )}
+          {!canOpen && (
+            <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
+              No linked page
+            </div>
+          )}
+        </div>
+
+        {isUnread && (
+          <div
+            className="lm-notif-unread-dot"
+            style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
+          />
+        )}
+      </div>
+    );
+  };
 
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name  || '';
@@ -261,12 +1049,14 @@ export default function Dashboard({ user, onSignOut }) {
     if (tab === 'bookmanage') setBookManageTab('scanner');
     setActiveTab(tab);
     setMobileOpen(false);
+    setHistoryOpen(false);
     if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   };
 
   const navigateFromOverview = (tab) => {
     setActiveTab(tab);
     setMobileOpen(false);
+    setHistoryOpen(false);
     if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   };
 
@@ -280,14 +1070,189 @@ export default function Dashboard({ user, onSignOut }) {
   const renderContent = () => {
     switch (activeTab) {
       case 'overview':   return <Overview onNavigate={navigateFromOverview} />;
-      case 'attendance': return <AttendanceMonitoring />;
-      case 'bookmanage': return <BookManagement initialTab={bookManageTab} />;
+      case 'attendance': return (
+        <AttendanceMonitoring
+          focusAttendanceId={notifFocus.prop === 'focusAttendanceId' ? notifFocus.value : null}
+          focusNonce={notifFocus.nonce}
+        />
+      );
+      case 'bookmanage': return (
+        <BookManagement
+          initialTab={bookManageTab}
+          focusBorrowId={notifFocus.prop === 'focusBorrowId' ? notifFocus.value : null}
+          focusBorrowingId={notifFocus.prop === 'focusBorrowingId' ? notifFocus.value : null}
+          focusNonce={notifFocus.nonce}
+        />
+      );
       case 'catalog':    return <OnlineCatalog />;
-      case 'users':      return <UserManagement />;
+      case 'users':      return (
+        <UserManagement
+          focusUserId={notifFocus.prop === 'focusUserId' ? notifFocus.value : null}
+          focusNonce={notifFocus.nonce}
+        />
+      );
       case 'reports':    return <ReportsAnalytics />;
       case 'settings':   return <Settings user={user} onSignOut={onSignOut} />;
       default:           return <Overview onNavigate={navigateFromOverview} />;
     }
+  };
+
+  // "See all" no longer opens a floating modal — it renders right here in
+  // the main content area, styled the same way every other page in the app
+  // is (module header + stat cards + filters + panel), so it reads as a
+  // real page instead of something hovering disconnected on top of the UI.
+  const renderNotifHistoryPage = () => {
+    const q = historySearch.trim().toLowerCase();
+    const rows = notifHistory.filter(n => {
+      const matchType = historyTypeFilter === 'all' || n.type === historyTypeFilter;
+      const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
+      return matchType && matchQ;
+    });
+    const unreadTotal = notifHistory.filter(n => !n.read).length;
+    const todayTotal = notifHistory.filter(n => {
+      const d = new Date(n.createdAt);
+      const now = new Date();
+      return d.toDateString() === now.toDateString();
+    }).length;
+
+    return (
+      <div className="lm-module lm-notif-hist-page">
+        <div className="lm-module-header">
+          <div>
+            <div className="lm-module-title">Notification History</div>
+            <div className="lm-module-subtitle">Every notification the bell has shown, kept locally on this device.</div>
+          </div>
+          <button className="lm-btn lm-btn--ghost" onClick={() => setHistoryOpen(false)}>
+            Back to Dashboard
+          </button>
+        </div>
+
+        <div className="lm-stats-grid">
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Total Logged</div>
+            <div className="lm-stat-value">{notifHistory.length}</div>
+            <div className="lm-stat-sub">Up to 300 kept</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Unread</div>
+            <div className="lm-stat-value">{unreadTotal}</div>
+            <div className="lm-stat-sub">Awaiting review</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Today</div>
+            <div className="lm-stat-value">{todayTotal}</div>
+            <div className="lm-stat-sub">Since midnight</div>
+          </div>
+          <div className="lm-stat-card">
+            <div className="lm-stat-label">Showing</div>
+            <div className="lm-stat-value">{rows.length}</div>
+            <div className="lm-stat-sub">Matches current filter</div>
+          </div>
+        </div>
+
+        <div className="lm-filters">
+          <div className="lm-search-wrap">
+            <input
+              type="text"
+              className="lm-search"
+              placeholder="Search notifications…"
+              value={historySearch}
+              onChange={e => setHistorySearch(e.target.value)}
+              style={{ paddingLeft: 14 }}
+            />
+          </div>
+          <select
+            className="lm-select"
+            value={historyTypeFilter}
+            onChange={e => setHistoryTypeFilter(e.target.value)}
+          >
+            <option value="all">All types</option>
+            {Object.entries(NOTIF_TYPES).map(([key, t]) => (
+              <option key={key} value={key}>{t.label}</option>
+            ))}
+          </select>
+          {notifHistory.length > 0 && (
+            <button className="lm-btn lm-btn--danger" onClick={clearHistory}>Clear history</button>
+          )}
+        </div>
+
+        <div className="lm-notif-hist-panel">
+          <div className="lm-panel-title">
+            Activity Log
+            <span className="lm-notif-hist-count">{rows.length}</span>
+          </div>
+
+          <div className="lm-notif-hist-list">
+            {rows.length === 0 ? (
+              <div className="lm-notif-empty">
+                <div className="lm-notif-empty-title">
+                  {notifHistory.length === 0 ? 'No notifications yet' : 'No matches'}
+                </div>
+                <div className="lm-notif-empty-sub">
+                  {notifHistory.length === 0
+                    ? 'Everything that comes in will be kept here, even after it scrolls out of the bell.'
+                    : 'Try a different search term or type filter.'}
+                </div>
+              </div>
+            ) : (
+              rows.map((n, i) => {
+                const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
+                const isUnread = !n.read;
+                const target   = getNotifTarget(n);
+                const canOpen  = !!target;
+
+                return (
+                  <div
+                    key={n.id || i}
+                    className={`lm-notif-row${isUnread ? ' unread' : ''}${canOpen ? '' : ' unlinked'}`}
+                    onClick={canOpen ? () => openNotification(n) : () => markRead(n.id)}
+                    style={canOpen ? undefined : { cursor: 'default' }}
+                  >
+                    <div
+                      className="lm-notif-row-bar"
+                      style={{ background: isUnread ? typeInfo.color : `${typeInfo.color}55` }}
+                    />
+
+                    <div className="lm-notif-body">
+                      <div className="lm-notif-row-top">
+                        <span className="lm-notif-type" style={{ color: isUnread ? typeInfo.color : 'rgba(122,48,48,0.55)' }}>
+                          {typeInfo.label}
+                        </span>
+                        <span className="lm-notif-time">{fmtAgo(n.createdAt)}</span>
+                      </div>
+                      <div
+                        className="lm-notif-msg"
+                        style={{ color: isUnread ? 'var(--text-primary)' : 'var(--text-muted)', fontWeight: isUnread ? 500 : 400 }}
+                      >
+                        {n.message}
+                      </div>
+                      {target?.kind === 'area' && (
+                        <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section — the exact record can't be pinpointed.">
+                          General area only
+                        </div>
+                      )}
+                      {!canOpen && (
+                        <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
+                          No linked page
+                        </div>
+                      )}
+                    </div>
+
+                    {isUnread && (
+                      <div className="lm-notif-unread-dot" style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }} />
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="lm-notif-hist-foot">
+            <span className="lm-notif-hist-foot-note">Kept locally on this device — up to 300 notifications.</span>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const sections = SECTION_LABELS.map(s => ({
@@ -486,8 +1451,9 @@ export default function Dashboard({ user, onSignOut }) {
                 <line x1="3" y1="18" x2="21" y2="18"/>
               </svg>
             </button>
-            <div className="lm-topbar-title">{LABEL_MAP[activeTab] || 'Dashboard'}</div>
+            <div className="lm-topbar-title">{historyOpen ? 'Notification History' : (LABEL_MAP[activeTab] || 'Dashboard')}</div>
             <div className="lm-breadcrumb">
+              {historyOpen ? 'Your full notification activity, saved locally on this device.' : <>
               {activeTab === 'overview'    && "Welcome back. Here's what's happening at the library today."}
               {activeTab === 'attendance'  && 'Track and manage student library attendance records.'}
               {activeTab === 'bookmanage'  && 'Manage book borrowing and returns via QR scanning.'}
@@ -495,334 +1461,176 @@ export default function Dashboard({ user, onSignOut }) {
               {activeTab === 'users'       && 'View and manage all registered library accounts.'}
               {activeTab === 'reports'     && 'View detailed reports on loans, activity, and usage.'}
               {activeTab === 'settings'    && 'Configure your account and system preferences.'}
+              </>}
             </div>
           </div>
 
           <div className="lm-topbar-right">
-            <div style={{ position: 'relative' }}>
+            <div className="lm-notif-wrap">
               <button
-                className="lm-notif-btn"
+                ref={notifBtnRef}
+                className={`lm-notif-btn${unreadCount > 0 ? ' has-unread' : ''}`}
                 onClick={handleBellClick}
                 aria-label="Notifications"
-                style={{ position: 'relative' }}
               >
                 {NavIcons.bell}
                 {unreadCount > 0 && (
-                  <span style={{
-                    position: 'absolute', top: -4, right: -4,
-                    minWidth: 17, height: 17,
-                    background: '#C9A84C',
-                    color: '#3a0000',
-                    borderRadius: 10,
-                    fontSize: 10, fontWeight: 800,
-                    fontFamily: 'var(--font-sans)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: '0 4px',
-                    border: '1.5px solid var(--cream, #FAF6EE)',
-                    lineHeight: 1,
-                    animation: 'lm-fade-in 0.2s ease',
-                  }}>
-                    {unreadCount > 9 ? '9+' : unreadCount}
+                  <span className="lm-notif-badge" aria-hidden="true">
+                    {unreadCount > 99 ? '99+' : unreadCount}
                   </span>
+                )}
+                {unreadCount > 0 && (
+                  <span className="lm-sr-only">{unreadCount} unread notification{unreadCount === 1 ? '' : 's'}</span>
                 )}
               </button>
 
-              {notifOpen && (
-                <div style={{
-                  position: 'absolute', top: 52, right: 0,
-                  width: 360,
-                  background: 'linear-gradient(160deg, #6B0000 0%, #5A0000 100%)',
-                  border: '1px solid rgba(201,168,76,0.35)',
-                  borderRadius: 16,
-                  boxShadow: '0 20px 50px rgba(0,0,0,0.55), 0 0 0 1px rgba(201,168,76,0.10)',
-                  zIndex: 200,
-                  overflow: 'hidden',
-                  animation: 'lm-fade-in 0.22s ease',
-                }}>
+              {notifOpen && createPortal(
+                <>
+                  <div
+                    className="lm-notif-backdrop"
+                    onClick={() => setNotifOpen(false)}
+                  />
+                  {notifPanelPos && (
+                    // Must be a SIBLING of .lm-notif-panel, not a child — the
+                    // panel's own entrance animation leaves a `transform`
+                    // applied to it (animation-fill-mode: both), and any
+                    // non-`none` transform on an ancestor turns it into the
+                    // positioning reference for position:fixed descendants.
+                    // Nested inside the panel, this caret's top/right were
+                    // being measured from the panel's own corner instead of
+                    // the viewport, which is why it rendered as a stray
+                    // square jammed inside the header instead of a triangle
+                    // pointing at the bell.
+                    <div className="lm-notif-caret" style={{ right: notifPanelPos.arrowRight, top: notifPanelPos.top - 8 }} />
+                  )}
+                  <div
+                    className="lm-notif-panel"
+                    style={notifPanelPos ? { top: notifPanelPos.top, right: notifPanelPos.right } : undefined}
+                    onClick={e => e.stopPropagation()}
+                  >
 
-              
-                  <div style={{
-                    padding: '14px 18px 12px',
-                    borderBottom: '1px solid rgba(201,168,76,0.20)',
-                    background: 'rgba(0,0,0,0.18)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                      
-                      <div>
-                        <div style={{
-                          fontFamily: 'var(--font-display)',
-                          fontSize: 12, fontWeight: 700,
-                          color: 'var(--gold-pale)', letterSpacing: '0.06em',
-                          textTransform: 'uppercase',
-                        }}>
-                          Notifications
-                        </div>
-                        <div style={{
-                          fontSize: 10.5, color: 'rgba(245,228,168,0.55)',
-                          fontFamily: 'var(--font-sans)', marginTop: 1,
-                        }}>
-                         
-                        </div>
+                  <div className="lm-notif-head">
+                    <div className="lm-notif-head-top">
+                      <div className="lm-notif-head-title">
+                        Notifications
+                        <span
+                          className={`lm-notif-live${realtimeStatus === 'SUBSCRIBED' ? ' is-live' : ''}`}
+                          title={realtimeStatus === 'SUBSCRIBED' ? 'Live — updates instantly' : 'Reconnecting…'}
+                        >
+                          <i className="lm-notif-live-dot" />
+                          {realtimeStatus === 'SUBSCRIBED' ? 'Live' : 'Syncing'}
+                        </span>
                       </div>
-                    </div>
-
-                    
-                    <div style={{ display: 'flex', gap: 6 }}>
                       {unreadCount > 0 && (
                         <button
+                          className="lm-notif-action-btn"
                           onClick={markAllRead}
-                          style={{
-                            background: 'rgba(201,168,76,0.12)',
-                            border: '1px solid rgba(201,168,76,0.25)',
-                            borderRadius: 8,
-                            cursor: 'pointer',
-                            fontSize: 10, color: '#C9A84C',
-                            fontFamily: 'var(--font-sans)', fontWeight: 600,
-                            padding: '4px 9px',
-                            transition: 'all 0.15s',
-                            whiteSpace: 'nowrap',
-                          }}
-                          onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.22)'; }}
-                          onMouseLeave={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)'; }}
                           title="Mark all as read"
+                          aria-label="Mark all notifications as read"
                         >
-                          Mark read
+                          Mark all as read
                         </button>
                       )}
+                    </div>
+
+                    <div className="lm-notif-tabs" role="tablist" aria-label="Filter notifications">
                       <button
-                        onClick={() => { setBookManageTab('pending'); setActiveTab('bookmanage'); setNotifOpen(false); }}
-                        style={{
-                          background: 'rgba(201,168,76,0.12)',
-                          border: '1px solid rgba(201,168,76,0.25)',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          fontSize: 10, color: '#C9A84C',
-                          fontFamily: 'var(--font-sans)', fontWeight: 600,
-                          padding: '4px 9px',
-                          transition: 'all 0.15s',
-                          whiteSpace: 'nowrap',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.22)'; }}
-                        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(201,168,76,0.12)'; }}
+                        type="button"
+                        role="tab"
+                        aria-selected={notifTab === 'all'}
+                        className={`lm-notif-tab${notifTab === 'all' ? ' active' : ''}`}
+                        onClick={() => setNotifTab('all')}
                       >
-                        View All →
+                        All
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={notifTab === 'unread'}
+                        className={`lm-notif-tab${notifTab === 'unread' ? ' active' : ''}`}
+                        onClick={() => setNotifTab('unread')}
+                      >
+                        Unread{unreadCount > 0 ? ` (${unreadCount > 99 ? '99+' : unreadCount})` : ''}
                       </button>
                     </div>
                   </div>
 
-           
-                  <div style={{
-                    maxHeight: 380,
-                    overflowY: 'auto',
-                    overflowX: 'hidden',
-                    scrollbarWidth: 'thin',
-                    scrollbarColor: 'rgba(201,168,76,0.30) rgba(0,0,0,0.15)',
-                  }}>
-                    {notifications.length === 0 ? (
-                   
-                      <div style={{
-                        padding: '40px 20px', textAlign: 'center',
-                        fontFamily: 'var(--font-sans)',
-                      }}>
-                        <div style={{
-                          width: 44, height: 44, borderRadius: '50%',
-                          background: 'rgba(201,168,76,0.10)',
-                          border: '1px solid rgba(201,168,76,0.20)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          margin: '0 auto 12px',
-                        }}>
-                          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.55)" strokeWidth="1.5">
-                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-                          </svg>
+                  <div className="lm-notif-list">
+                    {visibleNotifications.length === 0 ? (
+                      <div className="lm-notif-empty">
+                        <div className="lm-notif-empty-title">
+                          {notifTab === 'unread' ? "You're all caught up" : 'No notifications yet'}
                         </div>
-                        <div style={{ fontSize: 12.5, fontWeight: 600, color: 'rgba(245,228,168,0.70)', marginBottom: 4 }}>
-                          No notifications yet
-                        </div>
-                        <div style={{ fontSize: 11, color: 'rgba(245,228,168,0.38)' }}>
-                          Activity will appear here in real time
+                        <div className="lm-notif-empty-sub">
+                          {notifTab === 'unread'
+                            ? 'No unread notifications right now.'
+                            : "New activity will appear here instantly — no refresh needed."}
                         </div>
                       </div>
                     ) : (
-                      notifications.map((n, i) => {
-                        const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
-                        const isUnread = !n.read;
-
-                        
-                        const iconSvg = {
-                          book: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="1.8">
-                              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-                            </svg>
-                          ),
-                          check: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
-                              <polyline points="20 6 9 17 4 12"/>
-                            </svg>
-                          ),
-                          cancel: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
-                              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-                            </svg>
-                          ),
-                          return: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
-                              <polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/>
-                            </svg>
-                          ),
-                          scan: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
-                              <rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/>
-                              <path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/>
-                              <path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/>
-                            </svg>
-                          ),
-                          alert: (
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={isUnread ? typeInfo.color : 'rgba(245,228,168,0.50)'} strokeWidth="2">
-                              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                            </svg>
-                          ),
-                        }[typeInfo.icon] || iconSvg?.book;
-
-                        return (
-                          <div
-                            key={n.id || i}
-                            onClick={() => {
-                              markRead(n.id);
-                              
-                              if (n.type === 'BORROW_REQUEST' || n.type === 'BORROW_APPROVED' || n.type === 'BORROW_CANCELLED' || n.type === 'BOOK_RETURNED') {
-                                setBookManageTab('pending');
-                                setActiveTab('bookmanage');
-                              } else if (n.type === 'SCANNER_ACTIVITY') {
-                                setActiveTab('bookmanage');
-                              }
-                              setNotifOpen(false);
-                            }}
-                            style={{
-                              display: 'flex', alignItems: 'flex-start', gap: 11,
-                              padding: '11px 16px',
-                              borderBottom: '1px solid rgba(255,255,255,0.05)',
-                              cursor: 'pointer',
-                              transition: 'background 0.15s',
-                              background: isUnread ? 'rgba(201,168,76,0.07)' : 'transparent',
-                              position: 'relative',
-                            }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,168,76,0.12)'}
-                            onMouseLeave={e => e.currentTarget.style.background = isUnread ? 'rgba(201,168,76,0.07)' : 'transparent'}
-                          >
-                     
-                            {isUnread && (
-                              <div style={{
-                                position: 'absolute', left: 0, top: 0, bottom: 0,
-                                width: 3, background: `linear-gradient(180deg, ${typeInfo.color}, ${typeInfo.color}44)`,
-                                borderRadius: '0 2px 2px 0',
-                              }} />
-                            )}
-
-                     
-                            <div style={{
-                              width: 34, height: 34, borderRadius: 10, flexShrink: 0,
-                              background: isUnread ? `${typeInfo.color}22` : 'rgba(255,255,255,0.08)',
-                              border: `1px solid ${isUnread ? `${typeInfo.color}44` : 'rgba(255,255,255,0.10)'}`,
-                              display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            }}>
-                              {iconSvg}
+                      <>
+                        {notifNewGroup.length > 0 && (
+                          <>
+                            <div className="lm-notif-section-head">
+                              <span>New</span>
+                              <button
+                                type="button"
+                                className="lm-notif-see-all"
+                                onClick={() => { setNotifOpen(false); setHistoryOpen(true); }}
+                              >
+                                See all →
+                              </button>
                             </div>
-
-                   
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              
-                              <div style={{
-                                display: 'flex', alignItems: 'center',
-                                justifyContent: 'space-between', marginBottom: 2,
-                              }}>
-                                <span style={{
-                                  fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em',
-                                  textTransform: 'uppercase',
-                                  color: isUnread ? typeInfo.color : 'rgba(245,228,168,0.38)',
-                                  fontFamily: 'var(--font-sans)',
-                                }}>
-                                  {typeInfo.label}
-                                </span>
-                                <span style={{
-                                  fontSize: 9.5, color: 'rgba(245,228,168,0.38)',
-                                  fontFamily: 'var(--font-sans)',
-                                  display: 'flex', alignItems: 'center', gap: 3, flexShrink: 0,
-                                }}>
-                                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                    <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                                  </svg>
-                                  {fmtAgo(n.createdAt)}
-                                </span>
-                              </div>
-
-                    
-                              <div style={{
-                                fontSize: 11.5,
-                                fontFamily: 'var(--font-sans)',
-                                color: isUnread ? 'rgba(245,228,168,0.90)' : 'rgba(245,228,168,0.58)',
-                                lineHeight: 1.45,
-                                fontWeight: isUnread ? 500 : 400,
-                                overflow: 'hidden',
-                                display: '-webkit-box',
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: 'vertical',
-                              }}>
-                                {n.message}
-                              </div>
+                            {notifNewGroup.map(renderNotifRow)}
+                          </>
+                        )}
+                        {notifEarlierGroup.length > 0 && (
+                          <>
+                            <div className="lm-notif-section-head">
+                              <span>Earlier</span>
+                              {notifNewGroup.length === 0 && (
+                                <button
+                                  type="button"
+                                  className="lm-notif-see-all"
+                                  onClick={() => { setNotifOpen(false); setHistoryOpen(true); }}
+                                >
+                                  See all →
+                                </button>
+                              )}
                             </div>
-
-                      
-                            {isUnread && (
-                              <div style={{
-                                width: 7, height: 7, borderRadius: '50%',
-                                background: typeInfo.color,
-                                boxShadow: `0 0 8px ${typeInfo.color}99`,
-                                flexShrink: 0, marginTop: 5,
-                              }} />
-                            )}
-                          </div>
-                        );
-                      })
+                            {notifEarlierGroup.map(renderNotifRow)}
+                          </>
+                        )}
+                      </>
                     )}
                   </div>
 
-                  
-                  {notifications.length > 0 && (
-                    <div style={{
-                      padding: '9px 16px',
-                      borderTop: '1px solid rgba(201,168,76,0.20)',
-                      background: 'rgba(0,0,0,0.18)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    }}>
-                      <span style={{
-                        fontSize: 10, color: 'rgba(245,228,168,0.35)',
-                        fontFamily: 'var(--font-sans)',
-                      }}>
-                        {notifications.length} of {NOTIF_MAX} max
-                      </span>
-                      <button
-                        style={{
-                          background: 'none', border: 'none', cursor: 'pointer',
-                          fontSize: 10.5, color: 'rgba(245,228,168,0.45)',
-                          fontFamily: 'var(--font-sans)', fontWeight: 500,
-                          padding: '3px 6px', borderRadius: 6,
-                          transition: 'color 0.15s',
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.color = '#C9A84C'}
-                        onMouseLeave={e => e.currentTarget.style.color = 'rgba(245,228,168,0.45)'}
-                        onClick={dismissAll}
-                      >
-                        Clear all
-                      </button>
+                  <div className="lm-notif-foot">
+                    <button
+                      type="button"
+                      className="lm-notif-settings-link"
+                      onClick={() => { setActiveTab('settings'); setNotifOpen(false); setHistoryOpen(false); }}
+                      title="Manage notification preferences"
+                    >
+                      Preferences
+                    </button>
+                    <div className="lm-notif-foot-right">
+                      {notifications.length > 0 && (
+                        <>
+                          <span className="lm-notif-foot-count">{notifications.length} of {NOTIF_MAX} max</span>
+                          <button className="lm-notif-clear-btn" onClick={dismissAll} title="Clears this dropdown only — full history stays in See all">Clear all</button>
+                        </>
+                      )}
                     </div>
-                  )}
-                </div>
+                  </div>
+                  </div>
+                </>,
+                document.body
               )}
+
             </div>
 
-            <div className="lm-profile-chip" onClick={() => { setActiveTab('settings'); setNotifOpen(false); }}>
+            <div className="lm-profile-chip" onClick={() => { setActiveTab('settings'); setNotifOpen(false); setHistoryOpen(false); }}>
               <div className="lm-avatar" style={{ overflow: 'hidden' }}>
                 {avatarUrl
                   ? <img src={avatarUrl} alt="avatar" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
@@ -838,7 +1646,7 @@ export default function Dashboard({ user, onSignOut }) {
         </header>
 
         <main className="lm-content" onClick={() => notifOpen && setNotifOpen(false)}>
-          {renderContent()}
+          {historyOpen ? renderNotifHistoryPage() : renderContent()}
         </main>
       </div>
     </div>

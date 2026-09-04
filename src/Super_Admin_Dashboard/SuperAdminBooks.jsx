@@ -4,6 +4,7 @@ import {
   Building2, X, Hash, MapPin, User, Layers, Clock, Check, Ban,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
+import { notifyLibrariansOfRegistration } from './notifyLibrariansOfRegistration';
 
 /* ── Analog clock illustration (matches the "Nothing Pending" reference) ── */
 function AnalogClockIcon({ size = 64 }) {
@@ -634,6 +635,15 @@ export default function SuperAdminBooks() {
       if (error) throw error;
       setBooks(prev => prev.map(b => b.id === book.id ? { ...b, registration_status: 'approved' } : b));
       flashMsg('success', `"${book.title}" is now registered and live in the catalog.`);
+      // Fire-and-forget: notify every Librarian on this campus. Runs only
+      // once the update above has actually succeeded, so a failed/retried
+      // confirm never produces a duplicate notification.
+      notifyLibrariansOfRegistration({
+        campusId:  book.campus_id,
+        bookId:    book.id,
+        bookTitle: book.title,
+        decision:  'approved',
+      });
     } catch (err) {
       flashMsg('error', 'Could not confirm this book: ' + err.message);
     } finally {
@@ -659,6 +669,15 @@ export default function SuperAdminBooks() {
       if (error) throw error;
       setBooks(prev => prev.filter(b => b.id !== rejectTarget.id));
       flashMsg('success', `"${rejectTarget.title}" was rejected and removed.`);
+      // Capture title/campus BEFORE clearing rejectTarget below — the books
+      // row is already gone at this point, so this call is the only place
+      // left that still has the title available.
+      notifyLibrariansOfRegistration({
+        campusId:  rejectTarget.campus_id,
+        bookId:    rejectTarget.id,
+        bookTitle: rejectTarget.title,
+        decision:  'rejected',
+      });
       setRejectTarget(null);
     } catch (err) {
       flashMsg('error', 'Could not reject this book: ' + err.message);

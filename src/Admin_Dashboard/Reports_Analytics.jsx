@@ -2618,6 +2618,15 @@ export default function ReportsAnalytics() {
   const [txData,      setTxData]      = useState({ transactions:[] });
   const [attendData,  setAttendData]  = useState({ logs:[], byProgram:[], dailyCounts:[] });
 
+  // Data-quality warnings about inconsistent program names (see fetchData
+  // below) get re-derived on every fetch — including on every realtime
+  // postgres_changes event — so without this they'd reprint to the console
+  // on a loop as long as the tab stayed open. This tracks which exact
+  // warning text has already been logged so each distinct issue only
+  // prints once per session; if the underlying data actually changes, the
+  // warning text changes too and it prints again.
+  const warnedProgramIssuesRef = useRef(new Set());
+
 
   const fetchStats = useCallback(async () => {
     setStatsLoading(true);
@@ -2797,24 +2806,30 @@ export default function ReportsAnalytics() {
         if (!isTie) {
 
           programNameByCode[code] = winner.display;
-          console.warn(
+          const msg =
             `[Reports_Analytics] program_code "${code}" has ${totalRows} rows in ` +
             `\`programs\` with disagreeing names — using "${winner.display}" ` +
             `(${winner.count}/${totalRows} rows agree). Outlier name(s): ` +
             `${variants.slice(1).map(v=>`"${v.display}" (${v.count} row${v.count>1?'s':''})`).join(', ')}. ` +
-            `Consider fixing the outlier row(s) in Super Admin → Campuses.`
-          );
+            `Consider fixing the outlier row(s) in Super Admin → Campuses.`;
+          if (!warnedProgramIssuesRef.current.has(msg)) {
+            warnedProgramIssuesRef.current.add(msg);
+            console.warn(msg);
+          }
         } else {
 
           const alphabetical = [...variants].sort((a, b) => a.display.localeCompare(b.display));
           programNameByCode[code] = alphabetical[0].display;
-          console.warn(
+          const msg =
             `[Reports_Analytics] program_code "${code}" is tied between ` +
             `${variants.length} equally-common names in \`programs\`: ` +
             `${variants.map(v=>`"${v.display}" (${v.count})`).join(', ')}. ` +
             `Using "${alphabetical[0].display}" as a stable default — consider ` +
-            `picking the correct one and fixing the other row(s) in Super Admin → Campuses.`
-          );
+            `picking the correct one and fixing the other row(s) in Super Admin → Campuses.`;
+          if (!warnedProgramIssuesRef.current.has(msg)) {
+            warnedProgramIssuesRef.current.add(msg);
+            console.warn(msg);
+          }
         }
       });
       const resolveProgramCode = raw => {
