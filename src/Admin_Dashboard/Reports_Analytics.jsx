@@ -3085,15 +3085,17 @@ export default function ReportsAnalytics() {
   useEffect(()=>{ fetchStats(); }, [fetchStats]);
   useEffect(()=>{ fetchData();  }, [fetchData]);
 
-  // Real-time subscriptions
+
+  const channelNameRef = useRef(`ra3-rt-${Math.random().toString(36).slice(2)}`);
+
   useEffect(()=>{
-    const ch = supabase.channel('ra3-rt')
+    const ch = supabase.channel(channelNameRef.current)
       .on('postgres_changes',{event:'*',schema:'public',table:'borrow_requests'},()=>{ fetchStats(); fetchData(); })
       .on('postgres_changes',{event:'*',schema:'public',table:'borrowings'},     ()=>{ fetchStats(); fetchData(); })
       .on('postgres_changes',{event:'*',schema:'public',table:'books'},          ()=>{ fetchStats(); fetchData(); })
       .on('postgres_changes',{event:'*',schema:'public',table:'attendance_logs'},()=>{ fetchData(); })
       .subscribe();
-    return ()=>supabase.removeChannel(ch);
+    return ()=>{ supabase.removeChannel(ch); };
   },[fetchStats,fetchData]);
 
   const TABS=[

@@ -621,12 +621,15 @@ export default function Dashboard({ user, onSignOut }) {
   }, [addNotifications, showInitialBatch, user?.id]);
 
 
-  // Unique per-mount channel name — reusing a fixed string like
-  // 'dashboard-borrow-notif' causes Supabase-js to silently drop the second
-  // subscribe() when React re-invokes effects (e.g. Strict Mode's mount →
-  // unmount → mount in dev), which is one of the classic reasons realtime
-  // updates never arrive even though the code "looks" correct.
-  const channelNameRef = useRef(`dashboard-borrow-notif-${Math.random().toString(36).slice(2)}`);
+  // Unique-per-*attempt* channel name generator — NOT a ref computed once.
+  // Reusing the same topic string across retries causes Supabase-js to
+  // reuse the still-registered (already-subscribed) channel instance if the
+  // previous removeChannel() hasn't finished deregistering it yet, and
+  // chaining .on() onto an already-subscribed channel throws
+  // "cannot add postgres_changes callbacks ... after subscribe()". Minting
+  // a brand-new name every time subscribe() runs (initial mount AND every
+  // reconnect) sidesteps that race entirely.
+  const newChannelName = () => `dashboard-borrow-notif-${Math.random().toString(36).slice(2)}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -651,7 +654,7 @@ export default function Dashboard({ user, onSignOut }) {
 
     const subscribe = () => {
       ch = supabase
-        .channel(channelNameRef.current)
+        .channel(newChannelName())
         .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'borrow_requests',
         }, (payload) => {
@@ -743,8 +746,15 @@ export default function Dashboard({ user, onSignOut }) {
           // a proxy timing it out, the tab waking from sleep, etc.), rebuild
           // the channel instead of silently staying dead in the water.
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-            supabase.removeChannel(ch);
-            resubscribeTimer = setTimeout(() => { if (!cancelled) subscribe(); }, 2000);
+            const dead = ch;
+            ch = null;
+            // removeChannel() is async — wait for it to fully deregister
+            // the old topic before minting a new channel, otherwise a
+            // stale-but-still-registered channel can get reused and throw
+            // "cannot add postgres_changes callbacks ... after subscribe()".
+            Promise.resolve(supabase.removeChannel(dead)).finally(() => {
+              resubscribeTimer = setTimeout(() => { if (!cancelled) subscribe(); }, 2000);
+            });
           }
         });
     };
