@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
 import { extractAbstractText } from '../ocrClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';

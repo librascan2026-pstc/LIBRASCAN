@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 
 
 const G    = '#C9A84C';

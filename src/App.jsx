@@ -8,7 +8,8 @@ import {
 } from './constants'
 import { QR_URL, QR_SIZE, QR_RECTS } from './qrData'
 
-import { AuthProvider, useAuth }   from './Login_SignUp/AuthContext'
+import { AuthProvider }            from './Login_SignUp/AuthContext'
+import { useAuth }                 from './Login_SignUp/useAuth'
 import AuthRouter                  from './Login_SignUp/AuthRouter'
 import Dashboard                   from './Admin_Dashboard/Dashboard'
 import StudentDashboard            from './Student_Dashboard/StudentDashboard'

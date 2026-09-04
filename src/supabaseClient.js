@@ -34,6 +34,11 @@ export const supabaseAdmin = createClient(url, supabaseServiceRole || anon, {
     autoRefreshToken:   false,
     persistSession:     false,
     detectSessionInUrl: false,
+    // Distinct storage key so this client's GoTrueClient instance doesn't
+    // collide with the `supabase` client above over the same localStorage
+    // slot — that collision is what triggers the "Multiple GoTrueClient
+    // instances detected in the same browser context" warning.
+    storageKey:         'librascan-admin-auth-token',
   },
   global: {
     headers: supabaseServiceRole

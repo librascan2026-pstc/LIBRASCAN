@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import {
   getNotifPrefs,
@@ -28,13 +28,15 @@ const NOTIF_MAX = 15;
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 
+// Note: BORROW_APPROVED / BORROW_CANCELLED are intentionally absent — those
+// decisions are only ever meaningful to the student who made the request,
+// so they're never synthesized into this (Librarian) dashboard's own bell.
+// SCANNER_ACTIVITY is also absent — check-ins/outs stay attendance-only
+// records and are never turned into a notification (see Attendance tab).
 const NOTIF_TYPES = {
   BORROW_REQUEST:  { label: 'Borrow Request', color: '#B08D3E' },
-  BORROW_APPROVED: { label: 'Approved',       color: '#3F6B4A' },
-  BORROW_CANCELLED:{ label: 'Cancelled',      color: '#8B3A3A' },
   BOOK_RETURNED:   { label: 'Returned',       color: '#3B5878' },
   NEW_USER:        { label: 'New User',       color: '#3E6E6B' },
-  SCANNER_ACTIVITY:{ label: 'Scanner',        color: '#5C4B7A' },
   SYSTEM_ALERT:    { label: 'System',         color: '#9C5A2E' },
   REGISTRATION_APPROVED: { label: 'Registration Approved', color: '#3F6B4A' },
   REGISTRATION_REJECTED: { label: 'Registration Rejected', color: '#8B3A3A' },
@@ -51,45 +53,41 @@ function buildNotification({ id, type, title, message, createdAt, extra = {} }) 
 //             to it (we have a real row id to look for).
 //   'area'  — there's no single record to point at (e.g. an approved or
 //             rejected request doesn't correspond to a fixed row anywhere
-//             once it's decided), so it opens the relevant section instead
-//             and is visibly labeled as a general link, not an exact one.
-//   null    — nothing to open at all (e.g. a system alert). These never
-//             navigate and are shown with a "No linked page" tag.
+//             once it's decided), so it opens the relevant section instead.
+//   null    — reserved for truly unroutable rows; no longer used in
+//             practice (every case below now resolves to a target so
+//             every notification is clickable).
 function getNotifTarget(n) {
   const extra = n?.extra || {};
   switch (n?.type) {
     case 'BORROW_REQUEST':
       return extra.borrowId != null
         ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'pending', focusProp: 'focusBorrowId', focusValue: extra.borrowId }
-        : null;
+        : { kind: 'area', tab: 'bookmanage', bookManageTab: 'pending' };
     case 'BOOK_RETURNED':
       return extra.borrowingId != null
         ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'history', focusProp: 'focusBorrowingId', focusValue: extra.borrowingId }
-        : null;
+        : { kind: 'area', tab: 'bookmanage', bookManageTab: 'history' };
     case 'NEW_USER':
       return extra.userId != null
         ? { kind: 'exact', tab: 'users', focusProp: 'focusUserId', focusValue: extra.userId }
-        : null;
-    case 'SCANNER_ACTIVITY':
-      return extra.attendanceId != null
-        ? { kind: 'exact', tab: 'attendance', focusProp: 'focusAttendanceId', focusValue: extra.attendanceId }
-        : null;
-    case 'BORROW_APPROVED':
-    case 'BORROW_CANCELLED':
-      // The decision itself doesn't live at a fixed row anywhere in the UI
-      // (a rejected request has no borrowing record at all, and an approved
-      // one's borrowing id isn't something the notification carries) — so
-      // this can only point at the general History area, not the exact row.
-      return { kind: 'area', tab: 'bookmanage', bookManageTab: 'history' };
+        : { kind: 'area', tab: 'users' };
     case 'REGISTRATION_APPROVED':
+      // The book is live now — send the librarian straight to the Book
+      // Catalog. It shows up there automatically (Book_Catalog.jsx refetches
+      // on every `books` table change and only hides rows still 'pending'),
+      // so by the time this link is opened the title is already visible.
+      return { kind: 'area', tab: 'catalog' };
     case 'REGISTRATION_REJECTED':
       // A rejected registration has no row left anywhere (the books row is
-      // deleted the moment Super Admin rejects it), and an approved one's
-      // exact id isn't guaranteed to still be visible under any one filter
-      // — so, same as a system alert, this is informational only.
-      return null;
+      // deleted the moment Super Admin rejects it) — send the librarian to
+      // the Book Catalog, the closest relevant section.
+      return { kind: 'area', tab: 'catalog' };
     default:
-      return null; // SYSTEM_ALERT and anything unrecognized
+      // SYSTEM_ALERT and anything unrecognized — fall back to Overview.
+      // (Note: BORROW_APPROVED/BORROW_CANCELLED and SCANNER_ACTIVITY never
+      // reach here — they're not generated on this dashboard at all.)
+      return { kind: 'area', tab: 'overview' };
   }
 }
 
@@ -278,7 +276,6 @@ export default function Dashboard({ user, onSignOut }) {
   // state right now, which is what de-duping *inserts* needs.
   const seenNotifIdsInStateRef = useRef(new Set());
   const isFirstLoad = useRef(true);
-  const isFirstDecisionLoad = useRef(true);
   const isFirstUserLoad     = useRef(true);
 
   // Settings → Notifications preferences (which types show up / whether the
@@ -464,60 +461,12 @@ export default function Dashboard({ user, onSignOut }) {
   }, [addNotifications, showInitialBatch, campusId]);
 
 
-  // Approved / rejected borrow requests — surfaces once a decision has been
-  // made (whether by this librarian or elsewhere), so "Approved Requests"
-  // and "Cancelled / Rejected" toggles in Settings have something real to
-  // switch on and off.
-  const fetchRecentDecisions = useCallback(async (isRealtime = false) => {
-    let q = supabase
-      .from('borrow_requests')
-      .select(campusId
-        ? 'id, student_name, book_title, created_at, reviewed_at, status, books!inner(campus_id)'
-        : 'id, student_name, book_title, created_at, reviewed_at, status')
-      .in('status', ['approved', 'rejected'])
-      .order('created_at', { ascending: false })
-      .limit(NOTIF_MAX);
-    if (campusId) q = q.eq('books.campus_id', campusId);
-    const { data, error } = await q;
-
-    if (error) { console.error('[Dashboard] decisions fetch error:', error.message); return; }
-
-    const rows = data || [];
-
-    if (isFirstDecisionLoad.current) {
-      rows.forEach(r => seenIdsRef.current.add(`borrow_dec_${r.id}_${r.status}`));
-      isFirstDecisionLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.reviewed_at || r.created_at).getTime() <= RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildNotification({
-        id:        `borrow_dec_${r.id}_${r.status}`,
-        type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
-        title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
-        message:   r.status === 'approved'
-          ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
-          : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
-        createdAt: r.reviewed_at || r.created_at,
-        extra:     { borrowId: r.id },
-      }));
-      showInitialBatch(recentNotifs);
-      return;
-    }
-
-    const newRows = rows.filter(r => !seenIdsRef.current.has(`borrow_dec_${r.id}_${r.status}`));
-    if (!newRows.length) return;
-
-    const newNotifs = newRows.map(r => buildNotification({
-      id:        `borrow_dec_${r.id}_${r.status}`,
-      type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
-      title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
-      message:   r.status === 'approved'
-        ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
-        : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
-      createdAt: r.reviewed_at || r.created_at,
-      extra:     { borrowId: r.id },
-    }));
-
-    addNotifications(newNotifs, isRealtime);
-  }, [addNotifications, showInitialBatch, campusId]);
+  // NOTE: Approved / rejected borrow-request decisions are deliberately NOT
+  // synthesized into notifications here. Only the student who made the
+  // request should ever be told "your request was approved/rejected" —
+  // including when the librarian looking at this dashboard is the one who
+  // just made that decision themselves. That notification type is
+  // student-only and lives in StudentDashboard.jsx instead.
 
   // New student accounts on this librarian's campus.
   const fetchRecentNewUsers = useCallback(async (isRealtime = false) => {
@@ -613,51 +562,10 @@ export default function Dashboard({ user, onSignOut }) {
     addNotifications(newNotifs, isRealtime);
   }, [addNotifications, showInitialBatch, campusId]);
 
-  // Live QR check-in / check-out activity at the front desk (attendance_logs).
-  const isFirstScanLoad = useRef(true);
-  const fetchRecentScans = useCallback(async (isRealtime = false) => {
-    let q = supabase
-      .from('attendance_logs')
-      .select('id, full_name, status, time_in, campus_id')
-      .order('time_in', { ascending: false })
-      .limit(NOTIF_MAX);
-    if (campusId) q = q.eq('campus_id', campusId);
-    const { data, error } = await q;
-
-    if (error) { console.error('[Dashboard] scan fetch error:', error.message); return; }
-
-    const rows = data || [];
-
-    if (isFirstScanLoad.current) {
-      rows.forEach(r => seenIdsRef.current.add(`scan_${r.id}`));
-      isFirstScanLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.time_in).getTime() <= RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildNotification({
-        id:        `scan_${r.id}`,
-        type:      'SCANNER_ACTIVITY',
-        title:     'Scanner Activity',
-        message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
-        createdAt: r.time_in,
-        extra:     { attendanceId: r.id },
-      }));
-      showInitialBatch(recentNotifs);
-      return;
-    }
-
-    const newRows = rows.filter(r => !seenIdsRef.current.has(`scan_${r.id}`));
-    if (!newRows.length) return;
-
-    const newNotifs = newRows.map(r => buildNotification({
-      id:        `scan_${r.id}`,
-      type:      'SCANNER_ACTIVITY',
-      title:     'Scanner Activity',
-      message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
-      createdAt: r.time_in,
-      extra:     { attendanceId: r.id },
-    }));
-
-    addNotifications(newNotifs, isRealtime);
-  }, [addNotifications, showInitialBatch, campusId]);
+  // NOTE: Scanner/check-in activity (attendance_logs) is intentionally NOT
+  // turned into a notification. QR check-ins/check-outs stay attendance
+  // records only — see AttendanceMonitoring.jsx — and are never added to
+  // this dashboard's notification list or its persisted history.
 
   // Super Admin approval/rejection of this librarian's book registration
   // requests. Unlike every other notification type above, these rows come
@@ -726,10 +634,8 @@ export default function Dashboard({ user, onSignOut }) {
 
     const load = () => {
       fetchPendingRequests(false);
-      fetchRecentDecisions(false);
       fetchRecentNewUsers(false);
       fetchRecentReturns(false);
-      fetchRecentScans(false);
       fetchRecentRegistrationDecisions(false);
     };
     load();
@@ -764,22 +670,11 @@ export default function Dashboard({ user, onSignOut }) {
         })
         .on('postgres_changes', {
           event: 'UPDATE', schema: 'public', table: 'borrow_requests',
-        }, (payload) => {
-          const r = payload?.new;
-          if (r && !campusId && (r.status === 'approved' || r.status === 'rejected')) {
-            addNotifications([buildNotification({
-              id:        `borrow_dec_${r.id}_${r.status}`,
-              type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
-              title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
-              message:   r.status === 'approved'
-                ? `"${r.book_title || 'A book'}" was approved for ${r.student_name || 'a student'}.`
-                : `"${r.book_title || 'A book'}" request for ${r.student_name || 'a student'} was rejected.`,
-              createdAt: r.reviewed_at || r.created_at,
-              extra:     { borrowId: r.id },
-            })], true);
-          }
+        }, () => {
+          // A decision (approved/rejected) was made — no notification is
+          // synthesized here for the Librarian (that's student-only), we
+          // just need the pending list to drop the now-resolved request.
           fetchPendingRequests(false);
-          fetchRecentDecisions(true);
         })
         .on('postgres_changes', {
           event: 'DELETE', schema: 'public', table: 'borrow_requests',
@@ -824,22 +719,6 @@ export default function Dashboard({ user, onSignOut }) {
           fetchRecentReturns(true);
         })
         .on('postgres_changes', {
-          event: 'INSERT', schema: 'public', table: 'attendance_logs',
-        }, (payload) => {
-          const r = payload?.new;
-          if (r && (!campusId || r.campus_id === campusId)) {
-            addNotifications([buildNotification({
-              id:        `scan_${r.id}`,
-              type:      'SCANNER_ACTIVITY',
-              title:     'Scanner Activity',
-              message:   `${r.full_name || 'A student'} ${r.status === 'time-out' ? 'checked out' : 'checked in'} at the library.`,
-              createdAt: r.time_in,
-              extra:     { attendanceId: r.id },
-            })], true);
-          }
-          fetchRecentScans(true);
-        })
-        .on('postgres_changes', {
           event: 'INSERT', schema: 'public', table: 'notifications',
         }, (payload) => {
           const r = payload?.new;
@@ -879,10 +758,8 @@ export default function Dashboard({ user, onSignOut }) {
     // path above keeps things instant whenever the socket is up.
     const pollId = setInterval(() => {
       fetchPendingRequests(true);
-      fetchRecentDecisions(true);
       fetchRecentNewUsers(true);
       fetchRecentReturns(true);
-      fetchRecentScans(true);
       fetchRecentRegistrationDecisions(true);
     }, 15000);
 
@@ -892,12 +769,12 @@ export default function Dashboard({ user, onSignOut }) {
       if (resubscribeTimer) clearTimeout(resubscribeTimer);
       if (ch) supabase.removeChannel(ch);
     };
-  }, [fetchPendingRequests, fetchRecentDecisions, fetchRecentNewUsers, fetchRecentReturns, fetchRecentScans, fetchRecentRegistrationDecisions, addNotifications, removeNotifications, campusId, user?.id]);
+  }, [fetchPendingRequests, fetchRecentNewUsers, fetchRecentReturns, fetchRecentRegistrationDecisions, addNotifications, removeNotifications, campusId, user?.id]);
 
   // Optimistic: flip local state first (badge updates instantly), then
   // persist. Persistence here is localStorage (notificationHistory.js) —
   // this app's notification feed is synthesized client-side from several
-  // tables (see fetchPendingRequests/fetchRecentDecisions/etc. above), not
+  // tables (see fetchPendingRequests/fetchRecentReturns/etc. above), not
   // a single Supabase `notifications` row with an `is_read` column, so
   // there's no network round trip that can fail here the way a Supabase
   // UPDATE could. The try/catch still guards against a full/blocked
@@ -939,12 +816,11 @@ export default function Dashboard({ user, onSignOut }) {
   };
 
   // Shared by both the bell dropdown and the "See all" history modal.
-  // Marks the notification read, then — only if we actually have somewhere
-  // to send the librarian — switches tabs and hands the target component a
-  // focus id so it can scroll to and highlight the exact record. Anything
-  // without a target (see getNotifTarget) simply marks read and stops;
-  // those rows are rendered non-clickable with a "No linked page" tag so
-  // this branch is really just a safety net.
+  // Marks the notification read, then switches to the relevant tab (and,
+  // for 'exact' targets, hands the target component a focus id so it can
+  // scroll to and highlight the specific record). Every notification now
+  // resolves to a target (see getNotifTarget), so this always navigates —
+  // the `if (!target) return;` below is just a defensive fallback.
   const openNotification = (n) => {
     markRead(n.id);
     const target = getNotifTarget(n);
@@ -1014,16 +890,6 @@ export default function Dashboard({ user, onSignOut }) {
             {n.message}
           </div>
 
-          {target?.kind === 'area' && (
-            <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section — the exact record can't be pinpointed.">
-              General area only
-            </div>
-          )}
-          {!canOpen && (
-            <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
-              No linked page
-            </div>
-          )}
         </div>
 
         {isUnread && (
@@ -1226,16 +1092,6 @@ export default function Dashboard({ user, onSignOut }) {
                       >
                         {n.message}
                       </div>
-                      {target?.kind === 'area' && (
-                        <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section — the exact record can't be pinpointed.">
-                          General area only
-                        </div>
-                      )}
-                      {!canOpen && (
-                        <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
-                          No linked page
-                        </div>
-                      )}
                     </div>
 
                     {isUnread && (

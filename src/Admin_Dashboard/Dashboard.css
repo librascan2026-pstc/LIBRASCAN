@@ -3,15 +3,7 @@
 
 :root {
 
-  /* Notification dropdown palette — kept as its own small set of variables
-     (rather than reusing --maroon-mid/--maroon-deep directly everywhere)
-     so the header, the arrow/caret, and the body of the notification panel
-     always read from the exact same source values. The arrow is a flat
-     var(--notif-maroon) with no gradient/border of its own — it sits at the
-     very top edge of the header, which is *also* flat var(--notif-maroon)
-     at that edge, so the two are pixel-identical where they meet and read
-     as one continuous surface instead of a separately-colored shape glued
-     on top. */
+
   --notif-maroon:      #8B0000;
   --notif-maroon-dark: #720000;
   --notif-cream:       #FFF9F1;
@@ -996,7 +988,7 @@ a { text-decoration: none; }
   padding: 13px 18px 13px 20px;
   border-bottom: 1px solid var(--notif-border);
   cursor: pointer;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   background: transparent;
   position: relative;
   animation: lm-notif-row-in 0.28s ease both;
@@ -1006,7 +998,10 @@ a { text-decoration: none; }
   100% { opacity: 1; transform: translateX(0); }
 }
 .lm-notif-row.unread { background: var(--notif-unread); }
-.lm-notif-row:hover  { background: rgba(139,0,0,0.05); }
+.lm-notif-row:hover  {
+  background: rgba(139,0,0,0.05);
+  box-shadow: inset 2px 0 0 rgba(139,0,0,0.18);
+}
 .lm-notif-row:active { transform: scale(0.995); }
 .lm-notif-row:last-child { border-bottom: none; }
 .lm-notif-row:focus-visible {

@@ -1,7 +1,10 @@
-import { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { AuthContext } from './useAuth';
 
-const AuthContext = createContext(null);
+// useAuth() itself now lives in ./useAuth.js — this file exports the
+// AuthProvider component ONLY, which keeps it a valid React Fast Refresh
+// boundary (see the comment in useAuth.js for why that matters).
 
 export function AuthProvider({ children }) {
   const [user,    setUser]    = useState(undefined); // undefined = still loading
@@ -122,10 +125,4 @@ export function AuthProvider({ children }) {
       {children}
     </AuthContext.Provider>
   );
-}
-
-export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used inside <AuthProvider>');
-  return ctx;
 }

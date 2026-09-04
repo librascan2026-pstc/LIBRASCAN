@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 import {
   getNotifPrefTypesForRole,
   getNotifPrefs,
@@ -62,6 +62,7 @@ const CSS = `
     border-radius: 14px;
     padding: 24px 26px;
     box-shadow: 0 2px 8px rgba(80,0,0,0.07), 0 6px 24px rgba(80,0,0,0.05);
+     text-align: left;
   }
   .s-card-h {
     font-family: var(--font-sans);
@@ -69,14 +70,14 @@ const CSS = `
     font-weight: 700;
     color: var(--text-primary);
     margin: 0 0 3px 0;
-    text-align: center;
+    
   }
   .s-card-sub {
     font-size: 12px;
     color: var(--text-muted);
     line-height: 1.5;
     margin: 0 0 20px 0;
-    text-align: center;
+    
   }
   .s-line { height: 1px; background: rgba(139,0,0,0.10); margin: 18px 0; }
   .s-micro {
@@ -87,7 +88,7 @@ const CSS = `
     text-transform: uppercase;
     color: rgba(139,0,0,0.45);
     margin-bottom: 12px;
-    text-align: center;
+   
   }
 
   
@@ -289,24 +290,20 @@ const CSS = `
   .s-notif-link:hover { opacity: 0.65; }
   .s-notif-sep { color: var(--border); font-size: 11px; }
 
-  .s-notif-list { display: flex; flex-direction: column; gap: 8px; }
+  .s-notif-list { display: flex; flex-direction: column; gap: 10px; }
   .s-notif-row {
-    display: flex; align-items: center; gap: 13px;
-    padding: 12px 14px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 14px 16px;
     background: rgba(139,0,0,0.03);
     border: 1px solid rgba(139,0,0,0.09);
     border-radius: 10px;
     transition: background 0.15s, border-color 0.15s;
   }
   .s-notif-row:hover { background: rgba(139,0,0,0.06); border-color: rgba(139,0,0,0.16); }
-  .s-notif-icon {
-    width: 36px; height: 36px; border-radius: 10px; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-  }
   .s-notif-copy { flex: 1; min-width: 0; }
+  .s-notif-copy .s-mfa-label { margin-bottom: 3px; }
   @media (max-width: 560px) {
-    .s-notif-row { gap: 10px; padding: 11px 12px; }
-    .s-notif-icon { width: 32px; height: 32px; }
+    .s-notif-row { gap: 10px; padding: 12px 13px; }
     .s-notif-toolbar { flex-wrap: wrap; }
   }
 
@@ -322,6 +319,8 @@ const CSS = `
   }
   .s-toggle input:checked  ~ .s-track { background: #2E7D32; border-color: #2E7D32; }
   .s-toggle input:disabled ~ .s-track { opacity: 0.35; cursor: not-allowed; }
+  /* Notification preferences use red (on-brand) toggles instead of green. */
+  .s-toggle-red input:checked ~ .s-track { background: var(--maroon); border-color: var(--maroon); }
   .s-thumb {
     position: absolute; top: 3px; left: 3px;
     width: 16px; height: 16px; border-radius: 50%;
@@ -949,37 +948,13 @@ function PwField({ label, value, onChange, error, placeholder, autoComplete = 'n
   );
 }
 
-function Toggle({ id, checked, onChange, disabled }) {
+function Toggle({ id, checked, onChange, disabled, tone }) {
   return (
-    <label className="s-toggle" htmlFor={id}>
+    <label className={`s-toggle${tone === 'red' ? ' s-toggle-red' : ''}`} htmlFor={id}>
       <input id={id} type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
       <div className="s-track"><div className="s-thumb" /></div>
     </label>
   );
-}
-
-// Small glyph per notification type — keys line up with Dashboard.jsx's
-// own notification-bell icon set so both places feel like one system.
-function NotifTypeIcon({ icon, color }) {
-  const common = { width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none', stroke: color, strokeWidth: 2 };
-  switch (icon) {
-    case 'book':
-      return <svg {...common} strokeWidth={1.8}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>;
-    case 'check':
-      return <svg {...common}><polyline points="20 6 9 17 4 12"/></svg>;
-    case 'cancel':
-      return <svg {...common}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
-    case 'return':
-      return <svg {...common}><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>;
-    case 'user':
-      return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>;
-    case 'scan':
-      return <svg {...common}><rect x="3" y="3" width="5" height="5"/><rect x="16" y="3" width="5" height="5"/><rect x="3" y="16" width="5" height="5"/><path d="M21 16h-3a2 2 0 0 0-2 2v3"/><path d="M21 21v.01"/><path d="M12 7v3a2 2 0 0 1-2 2H7"/><path d="M3 12h.01"/><path d="M12 3h.01"/><path d="M12 16v.01"/><path d="M16 12h1"/></svg>;
-    case 'alert':
-      return <svg {...common}><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
-    default:
-      return <svg {...common}><circle cx="12" cy="12" r="9"/></svg>;
-  }
 }
 
 function NotificationsTab({ uid, onToast }) {
@@ -1037,11 +1012,8 @@ function NotificationsTab({ uid, onToast }) {
             <div className="s-mfa-desc">Play a short chime for new alerts while you're on the dashboard.</div>
           </div>
           <div className="s-mfa-right">
-            <span className={`s-pill ${sound ? 'on' : 'off'}`}>
-              <span className="s-dot" />
-              {sound ? 'On' : 'Off'}
-            </span>
-            <Toggle id="notif-sound-toggle" checked={sound} onChange={handleSoundToggle} />
+
+            <Toggle id="notif-sound-toggle" tone="red" checked={sound} onChange={handleSoundToggle} />
           </div>
         </div>
 
@@ -1059,21 +1031,13 @@ function NotificationsTab({ uid, onToast }) {
             const checked = prefs[t.key] !== false;
             return (
               <div key={t.key} className="s-notif-row">
-                <div
-                  className="s-notif-icon"
-                  style={{
-                    background: checked ? `${t.color}22` : 'rgba(139,0,0,0.06)',
-                    border: `1px solid ${checked ? `${t.color}55` : 'rgba(139,0,0,0.14)'}`,
-                  }}
-                >
-                  <NotifTypeIcon icon={t.icon} color={checked ? t.color : '#B8A79E'} />
-                </div>
                 <div className="s-notif-copy">
                   <div className="s-mfa-label">{t.label}</div>
                   <div className="s-mfa-desc">{t.desc}</div>
                 </div>
                 <Toggle
                   id={`notif-pref-${t.key}`}
+                  tone="red"
                   checked={checked}
                   onChange={() => handleToggle(t.key, t.label)}
                 />
@@ -1082,9 +1046,7 @@ function NotificationsTab({ uid, onToast }) {
           })}
         </div>
 
-        <div className="s-tip" style={{ marginTop: 18, marginBottom: 0 }}>
-          These preferences are saved on this device for your account and apply to the notification bell on your dashboard right away — no need to refresh.
-        </div>
+
       </div>
     </div>
   );

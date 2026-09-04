@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 
 
 const BORROW_LIMIT = 3; 

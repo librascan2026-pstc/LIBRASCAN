@@ -26,7 +26,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // STYLES

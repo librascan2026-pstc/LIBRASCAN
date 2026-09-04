@@ -1,13 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
-import { useAuth } from '../Login_SignUp/AuthContext';
+import { useAuth } from '../Login_SignUp/useAuth';
 
-/* ============================================================================
-   LIBRASCAN — Super Admin Settings
-   Same layout/behavior as the Librarian/Admin Settings page (Profile + Security
-   tabs, avatar upload, edit-profile form, change password, 2FA placeholder),
-   restyled with self-contained tokens so it doesn't depend on Dashboard.css.
-============================================================================ */
+
 
 const MAROON        = '#7B0000';
 const MAROON_DEEP    = '#5A0000';
@@ -1154,4 +1149,4 @@ export default function SuperAdminSettings({ user, onSignOut }) {
       <FloatingLogout onSignOut={onSignOut} />
     </div>
   );
-} 
+}

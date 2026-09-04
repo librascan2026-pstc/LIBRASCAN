@@ -6,8 +6,10 @@ import { supabase } from '../supabaseClient';
 import {
   getNotifPrefs,
   setNotifPref,
+  setAllNotifPrefs,
   getNotifPrefTypesForRole,
   getNotifSoundEnabled,
+  setNotifSoundEnabled,
   NOTIF_PREFS_EVENT,
 } from '../Admin_Dashboard/notificationPrefs';
 import {
@@ -1062,7 +1064,7 @@ button { cursor:pointer; }
   padding: 13px 18px 13px 20px;
   border-bottom: 1px solid var(--notif-border);
   cursor: pointer;
-  transition: background 0.18s ease, transform 0.18s ease;
+  transition: background 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
   background: transparent;
   position: relative;
   animation: lm-notif-row-in 0.28s ease both;
@@ -1072,7 +1074,10 @@ button { cursor:pointer; }
   100% { opacity: 1; transform: translateX(0); }
 }
 .lm-notif-row.unread { background: var(--notif-unread); }
-.lm-notif-row:hover  { background: rgba(139,0,0,0.05); }
+.lm-notif-row:hover  {
+  background: rgba(139,0,0,0.05);
+  box-shadow: inset 2px 0 0 rgba(139,0,0,0.18);
+}
 .lm-notif-row:active { transform: scale(0.995); }
 .lm-notif-row:last-child { border-bottom: none; }
 .lm-notif-row:focus-visible {
@@ -1613,17 +1618,18 @@ function buildStudentNotification({ id, type, title, message, createdAt, extra =
   return { id, type, title, message, createdAt, extra, read: false };
 }
 
-// Where a clicked notification takes the student. A rejected/approved
+// Where a clicked notification takes the student. An approved/rejected
 // request doesn't correspond to one fixed row anywhere (same reasoning as
 // Dashboard.jsx's getNotifTarget for BORROW_APPROVED/BORROW_CANCELLED), so
-// this only opens the general History tab rather than pointing at an exact record.
+// this opens the general History tab. Every type resolves to a target so
+// every notification is clickable.
 function getStudentNotifTarget(n) {
   switch (n?.type) {
     case 'BORROW_APPROVED':
     case 'BORROW_CANCELLED':
       return { kind: 'area', tab: 'history' };
     default:
-      return null; // SYSTEM_ALERT and anything unrecognized
+      return { kind: 'area', tab: 'home' }; // SYSTEM_ALERT and anything unrecognized
   }
 }
 
@@ -2145,45 +2151,58 @@ function PageCatalog({ user }) {
   const [selected,  setSelected]  = useState(null);
   const { toast, show } = useToast();
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        // Only show books that have completed the registration/approval workflow —
-        // titles still awaiting Super Admin approval must not appear to students.
-        const { data, error } = await supabase.from('books')
-          .select('*')
-          .eq('registration_status', 'approved')
-          .order('title');
-        if (error) throw error;
+  const fetchCatalog = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setLoading(true);
+    try {
+      // Only show books that have completed the registration/approval workflow —
+      // titles still awaiting Super Admin approval must not appear to students.
+      const { data, error } = await supabase.from('books')
+        .select('*')
+        .eq('registration_status', 'approved')
+        .order('title');
+      if (error) throw error;
 
-        // available_copies isn't a stored column — it's derived from book_copies,
-        // same as the Super Admin Books view.
-        const ids = (data || []).map(b => b.id);
-        let copyMap = {};
-        if (ids.length) {
-          const { data: copies } = await supabase.from('book_copies').select('book_id,status').in('book_id', ids);
-          (copies || []).forEach(c => {
-            if (!copyMap[c.book_id]) copyMap[c.book_id] = { total: 0, available: 0 };
-            copyMap[c.book_id].total += 1;
-            if (c.status === 'Available') copyMap[c.book_id].available += 1;
-          });
-        }
-        const withCopies = (data || []).map(b => {
-          const counts = copyMap[b.id];
-          const total = counts ? counts.total : (parseInt(b.copies) || 0);
-          return { ...b, copies: total, available_copies: counts ? counts.available : total };
+      // available_copies isn't a stored column — it's derived from book_copies,
+      // same as the Super Admin Books view.
+      const ids = (data || []).map(b => b.id);
+      let copyMap = {};
+      if (ids.length) {
+        const { data: copies } = await supabase.from('book_copies').select('book_id,status').in('book_id', ids);
+        (copies || []).forEach(c => {
+          if (!copyMap[c.book_id]) copyMap[c.book_id] = { total: 0, available: 0 };
+          copyMap[c.book_id].total += 1;
+          if (c.status === 'Available') copyMap[c.book_id].available += 1;
         });
+      }
+      const withCopies = (data || []).map(b => {
+        const counts = copyMap[b.id];
+        const total = counts ? counts.total : (parseInt(b.copies) || 0);
+        return { ...b, copies: total, available_copies: counts ? counts.available : total };
+      });
 
-        setBooks(withCopies);
-        if (user?.id) {
-          const { data:fv } = await supabase.from('student_favorites').select('book_id').eq('student_id',user.id);
-          setFavIds(new Set((fv||[]).map(f=>f.book_id)));
-        }
-      } catch(e){ console.error('[Catalog]',e); show('Could not load books.',true); }
-      finally { setLoading(false); }
-    })();
+      setBooks(withCopies);
+      if (user?.id) {
+        const { data:fv } = await supabase.from('student_favorites').select('book_id').eq('student_id',user.id);
+        setFavIds(new Set((fv||[]).map(f=>f.book_id)));
+      }
+    } catch(e){ console.error('[Catalog]',e); show('Could not load books.',true); }
+    finally { if (showSpinner) setLoading(false); }
   }, [user?.id]); // eslint-disable-line
+
+  useEffect(() => { fetchCatalog(true); }, [fetchCatalog]);
+
+  // Live refresh: the moment a Super Admin approves (or a librarian edits)
+  // a title, `books` changes — re-fetch quietly so a newly-approved book
+  // shows up here on its own, with no page reload needed.
+  useEffect(() => {
+    const silentRefresh = () => fetchCatalog(false);
+    const ch = supabase
+      .channel(`student-catalog-live-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, silentRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchCatalog]);
 
   const categories = [...new Set(books.map(b=>b.category||b.genre).filter(Boolean))].sort();
 
@@ -3022,10 +3041,13 @@ function PageSettings({ user, onSignOut }) {
   // separate from the `notif` state above, which only drives the three
   // unrelated email/reminder toggles further down this page.
   const [notifPrefs, setNotifPrefs] = useState(() => getNotifPrefs(user?.id));
+  const [notifSound, setNotifSound] = useState(() => getNotifSoundEnabled(user?.id));
   const notifPrefTypes = getNotifPrefTypesForRole('student');
+  const notifOnCount = notifPrefTypes.filter(t => notifPrefs[t.key] !== false).length;
 
   useEffect(() => {
     setNotifPrefs(getNotifPrefs(user?.id));
+    setNotifSound(getNotifSoundEnabled(user?.id));
   }, [user?.id]);
 
   const handleNotifPrefToggle = (key, label) => {
@@ -3033,6 +3055,24 @@ function PageSettings({ user, onSignOut }) {
     setNotifPrefs(p => ({ ...p, [key]: next }));
     setNotifPref(user?.id, key, next);
     show(`${label} notifications ${next ? 'enabled' : 'turned off'}.`);
+  };
+
+  const handleNotifSoundToggle = () => {
+    const next = !notifSound;
+    setNotifSound(next);
+    setNotifSoundEnabled(user?.id, next);
+    show(`Notification sound ${next ? 'enabled' : 'turned off'}.`);
+  };
+
+  const enableAllNotifs = () => {
+    setAllNotifPrefs(user?.id, true, 'student');
+    setNotifPrefs(getNotifPrefs(user?.id));
+    show('All notification types enabled.');
+  };
+  const disableAllNotifs = () => {
+    setAllNotifPrefs(user?.id, false, 'student');
+    setNotifPrefs(getNotifPrefs(user?.id));
+    show('All notification types turned off.');
   };
 
   const changePw = async () => {
@@ -3115,9 +3155,47 @@ function PageSettings({ user, onSignOut }) {
         <div className="sdb-panel-hdr">
           <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.bell} Notification Preferences</span>
         </div>
+
         <Toggle label="Email Notifications"  desc="Receive library updates via email"         value={notif.email}         onChange={v=>setNotif(p=>({...p,email:v}))} />
         <Toggle label="Due Date Reminders"   desc="Get reminded before your books are due"   value={notif.due_reminders} onChange={v=>setNotif(p=>({...p,due_reminders:v}))} />
         <Toggle label="New Arrivals"         desc="Notify me when new books are added"        value={notif.new_arrivals}  onChange={v=>setNotif(p=>({...p,new_arrivals:v}))} />
+
+        <div style={{ height:1, background:'rgba(139,0,0,0.10)', margin:'14px 0' }} />
+
+        {/* Notification sound — plays a short chime when a new alert arrives
+            on this dashboard, matching the Librarian's Settings page. */}
+        <Toggle
+          label="Notification Sound"
+          desc="Play a short chime whenever a new notification comes in"
+          value={notifSound}
+          onChange={handleNotifSoundToggle}
+        />
+
+        <div style={{
+          display:'flex', alignItems:'center', justifyContent:'space-between',
+          gap:10, margin:'16px 0 8px', flexWrap:'wrap',
+        }}>
+          <span style={{
+            fontFamily:'var(--font-sans)', fontSize:11, fontWeight:800,
+            letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)',
+          }}>
+            Alert Types · {notifOnCount}/{notifPrefTypes.length} on
+          </span>
+          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+            <button type="button" onClick={enableAllNotifs}
+              style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
+                fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
+              Enable all
+            </button>
+            <span style={{ color:'var(--border)', fontSize:11 }}>·</span>
+            <button type="button" onClick={disableAllNotifs}
+              style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
+                fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
+              Turn all off
+            </button>
+          </div>
+        </div>
+
         {/* Real, bell-connected preferences (Approved / Canceled-Rejected) */}
         {notifPrefTypes.map(t => (
           <Toggle
@@ -3517,16 +3595,6 @@ export default function StudentDashboard({ user, onSignOut }) {
           <div className={`lm-notif-msg${isUnread ? ' is-unread' : ''}`}>
             {n.message}
           </div>
-          {target?.kind === 'area' && (
-            <div className="lm-notif-link-tag lm-notif-link-tag--area" title="Opens the related section.">
-              General area only
-            </div>
-          )}
-          {!canOpen && (
-            <div className="lm-notif-link-tag lm-notif-link-tag--none" title="This notification isn't tied to a page it can open.">
-              No linked page
-            </div>
-          )}
         </div>
         {isUnread && (
           <div

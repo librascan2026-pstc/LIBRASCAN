@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from './AuthContext';
+import { useAuth } from './useAuth';
 import AuthLayout from './AuthLayout';
 import AuthInput from './AuthInput';
 import AuthCaptcha from './AuthCaptcha';
