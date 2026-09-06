@@ -7,6 +7,14 @@ const PSU_DOMAIN = '@pampangastateu.edu.ph';
 const FONT_BODY  = "'Crimson Pro', Georgia, serif";
 const FONT_SANS  = "'Josefin Sans', sans-serif";
 
+// Auto-generates the student's school email from their Student ID —
+// the student never types this field manually, it just follows along
+// as they type their Student ID.
+const studentNumberToEmail = (studentId) => {
+  const val = (studentId || '').trim();
+  return val ? `${val}${PSU_DOMAIN}` : '';
+};
+
 // ─── Validators ───────────────────────────────────────────────────────────────
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
@@ -380,6 +388,21 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
   // ── Field handlers ──
   const handleChange = (field) => (e) => {
     const val = e.target.value;
+
+    if (field === 'studentNumber') {
+      // Auto-generate the school email from the Student ID as it's typed —
+      // the student never touches the email field themselves.
+      const generatedEmail = studentNumberToEmail(val);
+      setForm(f => ({ ...f, studentNumber: val, email: generatedEmail }));
+      if (touched.studentNumber) {
+        setFE(fe => ({ ...fe, studentNumber: validators.studentNumber(val) }));
+      }
+      if (touched.email) {
+        setFE(fe => ({ ...fe, email: validators.email(generatedEmail) }));
+      }
+      return;
+    }
+
     setForm(f => ({ ...f, [field]: val }));
     if (touched[field]) {
       const updatedForm = { ...form, [field]: val };
@@ -395,6 +418,13 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     setTouched(t => ({ ...t, [field]: true }));
     const err = field === 'confirm' ? validators.confirm(form.confirm, form) : validators[field]?.(form[field]) ?? '';
     setFE(fe => ({ ...fe, [field]: err }));
+
+    // Keep the auto-generated email's validation in sync too, since it's
+    // derived from the Student Number rather than typed by the student.
+    if (field === 'studentNumber') {
+      setTouched(t => ({ ...t, email: true }));
+      setFE(fe => ({ ...fe, email: validators.email(form.email) }));
+    }
 
     // Live-check ID number uniqueness the moment the user leaves the field,
     // so they find out before they've filled out the rest of the form.
@@ -625,7 +655,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           </AnimatePresence>
         </div>
 
-        <Field label="Email Address" type="email" value={form.email} onChange={handleChange('email')} onBlur={handleBlur('email')} placeholder={`e.g. 2023929321${PSU_DOMAIN}`} error={fieldErrors.email} autoComplete="email" disabled={loading} />
+        <Field label="Email Address (Auto-generated)" type="email" value={form.email} onChange={() => {}} placeholder="Enter your Student Number above" error={fieldErrors.email} autoComplete="email" disabled />
         <Field label="Password" type="password" value={form.password} onChange={handleChange('password')} onBlur={handleBlur('password')} placeholder="Enter your password" error={fieldErrors.password} autoComplete="new-password" disabled={loading} />
         <StrengthBar password={form.password} />
         <Field label="Confirm Password" type="password" value={form.confirm} onChange={handleChange('confirm')} onBlur={handleBlur('confirm')} placeholder="Re-enter your password" error={fieldErrors.confirm} autoComplete="new-password" disabled={loading} />

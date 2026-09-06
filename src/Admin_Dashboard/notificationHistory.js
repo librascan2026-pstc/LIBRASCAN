@@ -9,6 +9,20 @@
 const HISTORY_PREFIX = 'librascan_notif_history_';
 const HISTORY_MAX = 300; // generous cap so localStorage doesn't grow unbounded
 
+// Historical cleanup: an earlier version of this app briefly logged QR
+// check-in/attendance scans as notifications (tagged BORROW_REQUEST,
+// message "<name> checked in at the library."). That was intentionally
+// removed — check-ins are attendance-only now (see Dashboard.jsx) — but
+// this store only ever appends/reads, it never prunes, so any copy of
+// that message already saved to a browser before the removal just sits
+// here forever, tagged as a type that's still perfectly valid today.
+// Preference filtering alone can't catch it (BORROW_REQUEST is enabled),
+// so we recognize the retired message shape directly and strip it out.
+const LEGACY_CHECKIN_PATTERN = /checked in at the library\.?\s*$/i;
+function isLegacyCheckIn(n) {
+  return typeof n?.message === 'string' && LEGACY_CHECKIN_PATTERN.test(n.message);
+}
+
 function historyKey(uid) { return `${HISTORY_PREFIX}${uid || 'guest'}`; }
 
 /** Returns the full notification history for a user, newest first. */
@@ -17,7 +31,17 @@ export function getNotifHistory(uid) {
     const raw = localStorage.getItem(historyKey(uid));
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+
+    const cleaned = parsed.filter(n => !isLegacyCheckIn(n));
+    if (cleaned.length !== parsed.length) {
+      // Self-healing: persist the pruned list so every future read (and
+      // every other tab/device sharing this store) doesn't have to keep
+      // filtering the same junk back out — and it stops eating into the
+      // 300-entry cap.
+      try { localStorage.setItem(historyKey(uid), JSON.stringify(cleaned)); } catch { /* storage unavailable */ }
+    }
+    return cleaned;
   } catch {
     return [];
   }
@@ -30,9 +54,13 @@ export function getNotifHistory(uid) {
  */
 export function addNotifHistory(uid, notifs) {
   if (!notifs || !notifs.length) return getNotifHistory(uid);
+  // Defense in depth: never let the retired check-in message shape back
+  // in, even if some future code path accidentally reintroduces it.
+  const incoming = notifs.filter(n => !isLegacyCheckIn(n));
+  if (!incoming.length) return getNotifHistory(uid);
   const existing = getNotifHistory(uid);
   const existingIds = new Set(existing.map(n => n.id));
-  const fresh = notifs.filter(n => !existingIds.has(n.id));
+  const fresh = incoming.filter(n => !existingIds.has(n.id));
   const merged = [...fresh, ...existing]
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, HISTORY_MAX);

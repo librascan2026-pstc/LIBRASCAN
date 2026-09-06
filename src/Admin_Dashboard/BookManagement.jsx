@@ -563,7 +563,7 @@ function TxRow({ tx, onClick, onDelete }) {
         boxShadow: hov ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
       }}
     >
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         {(() => {
       
           const nameField = String(tx.student_name || '');
@@ -576,22 +576,22 @@ function TxRow({ tx, onClick, onDelete }) {
             : <span style={{ fontSize:11.5, color:'#b08080', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>no ID recorded</span>;
         })()}
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <span style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>{(tx.student_name || '—').replace(/\s*\[.*?\]\s*$/, '')}</span>
         {tx.student_program && <div style={{ fontSize:10.5, color:'#9a7070', fontFamily:'var(--font-sans)', marginTop:1 }}>{tx.student_program}</div>}
       </td>
-      <td style={{ padding:'11px 14px', maxWidth:190 }}>
+      <td style={{ padding:'11px 14px', maxWidth:190, textAlign:'left' }}>
         <span style={{ fontSize:13, color:'#2a0a0a', fontFamily:'var(--font-sans)', display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{tx.book_title || '—'}</span>
         {tx.copy_label && <div style={{ fontSize:10.5, fontFamily:'monospace', color:'#9a7070', marginTop:1 }}>{tx.copy_label}</div>}
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <Badge status={tx.status} />
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <div style={{ fontSize:12, color:'#5a3030', fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>{fmtDate(tx.borrowed_at)}</div>
         <div style={{ fontSize:11, color:'#9a7070', fontFamily:'var(--font-sans)' }}>{fmtTime(tx.borrowed_at)}</div>
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         {tx.returned_at ? (
           <>
             <div style={{ fontSize:12, color:'#3a6e3a', fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>{fmtDate(tx.returned_at)}</div>
@@ -603,7 +603,7 @@ function TxRow({ tx, onClick, onDelete }) {
           </span>
         )}
       </td>
-      <td style={{ padding:'11px 14px', textAlign:'center' }} onClick={e => e.stopPropagation()}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }} onClick={e => e.stopPropagation()}>
         <button
           onMouseEnter={() => setDelHov(true)}
           onMouseLeave={() => setDelHov(false)}

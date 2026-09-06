@@ -401,7 +401,7 @@ export default function UserManagement({ onStatsRefresh }) {
     try {
       let _q = supabaseAdmin
         .from('profiles')
-        .select('id, first_name, last_name, email, role, created_at, avatar_url, campus_id')
+        .select('id, first_name, last_name, email, student_number, role, created_at, avatar_url, campus_id')
         .order('created_at', { ascending: false });
       // Phase 9: librarian only sees users from their campus
       if (campusId) _q = _q.eq('campus_id', campusId);
@@ -547,20 +547,21 @@ export default function UserManagement({ onStatsRefresh }) {
           overflow: 'auto', overflowX: 'auto', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
           WebkitOverflowScrolling: 'touch',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 520 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 620 }}>
             <colgroup>
-              <col style={{ width: '26%' }} />
-              <col style={{ width: '28%' }} />
-              <col style={{ width: '18%' }} />
+              <col style={{ width: '22%' }} />
+              <col style={{ width: '16%' }} />
+              <col style={{ width: '24%' }} />
               <col style={{ width: '14%' }} />
-              <col style={{ width: '14%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '12%' }} />
             </colgroup>
             <thead>
               <tr style={{
                 background: 'linear-gradient(135deg, #8B0000, #6B0000)',
                 borderBottom: '2px solid rgba(201,168,76,0.35)',
               }}>
-                {['Name', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
+                {['Name', 'ID Number', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
                   <th key={h} style={{
                     padding: '11px 14px', textAlign: 'left',
                     fontFamily: 'var(--font-sans)', fontSize: 10.5,
@@ -613,7 +614,7 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
         transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{
             width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
@@ -637,20 +638,23 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
           </span>
         </div>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.student_number || '—'}</span>
+      </td>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.email || '—'}</span>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <RoleBadge role={u.role} />
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
           {u.created_at
             ? new Date(u.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
             : '—'}
         </span>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle' }}>
+      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <ActionBtn variant="edit" onClick={onEdit}>
             {Icon.edit(12)} Edit

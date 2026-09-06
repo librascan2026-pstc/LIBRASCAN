@@ -651,7 +651,7 @@ const RA_STYLES = `
   .ra-table thead th.sorted { color:#F5E4A8; }
   .ra-table tbody tr { border-bottom:1px solid rgba(139,0,0,0.07); transition:background var(--ease); }
   .ra-table tbody tr:hover { background:rgba(139,0,0,0.04); }
-  .ra-table tbody td { padding:9px 13px; color:var(--text-secondary); vertical-align:middle; }
+  .ra-table tbody td { padding:9px 13px; color:var(--text-secondary); vertical-align:middle; text-align:left; }
   .ra-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
   .ra-table-wrap::-webkit-scrollbar { height:4px; }
   .ra-table-wrap::-webkit-scrollbar-track { background:rgba(139,0,0,0.04); }

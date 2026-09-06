@@ -170,12 +170,12 @@ function RequestRow({ req, onApprove, onReject }) {
         boxShadow: hov ? 'inset 3px 0 0 0 #C9A84C' : 'inset 3px 0 0 0 transparent',
       }}
     >
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <span style={{ fontSize:12, fontFamily:'monospace', color:'#7a4040', fontWeight:600 }}>
           {req.student_number || req.student_id || '—'}
         </span>
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <div style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)' }}>
           {req.student_name || '—'}
         </div>
@@ -185,7 +185,7 @@ function RequestRow({ req, onApprove, onReject }) {
           </div>
         )}
       </td>
-      <td style={{ padding:'11px 14px', maxWidth:200 }}>
+      <td style={{ padding:'11px 14px', maxWidth:200, textAlign:'left' }}>
         <div style={{ fontSize:13, color:'#2a0a0a', fontFamily:'var(--font-sans)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
           {req.book_title || '—'}
         </div>
@@ -195,17 +195,17 @@ function RequestRow({ req, onApprove, onReject }) {
           </div>
         )}
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <div style={{ fontSize:12, color:'#5a3030', fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>
           {fmtFull(req.created_at)}
         </div>
       </td>
-      <td style={{ padding:'11px 14px' }}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }}>
         <StatusPill status={req.status} />
       </td>
-      <td style={{ padding:'11px 14px', textAlign:'center' }} onClick={e => e.stopPropagation()}>
+      <td style={{ padding:'11px 14px', textAlign:'left' }} onClick={e => e.stopPropagation()}>
         {isPending ? (
-          <div style={{ display:'flex', gap:7, justifyContent:'center' }}>
+          <div style={{ display:'flex', gap:7, justifyContent:'flex-start' }}>
         
             <button
               onClick={() => onApprove(req)}

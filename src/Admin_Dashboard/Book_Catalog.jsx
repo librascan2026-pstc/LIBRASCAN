@@ -12,7 +12,6 @@ const SHELF_LOCATIONS = [
   'Filipiniana Section',
   'Circulation Section',
   'Reference Section',
-  'Thesis/Capstone',
   'Online Book Section',
 ];
 
@@ -23,7 +22,6 @@ const GENRES = [
   'Technology',
   'History',
   'Education',
-  'Thesis/Capstone',
   'Others',
 ];
 
@@ -1977,7 +1975,7 @@ export default function Book_Catalog() {
                 }}>
                   {['Book Title', 'Authors', 'ISBN', 'Copies', 'Submitted', 'Status', 'Action'].map((h, i) => (
                     <th key={h} style={{
-                      padding: '13px 16px', textAlign: i === 3 ? 'center' : 'left',
+                      padding: '13px 16px', textAlign: 'left',
                       fontFamily: 'var(--font-sans)', fontSize: 11,
                       fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
                       color: '#F5E4A8', whiteSpace: 'nowrap',
@@ -2027,7 +2025,7 @@ export default function Book_Catalog() {
               }}>
                 {['Book Title', 'Authors', 'ISBN', 'Copies', 'Status', 'Action'].map((h, i) => (
                   <th key={h} style={{
-                    padding: '13px 16px', textAlign: i === 3 ? 'center' : 'left',
+                    padding: '13px 16px', textAlign: 'left',
                     fontFamily: 'var(--font-sans)', fontSize: 11,
                     fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
                     color: '#F5E4A8', whiteSpace: 'nowrap',
@@ -2092,7 +2090,7 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
         cursor: 'pointer', transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '11px 16px', maxWidth: 240 }}>
+      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
             <img src={book.cover_image_url} alt=""
@@ -2120,19 +2118,19 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           </div>
         </div>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{
           fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           display: 'block', maxWidth: 160,
         }}>{book.authors || '—'}</span>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
           {book.isbn || '—'}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         {(() => {
           const total = parseInt(book.copies) ?? 0;
           const avail = book.available_copies !== null && book.available_copies !== undefined
@@ -2146,10 +2144,10 @@ function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
           );
         })()}
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <StatusBadge status={book.status} />
       </td>
-      <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }} onClick={e => e.stopPropagation()}>
         <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
           <ActionBtn variant="edit" onClick={onEdit}>{Ic.edit} Edit</ActionBtn>
           <ActionBtn variant="delete" onClick={onDelete}>{Ic.trash}</ActionBtn>
@@ -2175,7 +2173,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
         cursor: 'pointer', transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '11px 16px', maxWidth: 240 }}>
+      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
             <img src={book.cover_image_url} alt=""
@@ -2200,27 +2198,27 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
           }}>{book.title}</div>
         </div>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{
           fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           display: 'block', maxWidth: 160,
         }}>{book.authors || '—'}</span>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
           {book.isbn || '—'}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
           {parseInt(book.copies) || 0}
         </span>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{submitted}</span>
       </td>
-      <td style={{ padding: '11px 16px' }}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
           padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
@@ -2231,7 +2229,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
           Awaiting Confirmation
         </span>
       </td>
-      <td style={{ padding: '11px 16px' }} onClick={e => e.stopPropagation()}>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }} onClick={e => e.stopPropagation()}>
         <ActionBtn variant="delete" onClick={onWithdraw}>{Ic.trash} Withdraw</ActionBtn>
       </td>
     </tr>

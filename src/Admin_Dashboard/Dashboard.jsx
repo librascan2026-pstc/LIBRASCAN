@@ -175,6 +175,37 @@ export default function Dashboard({ user, onSignOut }) {
   // display filter — it never touches unreadCount or the underlying data.
   const [notifTab, setNotifTab] = useState('all'); // 'all' | 'unread'
 
+  // Settings → Notifications preferences (which types show up / whether the
+  // chime plays). Read from localStorage and kept in a ref so the realtime
+  // callbacks below always see the latest value without re-subscribing.
+  // Declared here (ahead of visibleNotifications below) because that memo
+  // reads notifPrefsRef/prefsVersion during this same render pass — hooks
+  // execute top-to-bottom, so a `const`/`useState` referenced before its own
+  // declaration line throws a "before initialization" error.
+  const notifPrefsRef = useRef(getNotifPrefs(user?.id));
+  const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
+  // Bumped every time prefs change so memoized lists derived from
+  // notifPrefsRef (a plain ref, which doesn't trigger re-renders on its
+  // own) actually recompute — otherwise toggling a preference mid-session
+  // wouldn't hide/show anything already sitting in `notifications` until
+  // some unrelated state change happened to force a re-render.
+  const [prefsVersion, setPrefsVersion] = useState(0);
+
+  useEffect(() => {
+    const syncNotifPrefs = () => {
+      notifPrefsRef.current = getNotifPrefs(user?.id);
+      notifSoundRef.current = getNotifSoundEnabled(user?.id);
+      setPrefsVersion(v => v + 1);
+    };
+    syncNotifPrefs();
+    window.addEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+    window.addEventListener('storage', syncNotifPrefs);
+    return () => {
+      window.removeEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
+      window.removeEventListener('storage', syncNotifPrefs);
+    };
+  }, [user?.id]);
+
   // SINGLE SOURCE OF TRUTH for the unread badge: derived directly from each
   // notification's own `read` flag instead of a hand-maintained counter.
   // Previously `unreadCount` was a separate piece of state that every call
@@ -196,10 +227,17 @@ export default function Dashboard({ user, onSignOut }) {
   // notification happened, completely independent from its read/unread
   // state (a read notification from 2 minutes ago is still "New").
   const NOTIF_NEW_WINDOW_MS = 3 * 60 * 60 * 1000; // last 3 hours = "New"
-  const visibleNotifications = useMemo(
-    () => (notifTab === 'unread' ? notifications.filter(n => !n.read) : notifications),
-    [notifications, notifTab]
-  );
+  const visibleNotifications = useMemo(() => {
+    // Only ever show types currently enabled in Settings → Notifications.
+    // Using a strict "=== true" check (instead of the old "!== false")
+    // means a type with no entry in prefs at all — a disabled type, or a
+    // legacy/retired type that no longer has a toggle — is excluded by
+    // default instead of silently passing through.
+    const prefs = notifPrefsRef.current;
+    const enabled = notifications.filter(n => prefs[n.type] === true);
+    return notifTab === 'unread' ? enabled.filter(n => !n.read) : enabled;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications, notifTab, prefsVersion]);
   const notifNewGroup = useMemo(
     () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() <= NOTIF_NEW_WINDOW_MS),
     [visibleNotifications]
@@ -278,26 +316,6 @@ export default function Dashboard({ user, onSignOut }) {
   const isFirstLoad = useRef(true);
   const isFirstUserLoad     = useRef(true);
 
-  // Settings → Notifications preferences (which types show up / whether the
-  // chime plays). Read from localStorage and kept in a ref so the realtime
-  // callbacks below always see the latest value without re-subscribing.
-  const notifPrefsRef = useRef(getNotifPrefs(user?.id));
-  const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
-
-  useEffect(() => {
-    const syncNotifPrefs = () => {
-      notifPrefsRef.current = getNotifPrefs(user?.id);
-      notifSoundRef.current = getNotifSoundEnabled(user?.id);
-    };
-    syncNotifPrefs();
-    window.addEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
-    window.addEventListener('storage', syncNotifPrefs);
-    return () => {
-      window.removeEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
-      window.removeEventListener('storage', syncNotifPrefs);
-    };
-  }, [user?.id]);
-
   useEffect(() => {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
@@ -331,7 +349,10 @@ export default function Dashboard({ user, onSignOut }) {
 
     // Respect Settings → Notifications: a disabled type never enters the
     // bell, but we still remember its id so it isn't re-evaluated later.
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] !== false);
+    // Strict opt-in ("=== true") rather than "!== false" — a type absent
+    // from prefs entirely (disabled, or a retired/legacy type with no
+    // toggle at all) must never be treated as allowed.
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true);
 
     if (allowed.length) {
       // De-dupe against the CURRENT id set (a plain ref-tracked set the
@@ -381,7 +402,7 @@ export default function Dashboard({ user, onSignOut }) {
   // had already added a moment earlier.
   const showInitialBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] !== false);
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true);
     if (!allowed.length) return;
 
     // Bug fix: a notification the person already opened/read in a previous
@@ -978,14 +999,26 @@ export default function Dashboard({ user, onSignOut }) {
   // is (module header + stat cards + filters + panel), so it reads as a
   // real page instead of something hovering disconnected on top of the UI.
   const renderNotifHistoryPage = () => {
+    // Preferences can change at any time (including from a different tab —
+    // see the 'storage' listener above), so read fresh here rather than
+    // trusting a value captured earlier. Anything currently disabled — or
+    // any type with no toggle at all (a retired/legacy type) — is filtered
+    // out of the persisted history view entirely, not just kept from being
+    // added going forward. This is what actually hides old, no-longer-
+    // supported entries (e.g. past library check-in activity) that were
+    // saved before that type was removed and would otherwise sit here
+    // forever with no way to turn them off.
+    const currentPrefs = getNotifPrefs(user?.id);
+    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true);
+
     const q = historySearch.trim().toLowerCase();
-    const rows = notifHistory.filter(n => {
+    const rows = enabledHistory.filter(n => {
       const matchType = historyTypeFilter === 'all' || n.type === historyTypeFilter;
       const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
       return matchType && matchQ;
     });
-    const unreadTotal = notifHistory.filter(n => !n.read).length;
-    const todayTotal = notifHistory.filter(n => {
+    const unreadTotal = enabledHistory.filter(n => !n.read).length;
+    const todayTotal = enabledHistory.filter(n => {
       const d = new Date(n.createdAt);
       const now = new Date();
       return d.toDateString() === now.toDateString();
@@ -1006,7 +1039,7 @@ export default function Dashboard({ user, onSignOut }) {
         <div className="lm-stats-grid">
           <div className="lm-stat-card">
             <div className="lm-stat-label">Total Logged</div>
-            <div className="lm-stat-value">{notifHistory.length}</div>
+            <div className="lm-stat-value">{enabledHistory.length}</div>
             <div className="lm-stat-sub">Up to 300 kept</div>
           </div>
           <div className="lm-stat-card">
@@ -1043,11 +1076,18 @@ export default function Dashboard({ user, onSignOut }) {
             onChange={e => setHistoryTypeFilter(e.target.value)}
           >
             <option value="all">All types</option>
-            {Object.entries(NOTIF_TYPES).map(([key, t]) => (
-              <option key={key} value={key}>{t.label}</option>
-            ))}
+            {Object.entries(NOTIF_TYPES)
+              .filter(([key]) => currentPrefs[key] === true)
+              .map(([key, t]) => (
+                <option key={key} value={key}>{t.label}</option>
+              ))}
           </select>
           {notifHistory.length > 0 && (
+            // Intentionally gated on the raw store, not enabledHistory —
+            // this wipes everything saved on this device (including any
+            // older entries hidden above because their type is disabled or
+            // no longer supported), so it should stay available even when
+            // nothing currently visible needs clearing.
             <button className="lm-btn lm-btn--danger" onClick={clearHistory}>Clear history</button>
           )}
         </div>
@@ -1062,10 +1102,10 @@ export default function Dashboard({ user, onSignOut }) {
             {rows.length === 0 ? (
               <div className="lm-notif-empty">
                 <div className="lm-notif-empty-title">
-                  {notifHistory.length === 0 ? 'No notifications yet' : 'No matches'}
+                  {enabledHistory.length === 0 ? 'No notifications yet' : 'No matches'}
                 </div>
                 <div className="lm-notif-empty-sub">
-                  {notifHistory.length === 0
+                  {enabledHistory.length === 0
                     ? 'Everything that comes in will be kept here, even after it scrolls out of the bell.'
                     : 'Try a different search term or type filter.'}
                 </div>

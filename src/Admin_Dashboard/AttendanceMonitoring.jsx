@@ -476,27 +476,27 @@ function TodayTable({ records, loading, onDelete, onFocusChange }) {
                     boxShadow: hovRow === r.id ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
                   }}
                 >
-                  <td style={{ padding: '11px 16px' }}>
+                  <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                     <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#7a4040', letterSpacing: '0.04em', fontWeight: 600 }}>
                       {r.id_no || <span style={{ fontSize: 11.5, color: '#b08080', fontStyle: 'italic' }}>no ID</span>}
                     </span>
                   </td>
-                  <td style={{ padding: '11px 16px' }}>
+                  <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{r.full_name || '—'}</span>
                   </td>
-                  <td style={{ padding: '11px 16px', maxWidth: 200 }}>
+                  <td style={{ padding: '11px 16px', maxWidth: 200, textAlign: 'left' }}>
                     <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.program || '—'}
                     </span>
                   </td>
-                  <td style={{ padding: '11px 16px' }}>
+                  <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                     <div style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>{fmtDate(r.time_in)}</div>
                     <div style={{ fontSize: 11, color: '#9a7070', fontFamily: 'var(--font-sans)' }}>{fmtTime(r.time_in)}</div>
                   </td>
-                  <td style={{ padding: '11px 16px' }}>
+                  <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                     <StatusBadge status={r.status} />
                   </td>
-                  <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                  <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                     <button
                       onMouseEnter={() => setDelHov(r.id)}
                       onMouseLeave={() => setDelHov(null)}
@@ -793,33 +793,33 @@ function VisitorHistoryTable({ onFocusChange }) {
                       boxShadow: hovRow === r.id ? 'inset 3px 0 0 0 #C9A84C, 0 2px 12px rgba(139,0,0,0.07)' : 'inset 3px 0 0 0 transparent',
                     }}
                   >
-                    <td style={{ padding: '11px 16px' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <span style={{ fontSize: 12, fontFamily: 'monospace', color: '#7a4040', letterSpacing: '0.04em', fontWeight: 600 }}>
                         {r.id_no || <span style={{ fontSize: 11.5, color: '#b08080', fontStyle: 'italic' }}>no ID</span>}
                       </span>
                     </td>
-                    <td style={{ padding: '11px 16px' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <span style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)' }}>{r.full_name || '—'}</span>
                     </td>
-                    <td style={{ padding: '11px 16px', maxWidth: 200 }}>
+                    <td style={{ padding: '11px 16px', maxWidth: 200, textAlign: 'left' }}>
                       <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {r.program || '—'}
                       </span>
                     </td>
-                    <td style={{ padding: '11px 16px' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
                         {fmtDate(r.time_in)}
                       </span>
                     </td>
-                    <td style={{ padding: '11px 16px' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <span style={{ fontSize: 12, color: '#5a3030', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap' }}>
                         {fmtTime(r.time_in)}
                       </span>
                     </td>
-                    <td style={{ padding: '11px 16px' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <StatusBadge status={r.status} />
                     </td>
-                    <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                    <td style={{ padding: '11px 16px', textAlign: 'left' }}>
                       <button
                         onMouseEnter={() => setDelHov(r.id)}
                         onMouseLeave={() => setDelHov(null)}

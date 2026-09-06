@@ -3300,11 +3300,17 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const notifPrefsRef = useRef(getNotifPrefs(user?.id));
   const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
+  // Bumped on every prefs change so memoized lists derived from
+  // notifPrefsRef (a plain ref — mutating it doesn't itself trigger a
+  // re-render) recompute immediately instead of waiting for unrelated
+  // state to change first.
+  const [prefsVersion, setPrefsVersion] = useState(0);
 
   useEffect(() => {
     const syncNotifPrefs = () => {
       notifPrefsRef.current = getNotifPrefs(user?.id);
       notifSoundRef.current = getNotifSoundEnabled(user?.id);
+      setPrefsVersion(v => v + 1);
     };
     syncNotifPrefs();
     window.addEventListener(NOTIF_PREFS_EVENT, syncNotifPrefs);
@@ -3342,7 +3348,9 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const addStudentNotifications = useCallback((incoming, isRealtime = false) => {
     if (!incoming.length) return;
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] !== false);
+    // Strict opt-in ("=== true"): a type absent from prefs — disabled, or
+    // a retired/legacy type with no toggle at all — must never pass.
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true);
 
     if (allowed.length) {
       const existingIds = new Set(seenNotifIdsInStateRef.current);
@@ -3363,7 +3371,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const showInitialStudentBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] !== false);
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true);
     if (!allowed.length) return;
 
     const readIds = new Set(getNotifHistory(user?.id).filter(h => h.read).map(h => h.id));
@@ -3498,10 +3506,15 @@ export default function StudentDashboard({ user, onSignOut }) {
   );
 
   const NOTIF_NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
-  const visibleNotifications = useMemo(
-    () => (notifTab === 'unread' ? notifications.filter(n => !n.read) : notifications),
-    [notifications, notifTab]
-  );
+  const visibleNotifications = useMemo(() => {
+    // Strict opt-in: only types currently enabled in Settings →
+    // Notifications are shown. A type absent from prefs (disabled, or a
+    // retired/legacy type with no toggle at all) is excluded by default.
+    const prefs = notifPrefsRef.current;
+    const enabled = notifications.filter(n => prefs[n.type] === true);
+    return notifTab === 'unread' ? enabled.filter(n => !n.read) : enabled;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notifications, notifTab, prefsVersion]);
   const notifNewGroup = useMemo(
     () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() <= NOTIF_NEW_WINDOW_MS),
     [visibleNotifications]
@@ -3607,14 +3620,21 @@ export default function StudentDashboard({ user, onSignOut }) {
   };
 
   const renderStudentNotifHistoryPage = () => {
+    // Read fresh, and filter the persisted history down to currently
+    // enabled types before anything else touches it — this is what hides
+    // old entries whose type has since been disabled or retired, not just
+    // what stops new ones from being added.
+    const currentPrefs = getNotifPrefs(user?.id);
+    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true);
+
     const q = historySearch.trim().toLowerCase();
-    const rows = notifHistory.filter(n => {
+    const rows = enabledHistory.filter(n => {
       const matchType = historyTypeFilter === 'all' || n.type === historyTypeFilter;
       const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
       return matchType && matchQ;
     });
-    const unreadTotal = notifHistory.filter(n => !n.read).length;
-    const todayTotal = notifHistory.filter(n => {
+    const unreadTotal = enabledHistory.filter(n => !n.read).length;
+    const todayTotal = enabledHistory.filter(n => {
       const d = new Date(n.createdAt);
       const now = new Date();
       return d.toDateString() === now.toDateString();
@@ -3635,7 +3655,7 @@ export default function StudentDashboard({ user, onSignOut }) {
         <div className="lm-stats-grid">
           <div className="lm-stat-card">
             <div className="lm-stat-label">Total Logged</div>
-            <div className="lm-stat-value">{notifHistory.length}</div>
+            <div className="lm-stat-value">{enabledHistory.length}</div>
             <div className="lm-stat-sub">Up to 300 kept</div>
           </div>
           <div className="lm-stat-card">
@@ -3672,11 +3692,17 @@ export default function StudentDashboard({ user, onSignOut }) {
             onChange={e => setHistoryTypeFilter(e.target.value)}
           >
             <option value="all">All types</option>
-            {Object.entries(STUDENT_NOTIF_TYPES).map(([key, t]) => (
-              <option key={key} value={key}>{t.label}</option>
-            ))}
+            {Object.entries(STUDENT_NOTIF_TYPES)
+              .filter(([key]) => currentPrefs[key] === true)
+              .map(([key, t]) => (
+                <option key={key} value={key}>{t.label}</option>
+              ))}
           </select>
           {notifHistory.length > 0 && (
+            // Gated on the raw store so it stays available even when
+            // everything currently in it is hidden above (disabled/retired
+            // types) — it wipes the whole on-device log, not just what's
+            // currently visible.
             <button className="lm-btn lm-btn--danger" onClick={clearStudentNotifHistory}>Clear history</button>
           )}
         </div>
@@ -3690,10 +3716,10 @@ export default function StudentDashboard({ user, onSignOut }) {
             {rows.length === 0 ? (
               <div className="lm-notif-empty">
                 <div className="lm-notif-empty-title">
-                  {notifHistory.length === 0 ? 'No notifications yet' : 'No matches'}
+                  {enabledHistory.length === 0 ? 'No notifications yet' : 'No matches'}
                 </div>
                 <div className="lm-notif-empty-sub">
-                  {notifHistory.length === 0
+                  {enabledHistory.length === 0
                     ? 'Everything that comes in will be kept here, even after it scrolls out of the bell.'
                     : 'Try a different search term or type filter.'}
                 </div>
