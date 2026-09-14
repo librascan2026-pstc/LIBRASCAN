@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../supabaseClient';
+import { searchOpenLibrary } from '../utils/openLibraryApi';
 import {
   getNotifPrefs,
   setNotifPref,
@@ -124,9 +125,13 @@ button { cursor:pointer; }
   color:#fff; letter-spacing:.08em; white-space:nowrap;
 }
 .sdb-brand-sub {
+  display:flex; align-items:center; gap:6px;
   font-size:9px; font-weight:600; letter-spacing:.09em; text-transform:uppercase;
   color:rgba(245,228,168,.72); white-space:nowrap;
  
+}
+.sdb-brand-sub::before {
+  content:''; width:12px; height:1px; background:var(--gold); flex-shrink:0;
 }
 
 /* Nav links */
@@ -199,7 +204,7 @@ button { cursor:pointer; }
 
 /* Dropdown menu (profile) */
 .sdb-dropdown {
-  position:absolute; top:calc(100% + 12px); right:0; width:230px;
+  position:absolute; top:calc(100% + 6px); right:0; width:230px;
   background:var(--dd-bg); border:1px solid var(--dd-border);
   border-radius:var(--radius-lg); box-shadow:0 18px 44px rgba(20,0,0,.28), 0 2px 8px rgba(20,0,0,.10);
   overflow:hidden; z-index:250; animation:lm-modal-in .18s cubic-bezier(.34,1.56,.64,1);
@@ -389,6 +394,45 @@ button { cursor:pointer; }
   background:rgba(122,0,0,.07); color:var(--maroon); border:1px solid rgba(122,0,0,.16);
 }
 .sdb-book-actions { display:flex; gap:6px; margin-top:10px; }
+
+/* ── Open Library integration — small additions, same visual language ── */
+.sdb-ol-tag {
+  position:absolute; top:7px; left:7px; z-index:2;
+  display:inline-flex; align-items:center; gap:4px;
+  padding:3px 8px; border-radius:8px;
+  font-size:9px; font-weight:700; font-family:var(--font-sans);
+  letter-spacing:.06em; text-transform:uppercase;
+  background:rgba(58,0,0,.82); color:var(--gold-pale);
+  border:1px solid rgba(201,168,76,.45); backdrop-filter:blur(3px);
+}
+.sdb-ol-status {
+  display:inline-flex; align-items:center; gap:5px;
+  padding:3px 10px; border-radius:12px; margin-top:8px;
+  font-size:10.5px; font-weight:600; font-family:var(--font-sans);
+  letter-spacing:.03em; white-space:nowrap;
+  background:rgba(122,0,0,.07); color:var(--text-muted); border:1px solid rgba(122,0,0,.16);
+}
+.sdb-btn-ol-read {
+  background:linear-gradient(135deg,var(--gold-light),var(--gold-dim));
+  color:var(--maroon-deep); border-color:rgba(122,0,0,.30);
+  box-shadow:0 2px 10px rgba(120,90,0,.25);
+}
+.sdb-btn-ol-read:hover:not(:disabled) {
+  background:linear-gradient(135deg,var(--gold-pale),var(--gold));
+  transform:translateY(-2px); box-shadow:0 6px 18px rgba(120,90,0,.35);
+}
+.sdb-ol-section-label {
+  display:flex; align-items:center; gap:10px; margin:26px 0 14px;
+  font-family:var(--font-display); font-size:13px; font-weight:700;
+  letter-spacing:.08em; text-transform:uppercase; color:var(--text-dim);
+}
+.sdb-ol-section-label::after {
+  content:''; flex:1; height:1px; background:rgba(139,0,0,.16);
+}
+.sdb-ol-error {
+  font-family:var(--font-sans); font-size:12px; color:var(--text-muted);
+  padding:8px 2px; font-style:italic;
+}
 
 /* ════════ TABLE — rich book-table style (matches Admin Book Catalog) ════════ */
 .sdb-table-wrap {
@@ -2049,10 +2093,17 @@ function PageHome({ user, profile, onNavigate }) {
       } catch(e){ console.error('[Home stats]',e); } finally { setLoadSt(false); }
 
       try {
-        const { data } = await supabase.from('borrow_requests')
-          .select('id,book_title,status,created_at,updated_at')
+        // NOTE: borrow_requests has no `updated_at` column — decisions are
+        // timestamped on `reviewed_at` (set when a librarian approves/
+        // rejects), same column the notification system already relies on
+        // elsewhere in this file. Selecting `updated_at` made Postgrest
+        // reject the whole query, which is why this silently showed
+        // "No activity yet" even with borrowed books on record.
+        const { data, error } = await supabase.from('borrow_requests')
+          .select('id,book_title,status,created_at,reviewed_at')
           .eq('student_id',user.id)
-          .order('updated_at',{ascending:false,nullsFirst:false}).limit(8);
+          .order('created_at',{ascending:false,nullsFirst:false}).limit(8);
+        if (error) throw error;
         setActs(data || []);
       } catch(e){ console.error('[Home acts]',e); } finally { setLoadAc(false); }
     })();
@@ -2129,7 +2180,7 @@ function PageHome({ user, profile, onNavigate }) {
                 <span style={{ color:'var(--maroon)', fontWeight:700, fontSize:10, marginRight:6 }}>{c.label}</span>
                 {a.book_title || 'Book'}
               </div>
-              <span className="sdb-activity-time">{relAgo(a.updated_at||a.created_at)}</span>
+              <span className="sdb-activity-time">{relAgo(a.reviewed_at||a.created_at)}</span>
             </div>
           );
         })}
@@ -2150,6 +2201,12 @@ function PageCatalog({ user }) {
   const [favIds,    setFavIds]    = useState(new Set());
   const [selected,  setSelected]  = useState(null);
   const { toast, show } = useToast();
+
+  // ── Open Library (external) results — additive, never touches Supabase ──
+  const [olResults, setOlResults] = useState([]);
+  const [olLoading, setOlLoading] = useState(false);
+  const [olError,   setOlError]   = useState(null);
+  const olReqId = useRef(0);
 
   const fetchCatalog = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -2204,6 +2261,27 @@ function PageCatalog({ user }) {
     return () => supabase.removeChannel(ch);
   }, [fetchCatalog]);
 
+  // Debounced Open Library search — fires ~500ms after typing stops, and
+  // only once there's a real query, so we don't hit the API on every
+  // keystroke or on the initial (empty-search) catalog load. A request-id
+  // guard drops any response that's no longer the latest one in flight.
+  useEffect(() => {
+    const q = search.trim();
+    if (q.length < 2) { setOlResults([]); setOlError(null); setOlLoading(false); return; }
+
+    setOlLoading(true);
+    const myReqId = ++olReqId.current;
+    const handle = setTimeout(async () => {
+      const { results, error } = await searchOpenLibrary(q, { limit: 8 });
+      if (myReqId !== olReqId.current) return; // a newer search superseded this one
+      setOlResults(results);
+      setOlError(error);
+      setOlLoading(false);
+    }, 500);
+
+    return () => clearTimeout(handle);
+  }, [search]);
+
   const categories = [...new Set(books.map(b=>b.category||b.genre).filter(Boolean))].sort();
 
   const filtered = books.filter(b => {
@@ -2212,6 +2290,20 @@ function PageCatalog({ user }) {
     const cat = b.category || b.genre || '';
     return ok && (!catF||cat===catF) && (!availF||(availF==='available'?(b.available_copies??1)>0:(b.available_copies??1)<=0));
   });
+
+  // Open Library results respect the same category/availability filters
+  // where they meaningfully apply — "available" here means readable or
+  // borrowable right now, since external copies don't have a copy count.
+  const filteredOl = olResults.filter(b => {
+    const cat = (b.category || '').toLowerCase();
+    const matchesCat = !catF || cat === catF.toLowerCase() || cat.includes(catF.toLowerCase());
+    if (!matchesCat) return false;
+    if (!availF) return true;
+    const readableNow = b.availability.canRead || b.availability.canBorrow;
+    return availF === 'available' ? readableNow : !readableNow;
+  });
+
+  const openExternal = (url) => { if (url) window.open(url, '_blank', 'noopener,noreferrer'); };
 
   const toggleFav = async (e, bookId) => {
     e && e.stopPropagation();
@@ -2261,7 +2353,11 @@ function PageCatalog({ user }) {
           <option value="available">Available</option>
           <option value="unavailable">Unavailable</option>
         </select>
-        <div className="sdb-count">{loading?'Loading…':`${filtered.length} book${filtered.length!==1?'s':''}`}</div>
+        <div className="sdb-count">
+          {loading
+            ? 'Loading…'
+            : `${filtered.length} book${filtered.length!==1?'s':''}${filteredOl.length ? ` · ${filteredOl.length} from Open Library` : ''}`}
+        </div>
       </div>
 
       {/* Book grid */}
@@ -2303,8 +2399,102 @@ function PageCatalog({ user }) {
         </div>
       )}
 
+      {/* Open Library results — only appears once there's a real search term */}
+      {search.trim().length >= 2 && (
+        <>
+          <div className="sdb-ol-section-label">
+            <span>From Open Library</span>
+          </div>
+          {olLoading ? (
+            <div className="sdb-book-grid">
+              {Array.from({length:4}).map((_,i)=>(
+                <div key={i} className="sdb-skeleton" style={{ height:280, borderRadius:'var(--radius-lg)' }} />
+              ))}
+            </div>
+          ) : olError ? (
+            <div className="sdb-ol-error">Open Library results unavailable right now — {olError}</div>
+          ) : filteredOl.length === 0 ? (
+            <div className="sdb-ol-error">No matching Open Library results for this search.</div>
+          ) : (
+            <div className="sdb-book-grid">
+              {filteredOl.map(book => (
+                <div key={book.id} className="sdb-book-card" onClick={()=>setSelected(book)}>
+                  <div className="sdb-book-cover-area" style={{ position:'relative' }}>
+                    <span className="sdb-ol-tag">Open Library</span>
+                    <BookCover src={book.cover_image_url} title={book.title} width="100%" height={120} />
+                  </div>
+                  <div className="sdb-book-body">
+                    <div className="sdb-book-title">{book.title}</div>
+                    <div className="sdb-book-author">{book.author}{book.year ? ` · ${book.year}` : ''}</div>
+                    {book.category && <span className="sdb-book-genre">{book.category}</span>}
+                    <div><span className="sdb-ol-status">{book.availability.label}</span></div>
+                    <div className="sdb-book-actions">
+                      <button className="sdb-btn sdb-btn-ghost" style={{ flex:1,fontSize:11,padding:'6px 10px' }} onClick={e=>{e.stopPropagation();setSelected(book);}}>View Details</button>
+                      {(book.availability.canRead || book.availability.canBorrow) && (
+                        <button
+                          className="sdb-btn sdb-btn-ol-read"
+                          style={{ flex:1,fontSize:11,padding:'6px 10px' }}
+                          onClick={e=>{ e.stopPropagation(); openExternal(book.availability.actionUrl); }}
+                          title="Opens the official Open Library / Internet Archive page in a new tab"
+                        >
+                          {book.availability.canRead ? 'Read Free' : 'Borrow'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
       {/* Book detail modal */}
-      {selected && (
+      {selected && selected.source === 'openlibrary' ? (
+        <Modal maxWidth={800} onClose={()=>setSelected(null)}>
+          <div className="sdb-modal-hdr">
+            <div>
+              <div className="sdb-modal-title">Book Details</div>
+              <div className="sdb-modal-sub">{selected.category || 'Open Library'}</div>
+            </div>
+            <button className="sdb-modal-close" onClick={()=>setSelected(null)}>{Ic.close}</button>
+          </div>
+          <div className="sdb-modal-body" style={{ display:'flex', gap:24, flexWrap:'wrap' }}>
+            {/* Left */}
+            <div style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:12,flexShrink:0 }}>
+              <BookCover src={selected.cover_image_url_lg||selected.cover_image_url} title={selected.title} width={120} height={170} />
+              <span className="sdb-ol-tag" style={{ position:'static' }}>Open Library</span>
+              <span className="sdb-ol-status">{selected.availability.label}</span>
+            </div>
+            {/* Right */}
+            <div style={{ flex:1, minWidth:200 }}>
+              <h2 style={{ fontFamily:'var(--font-display)', fontSize:19, fontWeight:700, color:'var(--text-primary)', letterSpacing:'.03em', margin:'0 0 5px' }}>{selected.title}</h2>
+              <div style={{ fontFamily:'var(--font-sans)', fontSize:14, color:'var(--text-secondary)', marginBottom:18 }}>by {selected.author||'—'}</div>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'9px 22px', marginBottom:18 }}>
+                {[['ISBN',selected.isbn],['Published',selected.year],['Category',selected.category]].filter(([,v])=>v).map(([k,v])=>(
+                  <div key={k}>
+                    <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.10em', textTransform:'uppercase', color:'var(--text-dim)', marginBottom:2 }}>{k}</div>
+                    <div style={{ fontSize:13, color:'var(--text-secondary)' }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', borderTop:'1px solid rgba(139,0,0,.12)', paddingTop:14 }}>
+                This title comes from Open Library, not the university library system. Reading and borrowing happen on Open Library / Internet Archive's own site — nothing is copied into this catalog.
+              </div>
+            </div>
+          </div>
+          <div className="sdb-modal-foot" style={{ justifyContent:'flex-start', gap:10 }}>
+            {selected.availability.canRead ? (
+              <button className="sdb-btn sdb-btn-ol-read" onClick={()=>openExternal(selected.availability.actionUrl)}>Read Free</button>
+            ) : selected.availability.canBorrow ? (
+              <button className="sdb-btn sdb-btn-ol-read" onClick={()=>openExternal(selected.availability.actionUrl)}>Borrow on Open Library</button>
+            ) : (
+              <span className="sdb-ol-status">{selected.availability.label}</span>
+            )}
+            <button className="sdb-btn sdb-btn-ghost" onClick={()=>openExternal(selected.olUrl)}>View on Open Library</button>
+          </div>
+        </Modal>
+      ) : selected && (
         <Modal maxWidth={800} onClose={()=>setSelected(null)}>
           <div className="sdb-modal-hdr">
             <div><div className="sdb-modal-title">Book Details</div><div className="sdb-modal-sub">{selected.category||selected.genre||'Library Catalog'}</div></div>
@@ -3836,7 +4026,7 @@ export default function StudentDashboard({ user, onSignOut }) {
             </div>
             <div className="sdb-brand-text">
               <div className="sdb-brand-title">LIBRASCAN</div>
-              <div className="sdb-brand-sub"> Pampanga State University</div>
+              <div className="sdb-brand-sub">Pampanga State University</div>
             </div>
           </div>
 
@@ -4004,17 +4194,6 @@ export default function StudentDashboard({ user, onSignOut }) {
 
               {profileOpen && (
                 <div className="sdb-dropdown">
-                  <div className="sdb-dropdown-user">
-                    {avatarUrl
-                      ? <img src={avatarUrl} alt="avatar" className="sdb-avatar" style={{ padding:0 }} onError={e=>{e.target.style.display='none';}} />
-                      : <div className="sdb-avatar">{initials}</div>
-                    }
-                    <div>
-                      <div className="sdb-dropdown-user-name">{displayName}</div>
-                      <div className="sdb-dropdown-user-role">Student</div>
-                    </div>
-                  </div>
-
                   {PROFILE_MENU.map(item => (
                     <button key={item.id} className="sdb-dropdown-item" onClick={()=>navigate(item.id)}>
                       {Ic[item.icon]} {item.label}

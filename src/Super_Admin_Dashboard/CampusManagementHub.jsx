@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo, cloneElement } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, ChevronRight, ChevronLeft, Copy, Ban, CheckCircle2,
@@ -405,20 +405,39 @@ const CSS = `
     margin-bottom: 24px;
   }
   .cmh-stat-card {
+    position: relative;
     background: ${CARD};
     border: 1px solid ${BORDER};
     border-radius: 16px;
-    padding: 16px;
-    display: flex; align-items: center; gap: 16px;
-    transition: transform 0.16s cubic-bezier(.22,1,.36,1), box-shadow 0.16s, border-color 0.16s;
+    padding: 16px 18px 14px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
+    overflow: hidden;
   }
-  .cmh-stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(59,42,37,0.08); border-color: rgba(122,0,0,0.22); }
+  .cmh-stat-card::after {
+    content: '';
+    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    border-radius: 0 0 16px 16px;
+    background: var(--accent, ${MAROON});
+    opacity: 0.65;
+  }
+  .cmh-stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 28px rgba(59,42,37,0.09);
+    border-color: var(--accent, rgba(122,0,0,0.3));
+  }
   .cmh-stat-icon {
-    width: 42px; height: 42px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    position: absolute; top: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent, ${MAROON});
+    opacity: 0.10;
+    pointer-events: none;
+    transition: opacity 0.18s;
   }
-  .cmh-stat-value { font-size: 21px; font-weight: 800; color: ${TEXT}; line-height: 1.15; }
-  .cmh-stat-label { font-size: 11px; font-weight: 700; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.04em; }
+  .cmh-stat-card:hover .cmh-stat-icon { opacity: 0.16; }
+  .cmh-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
+  .cmh-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
   .cmh-toolbar {
@@ -822,16 +841,17 @@ function StatCard({ icon, value, label, tint, delay = 0 }) {
   return (
     <motion.div
       className="cmh-stat-card"
+      style={{ '--accent': tint.fg }}
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay }}
     >
-      <div className="cmh-stat-icon" style={{ background: tint.bg, color: tint.fg }}>
-        {icon}
+      <div className="cmh-stat-icon">
+        {cloneElement(icon, { size: 34, strokeWidth: 1.6 })}
       </div>
       <div>
-        <div className="cmh-stat-value">{value}</div>
         <div className="cmh-stat-label">{label}</div>
+        <div className="cmh-stat-value">{value}</div>
       </div>
     </motion.div>
   );
@@ -852,7 +872,7 @@ function LoadingSkeleton() {
       <Skeleton w="100%" h={92} style={{ borderRadius: 20, marginBottom: 24 }} />
       <div className="cmh-stats-grid">
         {[0, 1, 2, 3].map(i => (
-          <Skeleton key={i} h={76} style={{ borderRadius: 16 }} />
+          <Skeleton key={i} h={88} style={{ borderRadius: 16 }} />
         ))}
       </div>
       <div style={{ marginTop: 16 }}>

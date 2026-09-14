@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { LayoutGrid, Building2, BookOpen, BarChart3, Users, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutGrid, Building2, BookOpen, Users, Settings as SettingsIcon } from 'lucide-react';
 import SuperAdminOverview    from './SuperAdminOverview';
 import CampusManagementHub   from './CampusManagementHub';
 import LibrarianManagement   from './LibrarianManagement';
 import SuperAdminBooks       from './SuperAdminBooks';
-import SuperAdminAnalytics   from './SuperAdminAnalytics';
 import SuperAdminSettings    from './SuperAdminSettings';
 
 /* ============================================================================
@@ -31,10 +30,6 @@ const PAGES = [
   {
     key: 'books', label: 'Books',
     icon: <BookOpen size={18} strokeWidth={1.8} />,
-  },
-  {
-    key: 'analytics', label: 'Analytics',
-    icon: <BarChart3 size={18} strokeWidth={1.8} />,
   },
   {
     key: 'librarians', label: 'Librarian',
@@ -288,7 +283,6 @@ const PATH_BY_PAGE = {
   overview:   '/superadmin/overview',
   campuses:   '/superadmin/campuses',
   books:      '/superadmin/books',
-  analytics:  '/superadmin/analytics',
   librarians: '/superadmin/librarians',
   settings:   '/superadmin/settings',
 };
@@ -338,8 +332,6 @@ export default function SuperAdminLayout({ user, onSignOut }) {
         return <CampusManagementHub user={user} onNavigate={navigateTo} />;
       case 'books':
         return <SuperAdminBooks />;
-      case 'analytics':
-        return <SuperAdminAnalytics />;
       case 'librarians':
         return <LibrarianManagement />;
       case 'settings':

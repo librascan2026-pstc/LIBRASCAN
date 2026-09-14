@@ -830,7 +830,7 @@ function Donut({ data=[], size=120 }) {
 }
 
 // ── Full Pie Chart with external labels + legend (like reference image) ──
-function PieChart({ data=[], size=300 }) {
+function PieChart({ data=[], size=300, showLegend=true }) {
   const [hov, setHov] = useState(null);
   const total = data.reduce((s,d)=>s+d.value,0)||1;
 
@@ -937,6 +937,7 @@ function PieChart({ data=[], size=300 }) {
       </svg>
 
       {/* Legend */}
+      {showLegend && (
       <div style={{display:'flex',flexWrap:'wrap',gap:'7px 20px',
         justifyContent:'center',padding:'0 12px'}}>
         {slices.map((s,i)=>(
@@ -958,6 +959,7 @@ function PieChart({ data=[], size=300 }) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
@@ -1551,6 +1553,7 @@ function TabStudents({ data, loading, period }) {
                   ? <PieChart
                       data={programPieData}
                       size={300}
+                      showLegend={false}
                     />
                   : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No program data</div></div>
               }
@@ -2163,7 +2166,6 @@ function TabTransactions({ data, loading }) {
         filterable={{key:'status',label:'Status',options:[
           {value:'Borrowed', label:'Borrowed'},
           {value:'Returned', label:'Returned'},
-          {value:'approved', label:'Approved (request)'},
           {value:'pending',  label:'Pending (request)'},
           {value:'rejected', label:'Rejected (request)'},
         ]}}
@@ -2577,6 +2579,7 @@ function TabAttendance({ data, loading, period }) {
                   ? <PieChart
                       data={programPieData}
                       size={280}
+                      showLegend={false}
                     />
                   : <div className="ra-empty">{Ic.empty()}<div className="ra-empty-s">No attendance data</div></div>
               }
@@ -2675,6 +2678,16 @@ export default function ReportsAnalytics() {
         .gte('borrowed_at', since)
         .order('borrowed_at');
 
+      // Returns need their own query: filtering by borrowed_at above would
+      // drop a book that was borrowed before this window but returned
+      // inside it, so "Returned" counts it on the wrong day (or not at
+      // all). This one is scoped by returned_at instead, so a return is
+      // always bucketed on the day it actually happened.
+      let qReturnsPeriod = supabase.from('borrowings')
+        .select('id,student_name,book_title,borrowed_at,returned_at,status')
+        .gte('returned_at', since)
+        .order('returned_at');
+
       // available_copies is NOT a books column — computed below from book_copies
       let qBooksRaw = supabase.from('books')
         .select('id,title,genre,copies,cover_image_url,status')
@@ -2705,6 +2718,7 @@ export default function ReportsAnalytics() {
       if (campusId) {
         qBorrowings       = qBorrowings.eq('campus_id', campusId);
         qBorrowingsPeriod = qBorrowingsPeriod.eq('campus_id', campusId);
+        qReturnsPeriod    = qReturnsPeriod.eq('campus_id', campusId);
         qBooksRaw         = qBooksRaw.eq('campus_id', campusId);
         qReqPeriod        = qReqPeriod.eq('books.campus_id', campusId);
         qReqAll           = qReqAll.eq('books.campus_id', campusId);
@@ -2715,13 +2729,14 @@ export default function ReportsAnalytics() {
       const [
         { data: borrowings    },
         { data: borrowingsPeriod },
+        { data: returnsPeriod },
         { data: booksRaw      },
         { data: reqPeriod     },
         { data: reqAll        },
         { data: attendRaw     },
         { data: copiesRaw     },
         { data: programsRaw   },
-      ] = await Promise.all([qBorrowings, qBorrowingsPeriod, qBooksRaw, qReqPeriod, qReqAll, qAttendRaw, qCopiesRaw, qPrograms]);
+      ] = await Promise.all([qBorrowings, qBorrowingsPeriod, qReturnsPeriod, qBooksRaw, qReqPeriod, qReqAll, qAttendRaw, qCopiesRaw, qPrograms]);
 
       if (!programsRaw || programsRaw.length === 0) {
         console.warn(
@@ -2974,7 +2989,7 @@ export default function ReportsAnalytics() {
 
       const reqAll30d     = (reqPeriod||[]);
       const borrowPeriodR = (borrowingsPeriod||[]);
-      const returnPeriodR = (borrowingsPeriod||[]).filter(b=>b.returned_at);
+      const returnPeriodR = (returnsPeriod||[]);
 
       setTrendData({
         [`req_${period}`]:    buildTimeline(reqAll30d,    'created_at',  pts, step),
@@ -3030,16 +3045,23 @@ export default function ReportsAnalytics() {
       // Merge: borrowings (Borrowed/Returned) + borrow_requests (pending/rejected)
       // borrow_requests that are 'approved' are already in borrowings, skip them
       // ──────────────────────────────────────────────────
-      const txFromBorrowings = (borrowings||[]).map(b=>({
-        student_name:   b.student_name||'—',
-        student_number: b.student_number||'',
-        book_title:     b.book_title||'—',
-        genre:          getGenre(b.book_title),
-        status:         b.returned_at ? 'Returned' : 'Borrowed',
-        date_display:   fmtShort(b.borrowed_at),
-        _ts:            b.borrowed_at,
-        source:         'borrowing',
-      }));
+      const txFromBorrowings = (borrowings||[]).map(b=>{
+        // Once a book is returned, the return is the most recent thing
+        // that happened to this record — sort and display by that date
+        // instead of the original borrowed_at, so e.g. a book borrowed
+        // Sep 12 and returned Sep 14 shows (and sorts) as Sep 14.
+        const effectiveDate = b.returned_at || b.borrowed_at;
+        return {
+          student_name:   b.student_name||'—',
+          student_number: b.student_number||'',
+          book_title:     b.book_title||'—',
+          genre:          getGenre(b.book_title),
+          status:         b.returned_at ? 'Returned' : 'Borrowed',
+          date_display:   fmtShort(effectiveDate),
+          _ts:            effectiveDate,
+          source:         'borrowing',
+        };
+      });
       const txFromRequests = (reqAll||[])
         .filter(r=>r.status==='pending'||r.status==='rejected')
         .map(r=>({

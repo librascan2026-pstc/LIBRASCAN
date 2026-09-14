@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, cloneElement } from 'react';
 import {
   BookOpen, Library, PackageCheck, PackageX, Search, ChevronLeft, ChevronRight,
   Building2, X, Hash, MapPin, User, Layers, Clock, Check, Ban,
@@ -136,8 +136,9 @@ const CSS = `
   .sab-stat-card {
     position: relative;
     background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px;
-    padding: 16px 18px 16px 16px; overflow: hidden;
-    display: flex; align-items: center; gap: 14px; text-align: left;
+    padding: 16px 18px 14px; overflow: hidden;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     animation: sab-rise 0.45s cubic-bezier(.22,1,.36,1) both;
   }
@@ -147,13 +148,8 @@ const CSS = `
   .sab-stats-grid .sab-stat-card:nth-child(4) { animation-delay: 0.14s; }
   .sab-stats-grid .sab-stat-card:nth-child(5) { animation-delay: 0.18s; }
   .sab-stat-card::before {
-    content: ''; position: absolute; top: 10px; bottom: 10px; left: 0; width: 3px;
-    border-radius: 0 3px 3px 0; background: var(--accent-grad); opacity: 0.9;
-  }
-  .sab-stat-card::after {
-    content: ''; position: absolute; top: -35%; right: -20%;
-    width: 100px; height: 100px; border-radius: 50%;
-    background: var(--accent-glow); opacity: 0.5; pointer-events: none;
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    border-radius: 0 0 16px 16px; background: var(--accent-grad); opacity: 0.65;
   }
   .sab-stat-card:hover {
     transform: translateY(-3px);
@@ -161,21 +157,18 @@ const CSS = `
     border-color: var(--accent-border);
   }
   .sab-stat-icon {
-    width: 46px; height: 46px; border-radius: 13px; flex-shrink: 0;
+    position: absolute; top: 12px; right: 12px;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent-soft); color: var(--accent-fg);
-    box-shadow: inset 0 0 0 1px var(--accent-border);
-    position: relative; z-index: 1;
+    color: var(--accent-fg);
+    opacity: 0.10;
+    pointer-events: none;
+    transition: opacity 0.18s;
   }
-  .sab-stat-body { min-width: 0; position: relative; z-index: 1; flex: 1; }
-  .sab-stat-value { font-size: 23px; font-weight: 800; color: ${TEXT}; line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
-  .sab-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT}; text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
-  .sab-stat-sub { font-size: 10.5px; color: ${TEXT_MUTED}; margin-top: 2px; font-weight: 500; }
-  .sab-stat-bar-track {
-    position: relative; z-index: 1; height: 4px; border-radius: 999px;
-    background: ${CREAM}; overflow: hidden; margin-top: 6px;
-  }
-  .sab-stat-bar-fill { height: 100%; border-radius: 999px; background: var(--accent-grad); transition: width 0.4s ease; }
+  .sab-stat-card:hover .sab-stat-icon { opacity: 0.16; }
+  .sab-stat-body { min-width: 0; position: relative; z-index: 1; }
+  .sab-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .sab-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; margin-bottom: 5px; }
+  .sab-stat-sub { font-size: 10.5px; color: ${TEXT_MUTED}; font-weight: 500; opacity: 0.85; }
 
   /* ---------- Section head ---------- */
   .sab-selector-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
@@ -321,7 +314,7 @@ const CSS = `
     transform: translateX(-100%); animation: sab-shimmer-sweep 1.4s infinite;
   }
   .sab-skel-hero { height: 148px; border-radius: 24px; margin-bottom: 24px; }
-  .sab-skel-stat { height: 82px; border-radius: 16px; }
+  .sab-skel-stat { height: 96px; border-radius: 16px; }
   .sab-skel-table { height: 320px; border-radius: 18px; }
 
   /* ---------- View modal ---------- */
@@ -452,7 +445,7 @@ const ACCENTS = {
   gold:   { grad: `linear-gradient(90deg, ${GOLD}, ${GOLD_DEEP})`,     soft: GOLD_PALE,               fg: GOLD_DEEP, border: 'rgba(212,175,55,0.30)', glow: 'rgba(212,175,55,0.16)' },
 };
 
-function StatCard({ accent, icon, value, label, sub, ratio }) {
+function StatCard({ accent, icon, value, label, sub }) {
   const a = ACCENTS[accent] || ACCENTS.maroon;
   return (
     <div
@@ -465,16 +458,11 @@ function StatCard({ accent, icon, value, label, sub, ratio }) {
         '--accent-glow':   a.glow,
       }}
     >
-      <div className="sab-stat-icon">{icon}</div>
+      <div className="sab-stat-icon">{cloneElement(icon, { size: 34, strokeWidth: 1.6 })}</div>
       <div className="sab-stat-body">
-        <div className="sab-stat-value">{value}</div>
         <div className="sab-stat-label">{label}</div>
+        <div className="sab-stat-value">{value}</div>
         <div className="sab-stat-sub">{sub}</div>
-        {typeof ratio === 'number' && (
-          <div className="sab-stat-bar-track">
-            <div className="sab-stat-bar-fill" style={{ width: `${Math.round(Math.min(1, Math.max(0, ratio)) * 100)}%` }} />
-          </div>
-        )}
       </div>
     </div>
   );
@@ -602,17 +590,18 @@ export default function SuperAdminBooks() {
     const totalCopies     = scopedBooks.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
     const availableCopies = scopedBooks.reduce((s, b) => s + (parseInt(b.available_copies) || 0), 0);
     const borrowedCopies  = Math.max(0, totalCopies - availableCopies);
-    // "Campuses" always reflects the system total (registered campuses),
-    // regardless of which campus is currently selected in the filter.
-    const campusesWithBooks = campuses.length;
+    // "Pending Requests" always reflects the system-wide total of book
+    // registration requests awaiting Super Admin review, regardless of
+    // which campus is currently selected in the filter.
+    const pendingCount = pendingBooks.length;
     return {
       titles: scopedBooks.length,
       totalCopies,
       availableCopies,
       borrowedCopies,
-      campusesWithBooks,
+      pendingCount,
     };
-  }, [scopedBooks, campuses]);
+  }, [scopedBooks, pendingBooks]);
 
   const selectedCampusName = useMemo(() => {
     if (campusFilter === 'all') return null;
@@ -741,7 +730,6 @@ export default function SuperAdminBooks() {
             value={stats.availableCopies}
             label="Available Copies"
             sub="ready to borrow"
-            ratio={stats.totalCopies ? stats.availableCopies / stats.totalCopies : 0}
           />
           <StatCard
             accent="orange"
@@ -749,14 +737,13 @@ export default function SuperAdminBooks() {
             value={stats.borrowedCopies}
             label="Borrowed Copies"
             sub="currently out"
-            ratio={stats.totalCopies ? stats.borrowedCopies / stats.totalCopies : 0}
           />
           <StatCard
             accent="gold"
-            icon={<Building2 size={20} />}
-            value={stats.campusesWithBooks}
-            label="Campuses"
-            sub="registered in the system"
+            icon={<Clock size={20} />}
+            value={stats.pendingCount}
+            label="Pending Requests"
+            sub="awaiting approval"
           />
         </div>
       )}

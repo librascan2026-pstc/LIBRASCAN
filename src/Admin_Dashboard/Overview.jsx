@@ -613,6 +613,14 @@ export default function Overview({ onNavigate }) {
       let qBorrowingsPeriod = supabase.from('borrowings')
         .select('id,borrowed_at,returned_at')
         .gte('borrowed_at', since);
+      // Returns need their own query: filtering by borrowed_at above would
+      // drop a book that was borrowed before this window but returned
+      // inside it, so "Returned" counts it on the wrong day (or not at
+      // all). This one is scoped by returned_at instead, so a return is
+      // always bucketed on the day it actually happened.
+      let qReturnsPeriod = supabase.from('borrowings')
+        .select('id,borrowed_at,returned_at')
+        .gte('returned_at', since);
       let qAttendRaw = supabase.from('attendance_logs')
         .select('id,program,time_in')
         .eq('date', todayStr)
@@ -623,15 +631,17 @@ export default function Overview({ onNavigate }) {
       if (campusId) {
         qReqPeriod        = qReqPeriod.eq('books.campus_id', campusId);
         qBorrowingsPeriod = qBorrowingsPeriod.eq('campus_id', campusId);
+        qReturnsPeriod    = qReturnsPeriod.eq('campus_id', campusId);
         qAttendRaw        = qAttendRaw.eq('campus_id', campusId);
       }
 
       const [
         { data: reqPeriod        },
         { data: borrowingsPeriod },
+        { data: returnsPeriod    },
         { data: attendRaw        },
         { data: programsRaw      },
-      ] = await Promise.all([qReqPeriod, qBorrowingsPeriod, qAttendRaw, qPrograms]);
+      ] = await Promise.all([qReqPeriod, qBorrowingsPeriod, qReturnsPeriod, qAttendRaw, qPrograms]);
 
       // Resolve raw program text (scanned off a student ID) to the
       // university's official program code, same logic as Reports & Analytics.
@@ -687,7 +697,7 @@ export default function Overview({ onNavigate }) {
         return buckets;
       };
 
-      const returnPeriod = (borrowingsPeriod || []).filter(b => b.returned_at);
+      const returnPeriod = returnsPeriod || [];
 
       setTrendData({
         req:  buildTimeline(reqPeriod || [],        'created_at',  7, 1),
@@ -782,7 +792,7 @@ export default function Overview({ onNavigate }) {
 
       <div className="lm-overview-bottom">
 
-        <div className="lm-chart-card" style={{ height: 420 }}>
+        <div className="lm-chart-card" style={{ minHeight: 420 }}>
 
           <div className="lm-activity-header" style={{ flexWrap: 'wrap', rowGap: 4 }}>
             <span style={{

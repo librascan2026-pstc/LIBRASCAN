@@ -790,6 +790,18 @@ function ViewModal({ book, onClose, onEdit }) {
           allCopies = [...allCopies, ...(inserted || [])];
         }
 
+        // book_copies.status can fall out of sync with what's actually
+        // checked out (e.g. a status update silently failing during
+        // approval — see the same caveat in fetchBooks above), so cross-
+        // check against 'borrowings' the same way the catalog list does,
+        // just scoped to this book's copies instead of the whole list.
+        const { data: activeBorrowings } = await supabaseAdmin
+          .from('borrowings')
+          .select('copy_label')
+          .eq('book_id', book.id)
+          .ilike('status', 'borrowed');
+        const borrowedCopyIds = new Set((activeBorrowings || []).map(r => r.copy_label));
+
         const results = await Promise.all(allCopies.map(async (c) => {
           const { dataUrl } = await generateCopyQR(c.copy_id, c.copy_number);
           return {
@@ -797,7 +809,7 @@ function ViewModal({ book, onClose, onEdit }) {
             label:       c.copy_id,
             copyNum:     c.copy_number,
             copy_id:     c.copy_id,
-            status:      c.status,
+            status:      borrowedCopyIds.has(c.copy_id) ? 'Borrowed' : c.status,
             qr_code_url: c.qr_code_url,
           };
         }));

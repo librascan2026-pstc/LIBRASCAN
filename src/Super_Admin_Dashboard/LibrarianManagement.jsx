@@ -155,14 +155,36 @@ const CSS = `
   /* ---------- Stat cards ---------- */
   .lbm-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .lbm-stat-card {
-    background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px; padding: 16px;
-    display: flex; align-items: center; gap: 16px;
-    transition: transform 0.16s cubic-bezier(.22,1,.36,1), box-shadow 0.16s, border-color 0.16s;
+    position: relative;
+    background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px; padding: 16px 18px 14px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
+    overflow: hidden;
   }
-  .lbm-stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(59,42,37,0.08); border-color: rgba(122,0,0,0.22); }
-  .lbm-stat-icon { width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-  .lbm-stat-value { font-size: 22px; font-weight: 800; color: ${TEXT}; line-height: 1.15; font-variant-numeric: tabular-nums; }
-  .lbm-stat-label { font-size: 11px; font-weight: 700; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+  .lbm-stat-card::after {
+    content: '';
+    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    border-radius: 0 0 16px 16px;
+    background: var(--accent, ${MAROON});
+    opacity: 0.65;
+  }
+  .lbm-stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 28px rgba(59,42,37,0.09);
+    border-color: var(--accent, rgba(122,0,0,0.3));
+  }
+  .lbm-stat-icon {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent, ${MAROON});
+    opacity: 0.10;
+    pointer-events: none;
+    transition: opacity 0.18s;
+  }
+  .lbm-stat-card:hover .lbm-stat-icon { opacity: 0.16; }
+  .lbm-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
+  .lbm-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
 
   /* ---------- Toolbar ---------- */
   .lbm-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -682,17 +704,17 @@ export default function LibrarianManagement() {
 
       {/* Stat cards */}
       <div className="lbm-stats-grid">
-        <div className="lbm-stat-card">
-          <div className="lbm-stat-icon" style={{ background: GOLD_PALE }}><Users size={19} color={GOLD_DEEP} /></div>
-          <div><div className="lbm-stat-value">{loading ? '—' : librarians.length}</div><div className="lbm-stat-label">Total Librarians</div></div>
+        <div className="lbm-stat-card" style={{ '--accent': GOLD_DEEP }}>
+          <div className="lbm-stat-icon"><Users size={34} strokeWidth={1.6} /></div>
+          <div><div className="lbm-stat-label">Total Librarians</div><div className="lbm-stat-value">{loading ? '—' : librarians.length}</div></div>
         </div>
-        <div className="lbm-stat-card">
-          <div className="lbm-stat-icon" style={{ background: 'rgba(34,197,94,0.12)' }}><Building2 size={19} color="#178A4C" /></div>
-          <div><div className="lbm-stat-value">{loading ? '—' : withCampus}</div><div className="lbm-stat-label">With Campus</div></div>
+        <div className="lbm-stat-card" style={{ '--accent': '#178A4C' }}>
+          <div className="lbm-stat-icon"><Building2 size={34} strokeWidth={1.6} /></div>
+          <div><div className="lbm-stat-label">With Campus</div><div className="lbm-stat-value">{loading ? '—' : withCampus}</div></div>
         </div>
-        <div className="lbm-stat-card">
-          <div className="lbm-stat-icon" style={{ background: 'rgba(239,68,68,0.10)' }}><AlertTriangle size={19} color={DANGER} /></div>
-          <div><div className="lbm-stat-value">{loading ? '—' : noCampus}</div><div className="lbm-stat-label">No Campus</div></div>
+        <div className="lbm-stat-card" style={{ '--accent': DANGER }}>
+          <div className="lbm-stat-icon"><AlertTriangle size={34} strokeWidth={1.6} /></div>
+          <div><div className="lbm-stat-label">No Campus</div><div className="lbm-stat-value">{loading ? '—' : noCampus}</div></div>
         </div>
       </div>
 

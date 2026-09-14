@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
 import {
   getNotifPrefTypesForRole,
@@ -1250,6 +1250,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         last_name:   form.last_name.trim(),
         middle_name: form.middle_name.trim(),
         username:    form.username.trim(),
+        email:       form.email.trim(),
         updated_at:  new Date().toISOString(),
       }).eq('id', uid);
       if (pErr) throw pErr;
@@ -1257,22 +1258,49 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
       // Keep auth user_metadata in sync as a best-effort step. A stale or
       // just-refreshed session can momentarily report "Auth session
       // missing" here even though the profiles update above already
-      // succeeded, so this step is non-fatal and never blocks the save.
+      // succeeded, so a metadata-only failure is non-fatal and never
+      // blocks the save.
       const metaUpdate = { first_name: form.first_name.trim(), last_name: form.last_name.trim() };
-      try {
-        if (form.email.trim() && form.email.trim() !== email) {
-          const { error: mErr } = await supabase.auth.updateUser({ email: form.email.trim(), data: metaUpdate });
-          if (mErr) throw mErr;
-          onToast('Profile updated. Check your new email inbox to confirm the change.', true);
-        } else {
-          const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
-          if (mErr) throw mErr;
-          onToast('Profile updated successfully.', true);
+      const emailChanged = form.email.trim() && form.email.trim() !== email;
+
+      if (emailChanged) {
+        // Email changes go through the admin (service-role) client with
+        // email_confirm: true so the new address takes effect immediately
+        // in Supabase auth — no confirmation link required. This is
+        // deliberate: Supabase's built-in email sender is currently
+        // rate-limited on this project (bounce-rate notice from Supabase),
+        // so the normal supabase.auth.updateUser({ email }) flow would
+        // silently sit "pending confirmation" forever, which is exactly
+        // the symptom of the email field looking editable but never
+        // actually updating.
+        const { error: adminErr } = await supabaseAdmin.auth.admin.updateUserById(uid, {
+          email: form.email.trim(),
+          email_confirm: true,
+        });
+        if (adminErr) {
+          onToast(`Name/username saved, but email update failed: ${adminErr.message}`, false);
+          setSaving(false);
+          return;
         }
+      }
+
+      try {
+        const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
+        if (mErr) throw mErr;
       } catch (authErr) {
         console.warn('[Profile save] auth metadata sync skipped:', authErr?.message);
-        onToast('Profile updated successfully.', true);
       }
+
+      // Refresh the local session so the UI (and the `user` prop) picks up
+      // the new email right away instead of on next login.
+      if (emailChanged) {
+        try { await supabase.auth.refreshSession(); } catch { /* best effort */ }
+      }
+
+      onToast(
+        emailChanged ? 'Profile updated. Email changed successfully.' : 'Profile updated successfully.',
+        true
+      );
       setEditing(false);
       onRefresh?.();
     } catch (err) { onToast(err.message, false); }

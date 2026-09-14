@@ -134,13 +134,23 @@ const CSS = `
   }
   @keyframes sao-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   .sao-stat-card {
+    position: relative;
     background: ${CARD};
     border: 1px solid ${BORDER};
     border-radius: 16px;
-    padding: 16px;
-    display: flex; align-items: center; gap: 16px;
-    transition: transform 0.16s cubic-bezier(.22,1,.36,1), box-shadow 0.16s, border-color 0.16s;
+    padding: 16px 18px 14px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     animation: sao-rise 0.4s ease both;
+    overflow: hidden;
+  }
+  .sao-stat-card::after {
+    content: '';
+    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    border-radius: 0 0 16px 16px;
+    background: var(--accent, ${MAROON});
+    opacity: 0.65;
   }
   .sao-stats-grid .sao-stat-card:nth-child(1) { animation-delay: 0.02s; }
   .sao-stats-grid .sao-stat-card:nth-child(2) { animation-delay: 0.05s; }
@@ -148,15 +158,24 @@ const CSS = `
   .sao-stats-grid .sao-stat-card:nth-child(4) { animation-delay: 0.11s; }
   .sao-stats-grid .sao-stat-card:nth-child(5) { animation-delay: 0.14s; }
   .sao-stats-grid .sao-stat-card:nth-child(6) { animation-delay: 0.17s; }
-  .sao-stat-card:hover { transform: translateY(-3px); box-shadow: 0 12px 26px rgba(59,42,37,0.08); border-color: rgba(122,0,0,0.22); }
-  .sao-stat-icon {
-    width: 42px; height: 42px; border-radius: 12px;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  .sao-stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 14px 28px rgba(59,42,37,0.09);
+    border-color: var(--accent, rgba(122,0,0,0.3));
   }
-  .sao-stat-body { min-width: 0; }
-  .sao-stat-value { font-size: 22px; font-weight: 800; color: ${TEXT}; line-height: 1.15; font-variant-numeric: tabular-nums; }
-  .sao-stat-label { font-size: 11px; font-weight: 700; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
-  .sao-stat-sub { font-size: 10.5px; color: rgba(138,115,104,0.7); margin-top: 1px; }
+  .sao-stat-icon {
+    position: absolute; top: 12px; right: 12px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--accent, ${MAROON});
+    opacity: 0.10;
+    pointer-events: none;
+    transition: opacity 0.18s;
+  }
+  .sao-stat-card:hover .sao-stat-icon { opacity: 0.16; }
+  .sao-stat-body { min-width: 0; position: relative; z-index: 1; }
+  .sao-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .sao-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-bottom: 5px; }
+  .sao-stat-sub { font-size: 10.5px; color: rgba(138,115,104,0.7); font-weight: 500; }
 
   /* ---------- Section titles ---------- */
   .sao-selector-head {
@@ -364,7 +383,7 @@ const CSS = `
     animation: sao-shimmer-sweep 1.4s infinite;
   }
   .sao-skel-hero { height: 148px; border-radius: 24px; margin-bottom: 24px; }
-  .sao-skel-stat { height: 78px; border-radius: 16px; }
+  .sao-skel-stat { height: 92px; border-radius: 16px; }
   .sao-skel-carousel { height: 190px; border-radius: 18px; margin-bottom: 28px; }
   .sao-skel-table { height: 260px; border-radius: 18px; }
 
@@ -605,13 +624,11 @@ export default function SuperAdminOverview() {
       ) : (
         <div className="sao-stats-grid">
           {STATS_CONFIG.map(({ key, label, sub, Icon, tint }) => (
-            <div key={key} className="sao-stat-card">
-              <div className="sao-stat-icon" style={{ background: tint.bg }}>
-                <Icon size={19} color={tint.fg} strokeWidth={2} />
-              </div>
+            <div key={key} className="sao-stat-card" style={{ '--accent': tint.fg }}>
+              <div className="sao-stat-icon"><Icon size={34} strokeWidth={1.6} /></div>
               <div className="sao-stat-body">
-                <div className="sao-stat-value">{stats?.[key] ?? 0}</div>
                 <div className="sao-stat-label">{label}</div>
+                <div className="sao-stat-value">{stats?.[key] ?? 0}</div>
                 <div className="sao-stat-sub">{sub}</div>
               </div>
             </div>
