@@ -3539,7 +3539,7 @@ function PageFavorites({ user, onNavigate }) {
 
   return (
     <>
-      <PageHero title="My Favorites" sub="Books you saved, all in one place, ready when you need them." />
+      <PageHero title="Favorites" sub="Books you saved, all in one place, ready when you need them." />
       <div className="sdb-module sdb-cat-module">
 
       <div className="sdb-cat-panel">
