@@ -1,5 +1,3 @@
-// src/Student_Dashboard/StudentDashboard.jsx
-// ─── 100% Visual-consistent with Admin Dashboard (Dashboard.css / Dashboard.jsx) ───
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../supabaseClient';
@@ -25,7 +23,7 @@ import {
    INLINE STYLES  — mirrors every token in Dashboard.css exactly
 ═══════════════════════════════════════════════════════════════ */
 const CSS = `
-@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Playfair+Display:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
 
 /* ── Variables (same as Dashboard.css :root) ── */
 :root {
@@ -41,7 +39,7 @@ const CSS = `
   --maroon-card:       #6B0000;
   --maroon-sidebar:    #6E0000;
   --cream:             #FDF8F0;
-  --bg-base:           #FDF8F0;
+  --bg-base:           #F8F0DD;
   --bg-sidebar:        #6E0000;
   --panel-bg:          #EAD9B4;
   --text-primary:      #3A0000;
@@ -53,6 +51,7 @@ const CSS = `
   --border:            rgba(139,0,0,0.18);
   --border-card:       rgba(201,168,76,0.40);
   --font-display:      'Cinzel','Cormorant Garamond',serif;
+  --font-hero:         'Playfair Display','Cormorant Garamond',Georgia,serif;
   --font-sans:         'DM Sans',system-ui,sans-serif;
   --sidebar-w:         252px;
   --sidebar-collapsed-w: 68px;
@@ -84,6 +83,16 @@ const CSS = `
 *,*::before,*::after { box-sizing:border-box; margin:0; padding:0; }
 button { cursor:pointer; }
 
+
+html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
+::-webkit-scrollbar { width:12px; height:12px; }
+::-webkit-scrollbar-track { background:var(--bg-base); }
+::-webkit-scrollbar-thumb {
+  background:var(--maroon-mid); border-radius:10px;
+  border:3px solid var(--bg-base); background-clip:padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background:var(--maroon-deep); }
+
 /* ════════ KEYFRAMES ════════ */
 @keyframes lm-fade-in    { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
 @keyframes lm-modal-in   { from{opacity:0;transform:scale(.93) translateY(-12px)} to{opacity:1;transform:none} }
@@ -97,6 +106,8 @@ button { cursor:pointer; }
   display:flex; flex-direction:column; min-height:100vh; width:100%;
   background:var(--bg-base); color:var(--text-primary);
   font-family:var(--font-sans); font-size:14px; line-height:1.5;
+  overflow-x:hidden; /* safety net for the full-bleed banner's 100vw breakout — sits
+                         at the true root so it never clips the breakout itself */
 }
 
 /* ════════ TOP NAVBAR ════════ */
@@ -257,16 +268,23 @@ button { cursor:pointer; }
 .sdb-mobnav-item.active { background:rgba(201,168,76,.20); color:#FFE97A; font-weight:700; }
 
 /* ════════ MAIN / CONTENT ════════ */
-.sdb-main { flex:1; display:flex; flex-direction:column; min-height:0; width:100%; }
+.sdb-main { flex:1; display:flex; flex-direction:column; width:100%; }
 .sdb-content {
-  flex:1; padding:28px 30px; overflow-y:auto; background:var(--bg-base);
-  scrollbar-width:thin; scrollbar-color:rgba(139,0,0,.20) transparent;
+  /* The page now scrolls as one normal document (.sdb-navbar is already
+     position:sticky, built for exactly this) instead of scrolling inside
+     this box. A nested overflow:auto here used to reserve its own
+     scrollbar gutter and quietly shave a few px off JUST this element's
+     right edge — since .sdb-navbar sits outside it and never lost that
+     width, the two edges drifted apart by the scrollbar's width. With no
+     scrollbar nested in here, .sdb-content stays pixel-identical to
+     .sdb-navbar's box at every width, with nothing to compensate for.
+     The 1520px reading-width cap + padding live on .sdb-module, so every
+     page's normal content (search bar, cards, tables…) is unchanged. */
+  flex:1; width:100%; background:var(--bg-base);
 }
-.sdb-content::-webkit-scrollbar { width:5px; }
-.sdb-content::-webkit-scrollbar-thumb { background:rgba(139,0,0,.20); border-radius:10px; }
 
 /* ════════ MODULE ════════ */
-.sdb-module { animation:lm-fade-in .32s ease; }
+.sdb-module { max-width:1520px; margin:0 auto; padding:28px 30px; animation:lm-fade-in .32s ease; }
 .sdb-module-header {
   display:flex; align-items:flex-start; justify-content:space-between;
   margin-bottom:24px; gap:16px; flex-wrap:wrap;
@@ -353,27 +371,46 @@ button { cursor:pointer; }
 
 /* ════════ CATALOG GRID ════════ */
 .sdb-book-grid {
-  display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:18px;
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:22px;
+  align-items:stretch;
 }
+/* Skeleton placeholders match the real card height so nothing jumps on load */
+.sdb-book-grid > .sdb-skeleton { height:440px !important; }
 /* Book card — matches .lm-book-card */
 .sdb-book-card {
   background:linear-gradient(160deg,#FDF6EC 0%,#FAF0E4 100%);
-  border:1px solid rgba(139,0,0,.14); border-radius:var(--radius-lg);
-  overflow:hidden; cursor:pointer;
+  border:1px solid rgba(139,0,0,.16); border-radius:var(--radius-lg);
+  overflow:hidden; cursor:pointer; min-width:0;
   transition:border-color var(--ease),transform var(--ease),box-shadow var(--ease);
   box-shadow:0 2px 8px rgba(80,0,0,.07),0 6px 24px rgba(80,0,0,.05); display:flex; flex-direction:column;
 }
 .sdb-book-card:hover {
-  border-color:rgba(139,0,0,.30); transform:translateY(-6px);
+  border-color:rgba(139,0,0,.34); transform:translateY(-6px);
   box-shadow:0 16px 34px rgba(80,0,0,.16);
 }
+/* Cover stage — fixed frame, whole cover always visible (never cropped) */
 .sdb-book-cover-area {
-  height:120px; display:flex; align-items:center; justify-content:center;
-  background:linear-gradient(145deg,rgba(122,0,0,.06) 0%,rgba(122,0,0,.12) 100%);
-  border-bottom:1px solid rgba(139,0,0,.12); position:relative; overflow:hidden;
+  height:250px; flex-shrink:0; box-sizing:border-box; padding:18px;
+  display:flex; align-items:center; justify-content:center;
+  background:
+    radial-gradient(ellipse at 50% 42%,rgba(255,255,255,.55) 0%,rgba(255,255,255,0) 68%),
+    linear-gradient(145deg,rgba(122,0,0,.07) 0%,rgba(122,0,0,.14) 100%);
+  border-bottom:1px solid rgba(139,0,0,.14); position:relative; overflow:hidden;
 }
-.sdb-book-cover-area img { height:100%; width:100%; object-fit:cover; transition:transform .28s ease; }
-.sdb-book-card:hover .sdb-book-cover-area img { transform:scale(1.06); filter:brightness(1.05); }
+.sdb-book-cover-area img {
+  width:auto !important; height:auto !important;
+  max-width:100% !important; max-height:100% !important;
+  object-fit:contain !important; border-radius:4px !important; display:block;
+  border:1px solid rgba(139,0,0,.20);
+  box-shadow:0 8px 18px rgba(50,0,0,.28),0 2px 4px rgba(50,0,0,.18);
+  transition:transform .28s ease, box-shadow .28s ease;
+}
+/* Fallback cover (shown when a book has no image) keeps a proper book proportion */
+.sdb-book-cover-area > div:not(.sdb-ol-tag) {
+  width:64% !important; height:100% !important; border-radius:4px !important;
+  box-shadow:0 8px 18px rgba(50,0,0,.28);
+}
+.sdb-book-card:hover .sdb-book-cover-area img { transform:scale(1.035); box-shadow:0 12px 24px rgba(50,0,0,.34),0 3px 6px rgba(50,0,0,.2); }
 .sdb-fav-btn {
   position:absolute; top:7px; right:7px;
   background:rgba(255,255,255,.85); border:1px solid rgba(139,0,0,.18);
@@ -382,18 +419,234 @@ button { cursor:pointer; }
   transition:all .18s; backdrop-filter:blur(4px);
 }
 .sdb-fav-btn:hover { background:#fff; transform:scale(1.12); }
-.sdb-book-body { padding:14px; flex:1; display:flex; flex-direction:column; }
+.sdb-book-body { padding:16px 16px 16px; flex:1; display:flex; flex-direction:column; align-items:flex-start; text-align:left; }
 .sdb-book-title {
-  font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:3px;
-  line-height:1.35; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  font-size:14px; font-weight:700; color:var(--text-primary); margin-bottom:4px; width:100%;
+  line-height:1.35; min-height:calc(2 * 1.35em); /* reserve 2 lines so every card lines up */
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  text-align:left;
 }
-.sdb-book-author { font-size:11px; color:var(--text-muted); margin-bottom:8px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sdb-book-author { font-size:12px; color:var(--text-muted); margin-bottom:10px; width:100%; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-align:left; }
 .sdb-book-genre {
-  display:inline-block; padding:2px 9px; border-radius:12px;
-  font-size:10px; font-family:var(--font-sans);
-  background:rgba(122,0,0,.07); color:var(--maroon); border:1px solid rgba(122,0,0,.16);
+  display:inline-flex; align-items:center; gap:5px; max-width:100%; box-sizing:border-box; padding:4px 11px; border-radius:14px;
+  font-size:11px; font-family:var(--font-sans); text-align:left; font-weight:500;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  background:rgba(122,0,0,.07); color:var(--maroon); border:1px solid rgba(122,0,0,.18);
 }
-.sdb-book-actions { display:flex; gap:6px; margin-top:10px; }
+.sdb-book-genre svg { flex-shrink:0; width:11px; height:11px; }
+/* Bookmark ribbon — top-left corner of every catalog cover */
+.sdb-book-bookmark {
+  position:absolute; top:10px; left:10px; z-index:2;
+  width:29px; height:29px; border-radius:9px;
+  background:linear-gradient(135deg,var(--maroon-mid),var(--maroon-deep));
+  display:flex; align-items:center; justify-content:center;
+  color:var(--gold-pale); box-shadow:0 3px 10px rgba(40,0,0,.35);
+  border:1px solid rgba(201,168,76,.35);
+}
+.sdb-book-actions { display:flex; gap:8px; margin-top:auto; padding-top:14px; width:100%; align-items:stretch; }
+.sdb-book-actions .sdb-btn { justify-content:center; min-height:36px; }
+.sdb-book-actions .sdb-tbl-btn { min-width:38px; min-height:36px; display:inline-flex; align-items:center; justify-content:center; }
+@media (max-width:768px) {
+  .sdb-book-grid { gap:14px; }
+  .sdb-book-cover-area { height:200px; padding:12px; }
+  .sdb-book-body { padding:12px; }
+  .sdb-book-grid > .sdb-skeleton { height:380px !important; }
+}
+
+
+.sdb-book-grid.sdb-bk-grid { grid-template-columns:repeat(6,minmax(0,1fr)); gap:22px; }   /* 6 per row on desktop */
+@media (max-width:1279px) { .sdb-book-grid.sdb-bk-grid { grid-template-columns:repeat(5,minmax(0,1fr)); } }
+@media (max-width:999px)  { .sdb-book-grid.sdb-bk-grid { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+.sdb-bk-card {
+  position:relative; display:flex; flex-direction:column; min-width:0; cursor:pointer;
+  background:#FDF3E3 url('/BookCover.png') center/cover no-repeat;
+  border:1px solid rgba(107,0,0,.14); border-radius:3px; overflow:hidden;
+  box-shadow:0 2px 6px rgba(80,0,0,.08),0 10px 28px rgba(80,0,0,.10);
+  transition:transform var(--ease),box-shadow var(--ease),border-color var(--ease);
+}
+.sdb-bk-card:hover { transform:translateY(-6px); border-color:rgba(107,0,0,.32); box-shadow:0 16px 34px rgba(80,0,0,.20); }
+/* Cover — fixed book proportion (270 x 385), whole cover always visible */
+.sdb-bk-cover { position:relative; flex-shrink:0; margin:9.4% 10.3% 0; aspect-ratio:270 / 385; }
+.sdb-bk-cover > img,
+.sdb-bk-cover > div { position:absolute; inset:0; width:100% !important; height:100% !important; }
+.sdb-bk-cover > img { object-fit:contain !important; border-radius:2px !important; }
+/* Bookmark (save) — top-right corner, overlapping the cover's corner */
+.sdb-bk-bookmark {
+  position:absolute; top:8px; right:10px; z-index:3; width:32px; height:32px; padding:0;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
+  background:#6B0000; color:#FFF6DF; border:2px solid #3F0000; border-radius:7px;
+  box-shadow:0 3px 8px rgba(40,0,0,.30); transition:transform .18s ease,background .18s ease;
+}
+.sdb-bk-bookmark:hover { transform:scale(1.08); background:#7B0000; }
+.sdb-bk-bookmark svg { width:17px; height:17px; display:block; }
+/* Title + author — kept tight together */
+.sdb-bk-info { padding:14px 10.3% 0; }
+.sdb-bk-title {
+  font-family:'Playfair Display',var(--font-display),serif; font-size:16px; font-weight:700;
+  line-height:1.2; color:#6B0000; text-align:left;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.sdb-bk-author {
+  font-family:var(--font-sans); font-size:13px; line-height:1.3; color:#A0524F; margin-top:2px; text-align:left;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+}
+/* View Details — full-width bar pinned to the bottom of every card */
+.sdb-bk-foot { margin-top:auto; padding:12px 4.1% 4.5%; }
+.sdb-bk-btn {
+  display:block; width:100%; height:32px; border:0; border-radius:4px; cursor:pointer;
+  background:#6B0000; color:#fff; font-family:var(--font-sans); font-size:14px; font-weight:500;
+  transition:background .18s ease;
+}
+.sdb-bk-btn:hover { background:#560000; }
+/* Open Library variant: status pill under the author, View Details + Borrow/Read side by side */
+.sdb-bk-info .sdb-ol-status { margin-top:6px; max-width:100%; box-sizing:border-box; overflow:hidden; text-overflow:ellipsis; }
+.sdb-bk-foot-row { display:flex; gap:6px; }
+.sdb-bk-foot-row .sdb-bk-btn { flex:1; min-width:0; padding:0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.sdb-bk-btn.sdb-bk-btn-read { background:linear-gradient(135deg,var(--gold-light),var(--gold-dim)); color:var(--maroon-deep); font-weight:600; }
+.sdb-bk-btn.sdb-bk-btn-read:hover { background:linear-gradient(135deg,var(--gold-pale),var(--gold)); }
+/* "Readers' All-Time Favorites" shelf (Home) — same card, no button; keeps the shelf's own 6 / 3 / 2 per-row scroller */
+.sdb-mr-bk-card { flex:0 0 calc((100% - 5 * 18px) / 6); scroll-snap-align:start; box-shadow:0 2px 6px rgba(80,0,0,.08),0 4px 14px rgba(80,0,0,.08); }
+.sdb-mr-bk-card:hover { transform:translateY(-4px); box-shadow:0 10px 24px rgba(80,0,0,.20); }
+.sdb-mr-bk-card .sdb-bk-info { padding-bottom:16px; }
+@media (max-width:1100px) { .sdb-mr-bk-card { flex-basis:calc((100% - 2 * 18px) / 3); } }
+@media (max-width:640px)  { .sdb-mr-bk-card { flex-basis:calc((100% - 1 * 18px) / 2); } }
+@media (max-width:768px) {
+  .sdb-book-grid.sdb-bk-grid { gap:14px; }
+  .sdb-bk-bookmark { top:6px; right:7px; width:28px; height:28px; border-radius:6px; }
+  .sdb-bk-bookmark svg { width:14px; height:14px; }
+  .sdb-bk-info { padding-top:10px; }
+  .sdb-bk-title { font-size:13px; }
+  .sdb-bk-author { font-size:11px; }
+  .sdb-bk-foot { padding-top:8px; }
+  .sdb-bk-btn { height:28px; font-size:12px; }
+}
+
+/* ════════ BOOK DETAILS POPUP — bordered two-card layout (Browse Catalog) ════════
+   Own sdb-bd-* classes; the shared .sdb-modal* rules are not touched. */
+.sdb-bd-hdr {
+  position:relative; flex-shrink:0; display:flex; align-items:center; gap:14px;
+  padding:16px 22px; background:linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid));
+  border-bottom:1px solid rgba(201,168,76,.35);
+}
+.sdb-bd-hdr-ico { display:flex; flex:none; color:var(--gold-pale); }
+.sdb-bd-hdr-ico svg { width:30px; height:30px; }
+.sdb-bd-hdr-text { flex:1; min-width:0; text-align:left; }
+.sdb-bd-hdr-title { font-family:'Playfair Display',var(--font-display),serif; font-size:24px; font-weight:600; line-height:1.15; color:#FFF6DF; }
+.sdb-bd-hdr-sub {
+  display:flex; align-items:center; gap:8px; margin-top:4px;
+  font-family:var(--font-sans); font-size:10.5px; letter-spacing:.2em; text-transform:uppercase; color:rgba(245,228,168,.70);
+}
+.sdb-bd-hdr-sub::before { content:''; flex:none; width:16px; height:1px; background:rgba(245,228,168,.55); }
+.sdb-bd-hdr .sdb-modal-close { flex:none; width:36px; height:36px; }
+.sdb-modal-body.sdb-bd-body {
+  padding:16px; display:grid; grid-template-columns:minmax(190px,31%) minmax(0,1fr);
+  gap:14px; align-items:start; text-align:left;
+}
+.sdb-bd-side, .sdb-bd-main { border:1px solid rgba(139,0,0,.18); border-radius:14px; background:rgba(255,255,255,.55); }
+.sdb-bd-side { position:sticky; top:0; padding:18px 14px 16px; display:flex; flex-direction:column; align-items:center; gap:12px; }
+.sdb-bd-cover { position:relative; flex-shrink:0; width:82%; aspect-ratio:160 / 204; }
+.sdb-bd-cover > img,
+.sdb-bd-cover > div { position:absolute; inset:0; width:100% !important; height:100% !important; }
+.sdb-bd-cover > img { object-fit:contain !important; border-radius:3px !important; filter:drop-shadow(0 6px 10px rgba(50,0,0,.30)); }
+.sdb-bd-copies { margin-top:0; font-family:var(--font-sans); font-size:11.5px; color:var(--text-muted); text-align:center; }
+.sdb-bd-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px; width:100%; min-height:40px; padding:0 14px;
+  border-radius:8px; cursor:pointer; font-family:var(--font-sans); font-size:12.5px; font-weight:500;
+  transition:filter .18s ease, background .18s ease;
+}
+.sdb-bd-btn svg { width:16px; height:16px; flex:none; }
+.sdb-bd-btn-lbl { display:inline-flex; align-items:center; gap:8px; }
+.sdb-bd-btn-fav { justify-content:space-between; background:linear-gradient(180deg,#7A1414,#5C0D0D); color:#FFF6DF; border:1px solid #4A0000; box-shadow:0 3px 8px rgba(80,0,0,.25); }
+.sdb-bd-btn-fav:hover { filter:brightness(1.14); }
+.sdb-bd-btn-gold { background:linear-gradient(135deg,var(--gold-light),var(--gold-dim)); color:var(--maroon-deep); border:1px solid rgba(122,0,0,.30); font-weight:600; }
+.sdb-bd-btn-gold:hover { filter:brightness(1.08); }
+.sdb-bd-btn-ghost { background:rgba(255,255,255,.70); color:var(--maroon-deep); border:1px solid rgba(139,0,0,.22); }
+.sdb-bd-btn-ghost:hover { background:#fff; }
+.sdb-bd-main { padding:20px 20px 22px; min-width:0; text-align:left; }
+.sdb-bd-title { font-family:'Playfair Display',var(--font-display),serif; font-size:clamp(22px,2.6vw,28px); font-weight:700; line-height:1.2; color:var(--text-primary); margin:0 0 6px; text-align:left; }
+.sdb-bd-by { font-family:var(--font-sans); font-size:13.5px; color:var(--text-secondary); margin-bottom:16px; text-align:left; }
+.sdb-bd-facts { display:grid; grid-template-columns:1fr 1fr; gap:14px 20px; padding:14px 16px; border:1px solid rgba(139,0,0,.16); border-radius:12px; background:rgba(255,255,255,.45); }
+.sdb-bd-fact { display:flex; align-items:center; gap:11px; min-width:0; }
+.sdb-bd-fact-ico { flex:none; width:32px; height:32px; display:flex; align-items:center; justify-content:center; color:var(--maroon-deep); background:rgba(255,255,255,.70); border:1px solid rgba(139,0,0,.18); border-radius:9px; }
+.sdb-bd-fact-ico svg { width:16px; height:16px; }
+.sdb-bd-fact-txt { min-width:0; text-align:left; }
+.sdb-bd-fact-k { font-family:var(--font-sans); font-size:9.5px; font-weight:600; letter-spacing:.14em; text-transform:uppercase; color:var(--text-dim); }
+.sdb-bd-fact-v { margin-top:1px; font-family:var(--font-sans); font-size:13px; color:var(--text-primary); overflow-wrap:anywhere; }
+.sdb-bd-abs-hd { display:flex; align-items:center; gap:10px; margin:20px 0 10px; font-family:var(--font-sans); font-size:10.5px; font-weight:600; letter-spacing:.2em; text-transform:uppercase; color:var(--text-dim); }
+.sdb-bd-abs-hd svg { width:16px; height:16px; flex:none; }
+.sdb-bd-abs-hd::after { content:''; flex:1; height:1px; background:rgba(139,0,0,.16); }
+.sdb-bd-desc { margin:0; font-family:var(--font-sans); font-size:13.5px; line-height:1.75; color:var(--text-secondary); text-align:left; }
+.sdb-bd-note { margin-top:16px; padding:12px 14px; border:1px solid rgba(139,0,0,.16); border-radius:10px; background:rgba(255,255,255,.45); font-family:var(--font-sans); font-size:12.5px; line-height:1.65; color:var(--text-muted); text-align:left; }
+@media (max-width:640px) {
+  .sdb-modal-body.sdb-bd-body { grid-template-columns:1fr; }
+  .sdb-bd-side { position:static; }
+  .sdb-bd-cover { width:58%; }
+  .sdb-bd-facts { grid-template-columns:1fr; }
+  .sdb-bd-hdr { padding:14px 16px; }
+  .sdb-bd-hdr-title { font-size:20px; }
+}
+
+/* ════════ BROWSE CATALOG — PANEL + TOOLBAR (scoped to Browse Catalog only,
+   uses its own sdb-cat-* classes so History/Settings/forms, which share
+   .sdb-filters / .sdb-input / .sdb-select / .sdb-count, are unaffected) ════════ */
+/* Closer gap between the hero banner and the search panel (Browse Catalog only):
+   the hero's own 24px bottom margin is kept, the module's extra 28px top padding is removed. */
+.sdb-module.sdb-cat-module { padding-top:0; }
+/* Borrowing History reuses the same panel — inner wrapper keeps the search + table above the panel's decorative leaf */
+.sdb-hist-inner { position:relative; z-index:1; }
+/* Floating panel — Browse Catalog / Borrowing History / Favorites.
+   The panel is pulled up so it overlaps the bottom edge of the hero banner (~22px) and sits above it.
+   Negative margin = the banner's own bottom margin (24 / 20 / 16 / 14px per breakpoint) + the overlap.
+   NOTE: z-index lives on the PANEL, not the module — a z-index on the module would trap the book-details
+   modal (position:fixed) inside a low stacking context, underneath the navbar. */
+.sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-46px; }
+.sdb-page-hero + .sdb-module.sdb-cat-module .sdb-cat-panel { z-index:2; box-shadow:0 12px 32px rgba(80,0,0,.16),0 3px 8px rgba(80,0,0,.08); }
+@media (max-width:1024px) { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-40px; } }
+@media (max-width:768px)  { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-30px; } }
+@media (max-width:480px)  { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-26px; } }
+.sdb-cat-panel {
+  position:relative; background:linear-gradient(160deg,#FBF4E6 0%,#F6ECDA 100%);
+  border:1px solid rgba(139,0,0,.14); border-radius:22px;
+  padding:22px 24px 26px; margin-bottom:26px; overflow:hidden;
+  box-shadow:0 4px 20px rgba(80,0,0,.06);
+}
+.sdb-cat-toolbar { position:relative; z-index:1; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.sdb-cat-search { position:relative; flex:1 1 260px; min-width:220px; }
+.sdb-cat-search-icon {
+  position:absolute; left:16px; top:50%; transform:translateY(-50%);
+  color:var(--text-muted); display:flex; pointer-events:none;
+}
+.sdb-cat-search input {
+  width:100%; padding:12px 18px 12px 42px; border-radius:999px; box-sizing:border-box;
+  border:1px solid rgba(139,0,0,.16); background:var(--cream);
+  color:var(--text-primary); font-family:var(--font-sans); font-size:13.5px;
+  outline:none; transition:border-color var(--ease),box-shadow var(--ease),background var(--ease);
+}
+.sdb-cat-search input::placeholder { color:var(--text-dim); }
+.sdb-cat-search input:focus { border-color:var(--maroon-mid); box-shadow:0 0 0 3px rgba(139,0,0,.10); background:#fff; }
+.sdb-cat-pillselect {
+  padding:11px 36px 11px 16px; border-radius:999px; flex-shrink:0;
+  border:1px solid rgba(139,0,0,.16); background:var(--cream);
+  color:var(--text-primary); font-family:var(--font-sans); font-size:12.5px; font-weight:500;
+  outline:none; cursor:pointer; appearance:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237A3030' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position:right 14px center;
+  transition:border-color var(--ease),box-shadow var(--ease);
+}
+.sdb-cat-pillselect:focus { border-color:rgba(139,0,0,.4); box-shadow:0 0 0 3px rgba(139,0,0,.09); }
+.sdb-cat-count {
+  display:inline-flex; align-items:center; gap:8px; flex-shrink:0;
+  padding:11px 20px; border-radius:999px; white-space:nowrap;
+  background:linear-gradient(135deg,var(--maroon-mid),var(--maroon-deep));
+  color:var(--gold-pale); font-family:var(--font-sans); font-size:12.5px; font-weight:600;
+  border:1px solid rgba(201,168,76,.30); box-shadow:0 2px 10px rgba(40,0,0,.25);
+}
+.sdb-cat-count svg { flex-shrink:0; }
+.sdb-cat-body { position:relative; z-index:1; margin-top:22px; }
+@media (max-width:640px) {
+  .sdb-cat-panel { padding:16px 16px 20px; border-radius:16px; }
+  .sdb-cat-count { order:99; width:100%; justify-content:center; }
+}
 
 /* ── Open Library integration — small additions, same visual language ── */
 .sdb-ol-tag {
@@ -451,7 +704,7 @@ button { cursor:pointer; }
 .sdb-table-wrap tbody tr { border-bottom:1px solid rgba(139,0,0,.08); transition:background var(--ease); }
 .sdb-table-wrap tbody tr:last-child { border-bottom:none; }
 .sdb-table-wrap tbody tr:hover { background:rgba(122,0,0,.04); }
-.sdb-table-wrap tbody td { padding:12px 16px; font-size:13px; color:var(--text-secondary); vertical-align:middle; }
+.sdb-table-wrap tbody td { padding:12px 16px; text-align:left;font-size:13px; color:var(--text-secondary); vertical-align:middle; }
 
 /* Book cell — cover + stacked title/author, used inside any table */
 .sdb-rtbl-book { display:flex; align-items:center; gap:12px; min-width:180px; }
@@ -717,85 +970,407 @@ button { cursor:pointer; }
 .sdb-tab:hover { color:var(--text-secondary); }
 .sdb-tab.on { font-weight:700; color:var(--maroon); border-bottom-color:var(--maroon); }
 
-/* ════════ DARK MODE ════════ */
 .sdb-shell {
   --dd-bg:#ffffff; --dd-border:rgba(139,0,0,.14); --dd-head-bg:rgba(139,0,0,.04); --dd-hover:rgba(139,0,0,.06);
 }
-.sdb-shell.sdb-dark {
-  --bg-base:#170A0A; --cream:#22100F; --text-primary:#F5E4A8; --text-secondary:#E7D3B0;
-  --text-muted:#C7AD8C; --text-dim:rgba(245,228,168,.55);
-  --dd-bg:#2A1412; --dd-border:rgba(201,168,76,.22); --dd-head-bg:rgba(201,168,76,.06); --dd-hover:rgba(201,168,76,.10);
-}
-.sdb-dark .sdb-content { background:var(--bg-base); }
-.sdb-dark .sdb-module-title,
-.sdb-dark .sdb-profile-banner .sdb-module-title { color:#F5D67A; }
-.sdb-dark .sdb-module-sub,
-.sdb-dark .sdb-breadcrumb { color:var(--text-muted); }
-.sdb-dark .sdb-input,
-.sdb-dark .sdb-select {
-  background:var(--cream); color:var(--text-primary);
-  border-color:rgba(201,168,76,.30);
-}
-.sdb-dark .sdb-select { background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23E7D3B0' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E"); }
-.sdb-dark .sdb-input::placeholder { color:var(--text-dim); }
-.sdb-dark .sdb-input:focus { background:#2A1412; box-shadow:0 0 0 3px rgba(201,168,76,.14); }
-.sdb-dark .sdb-count { background:rgba(201,168,76,.08); border-color:rgba(201,168,76,.18); color:var(--text-muted); }
-.sdb-dark .sdb-empty-text { color:#F0C773; }
-.sdb-dark .sdb-empty-sub { color:var(--text-muted); }
-.sdb-dark .sdb-modal { background:var(--cream); border-color:rgba(201,168,76,.24); }
-.sdb-dark .sdb-modal-body { background:var(--cream); }
-.sdb-dark .sdb-modal-foot { background:rgba(201,168,76,.05); border-top-color:rgba(201,168,76,.16); }
-.sdb-dark .sdb-label { color:var(--text-dim); }
-.sdb-dark .sdb-info-row,
-.sdb-dark .sdb-form-group div[style*="border-bottom"] { border-color:rgba(201,168,76,.12); }
-/* Dark-mode card surfaces (stat cards, panels, book cards, table, welcome hero, profile banner) */
-.sdb-dark .sdb-stat-card,
-.sdb-dark .sdb-panel,
-.sdb-dark .sdb-book-card,
-.sdb-dark .sdb-table-wrap,
-.sdb-dark .sdb-profile-banner {
-  background:linear-gradient(160deg,#2A1412 0%,#22100F 100%);
-  border-color:rgba(201,168,76,.22);
-  box-shadow:0 4px 18px rgba(0,0,0,.35);
-}
-.sdb-dark .sdb-welcome-card {
-  background:linear-gradient(135deg,#2A1412 0%,#1B0D0C 100%);
-  border-color:rgba(201,168,76,.28);
-}
-.sdb-dark .sdb-stat-label,
-.sdb-dark .sdb-stat-sub,
-.sdb-dark .sdb-book-author,
-.sdb-dark .sdb-activity-time,
-.sdb-dark .sdb-info-key { color:var(--text-muted); }
-.sdb-dark .sdb-stat-value { color:#F0C773; }
-.sdb-dark .sdb-book-title,
-.sdb-dark .sdb-activity-text,
-.sdb-dark .sdb-info-val,
-.sdb-dark .sdb-table-wrap tbody td { color:var(--text-secondary); }
-.sdb-dark .sdb-table-wrap thead th { color:#F5E4A8; }
-.sdb-dark .sdb-panel-hdr,
-.sdb-dark .sdb-tbl-edit,
-.sdb-dark .sdb-btn-ghost { color:var(--gold); }
-.sdb-dark .sdb-table-wrap tbody tr:hover,
-.sdb-dark .sdb-activity-item:hover { background:rgba(201,168,76,.06); }
-.sdb-dark .sdb-btn-ghost { border-color:rgba(201,168,76,.38); }
-.sdb-dark .sdb-btn-ghost:hover:not(:disabled) { background:rgba(201,168,76,.10); border-color:rgba(201,168,76,.58); color:var(--gold-light); }
-.sdb-dark .sdb-tabs { border-bottom-color:rgba(201,168,76,.20); }
-.sdb-dark .sdb-tab { color:var(--text-muted); }
-.sdb-dark .sdb-tab.on { color:var(--gold); border-bottom-color:var(--gold); }
-.sdb-dark .sdb-profile-cover::after { background:linear-gradient(90deg,transparent,rgba(201,168,76,.30),transparent); }
-.sdb-dark .sdb-hero-name {  color: transparent; }
 .sdb-hero-name--onbanner { color:#F5E4A8 !important; text-shadow:0 1px 3px rgba(0,0,0,.45); }
-.sdb-dark .sdb-hero-name--onbanner { color: transparent; }
-.sdb-dark .sdb-navbar { border-bottom-color:var(--gold-dim); }
-.sdb-dark .sdb-profile-chip { background:rgba(255,255,255,.92); }
-.sdb-dark .sdb-dropdown-item.danger { color:#e28a8a; }
-.sdb-dark .sdb-dropdown-item.danger svg { color:#e28a8a; }
+
+
+.sdb-home-hero {
+  position:relative; display:flex; align-items:center; justify-content:flex-start;
+  margin:-28px -30px 0; padding:0; overflow:hidden;
+  min-height:clamp(330px,30vw,450px);
+  background:#F8F0DD; border:none; border-radius:0; box-shadow:none;
+}
+.sdb-home-hero-media {
+  position:absolute; top:0; right:0; bottom:0; width:62%;
+  border:none; border-radius:0; box-shadow:inset 0 14px 26px -18px rgba(20,8,0,.30),inset 0 -18px 30px -16px rgba(20,8,0,.28);
+  z-index:0; overflow:hidden;
+}
+.sdb-home-hero-media img { width:100%; height:100%; object-fit:cover; display:block; }
+.sdb-home-hero-media::after {      /* the photo melts into the copy — one long, smooth transparent fade, no hard edge */
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:
+    linear-gradient(90deg,
+      #F8F0DD 0%,
+      rgba(248,240,221,.92) 9%,
+      rgba(243,231,199,.76) 18%,
+      rgba(238,219,175,.56) 28%,
+      rgba(232,204,150,.36) 38%,
+      rgba(232,204,150,.18) 48%,
+      rgba(232,204,150,.07) 57%,
+      rgba(232,204,150,0) 66%
+    ),
+    linear-gradient(180deg,rgba(30,14,4,.14) 0%,rgba(30,14,4,0) 18%,rgba(30,14,4,0) 76%,rgba(24,10,2,.20) 100%);
+}
+.sdb-home-hero-text {
+  position:relative; z-index:1; flex:0 1 640px; max-width:640px;
+  padding:0 40px 54px 150px; text-align:left;
+}
+.sdb-home-hero-eyebrow {
+  font-family:var(--font-sans); font-size:13px; font-weight:600; text-align:left;
+  letter-spacing:.07em; text-transform:uppercase; color:var(--maroon-deep); margin-bottom:18px;
+}
+.sdb-home-hero-title {
+  font-family:var(--font-hero); font-weight:700; letter-spacing:-.005em; text-align:left;
+  font-size:clamp(28px,3.2vw,46px); line-height:1.14; color:var(--maroon-deep); margin-bottom:18px;
+}
+.sdb-home-hero-sub {
+  font-family:var(--font-sans); font-size:14px; font-weight:500; line-height:1.55; text-align:left;
+  color:var(--maroon); margin-bottom:28px; max-width:300px;
+}
+.sdb-home-hero-actions { display:flex; gap:12px; flex-wrap:wrap; }
+
+/* ── stats strip — single ivory card that overlaps the hero's lower edge ── */
+.sdb-home-stats-bar {
+  position:relative; z-index:2; display:flex;
+  margin:-48px 0 30px;
+  background:linear-gradient(180deg,#FFFCF5 0%,#FBF3E3 100%);
+  border:1px solid rgba(139,0,0,.10); border-radius:6px;
+  overflow:hidden;
+  box-shadow:0 6px 22px rgba(80,0,0,.10), inset 0 1px 0 rgba(255,255,255,.8);
+}
+.sdb-home-stat {
+  position:relative; flex:1; display:flex; flex-direction:column; align-items:center;
+  gap:11px; text-align:center; padding:26px 12px 24px;
+  border-right:1px solid rgba(139,0,0,.10);
+  --st-accent:#8B0000; --st-accent-soft:rgba(139,0,0,.09);
+}
+.sdb-home-stat:last-child { border-right:none; }
+.sdb-home-stat-value {
+  font-family:var(--font-hero); font-size:clamp(26px,2.4vw,34px); font-weight:700;
+  color:var(--st-accent); line-height:1; letter-spacing:.01em;
+  font-variant-numeric:tabular-nums; font-feature-settings:'tnum' 1;
+}
+.sdb-home-stat-num  { display:inline-block; }
+.sdb-home-stat-dash { display:inline-block; animation:sdb-stat-breathe 1.4s ease-in-out infinite; }
+.sdb-home-stat-label {
+  font-family:var(--font-sans); font-size:12px; font-weight:600; letter-spacing:.07em;
+  text-transform:uppercase; color:var(--maroon-deep); opacity:.78;
+}
+/* per-column accent colours */
+.sdb-home-stat.st-borrowed  { --st-accent:#8B0000; --st-accent-soft:rgba(139,0,0,.09); }
+.sdb-home-stat.st-returned  { --st-accent:#9A7A31; --st-accent-soft:rgba(201,168,76,.18); }
+.sdb-home-stat.st-available { --st-accent:#2E6A4F; --st-accent-soft:rgba(46,106,79,.11); }
+.sdb-home-stat.st-favorites { --st-accent:#A8324A; --st-accent-soft:rgba(168,50,74,.10); }
+
+@keyframes sdb-stat-breathe { 0%,100%{opacity:.30} 50%{opacity:.62} }
+@media (prefers-reduced-motion: reduce) {
+  .sdb-home-stat-num, .sdb-home-stat-dash { animation:none; }
+}
+
+
+/* ── shared home-section header ── */
+.sdb-home-section { margin-bottom:28px; }
+.sdb-home-section-hdr { display:flex; align-items:flex-end; justify-content:space-between; gap:14px; margin-bottom:16px; flex-wrap:wrap; }
+.sdb-home-eyebrow { font-family:var(--font-sans); font-size:10.5px; font-weight:700; letter-spacing:.20em; text-transform:uppercase; color:var(--maroon); margin-bottom:4px; text-align:left; }
+.sdb-home-section-title { font-family:var(--font-hero); font-size:clamp(21px,1.9vw,26px); font-weight:700; color:var(--maroon-deep); letter-spacing:-.005em;text-align:left; }
+.sdb-home-viewall {
+  background:transparent; border:none; cursor:pointer;
+  font-family:var(--font-sans); font-size:11.5px; font-weight:700; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--maroon); white-space:nowrap; padding:6px 2px;
+  transition:color var(--ease);
+}
+.sdb-home-viewall:hover { color:var(--gold-dim); }
+
+/* ── category rail — premium editorial cards
+      photo + cinematic overlay + soft warm glow + line icon + white type ── */
+.sdb-home-cat-rail {
+  display:flex; gap:16px; overflow-x:auto; padding:6px 4px 14px;
+  scroll-snap-type:x proximity; scroll-behavior:smooth; -webkit-overflow-scrolling:touch;
+  scrollbar-width:thin; scrollbar-color:rgba(139,0,0,.25) transparent;
+}
+.sdb-home-cat-rail::-webkit-scrollbar { height:6px; }
+.sdb-home-cat-rail::-webkit-scrollbar-track { background:transparent; }
+.sdb-home-cat-rail::-webkit-scrollbar-thumb { background:rgba(139,0,0,.22); border-radius:99px; }
+
+/* card — one integrated visual element: the photograph IS the card */
+.sdb-home-cat-card {
+  position:relative; display:block; -webkit-appearance:none; appearance:none;
+  border:none; padding:0; margin:0; cursor:pointer; isolation:isolate;
+  flex:1 1 204px; min-width:204px; max-width:246px;
+  aspect-ratio:37/41;                 /* 244×270 at full width, same ratio at every size */
+  border-radius:14px; overflow:hidden; scroll-snap-align:start;
+  background:linear-gradient(145deg,#3A1512 0%,#1C0705 100%);  /* fallback if photo missing */
+  box-shadow:0 8px 24px rgba(58,12,8,.16), 0 1px 3px rgba(58,12,8,.10);
+  transition:transform .3s cubic-bezier(.4,0,.2,1), box-shadow .3s cubic-bezier(.4,0,.2,1);
+}
+.sdb-home-cat-card::after {           /* hairline edge keeps the corner crisp on ivory */
+  content:''; position:absolute; inset:0; z-index:2; border-radius:inherit;
+  pointer-events:none; box-shadow:inset 0 0 0 1px rgba(255,255,255,.10);
+}
+.sdb-home-cat-card img {
+  position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block;
+  transform:scale(1.01); transform-origin:center;
+  transition:transform .45s cubic-bezier(.22,.61,.36,1), opacity .2s ease;
+}
+.sdb-home-cat-card:hover { transform:translateY(-4px); box-shadow:0 16px 34px rgba(58,12,8,.26), 0 2px 5px rgba(58,12,8,.12); }
+.sdb-home-cat-card:hover img { transform:scale(1.05); }
+.sdb-home-cat-card:active { transform:translateY(-1px); }
+.sdb-home-cat-card:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
+
+/* dark overlay — layered gradient, never a flat black wash; bottom reads darkest */
+.sdb-home-cat-overlay {
+  position:absolute; inset:0; z-index:1;
+  display:grid; grid-template-rows:1fr auto; justify-items:center;
+  padding:7% 14px 15%; text-align:center;
+  background:
+    radial-gradient(118% 66% at 50% 33%, rgba(255,228,176,.12) 0%, rgba(0,0,0,0) 62%),
+    linear-gradient(180deg, rgba(26,10,6,.20) 0%, rgba(24,9,6,.46) 52%, rgba(14,4,2,.74) 100%);
+}
+
+/* soft circular light behind the icon — warm photographic glow, never neon */
+.sdb-home-cat-iconwrap { position:relative; align-self:center; display:grid; place-items:center; width:70px; height:70px; }
+.sdb-home-cat-glow {
+  position:absolute; left:50%; top:50%; width:154px; height:154px;
+  transform:translate(-50%,-50%); border-radius:50%; pointer-events:none;
+  filter:blur(11px); opacity:.92;
+  background:radial-gradient(circle, rgba(255,245,220,.35) 0%, rgba(255,243,214,.13) 45%, rgba(255,240,210,0) 74%);
+  transition:opacity .3s ease, transform .3s ease;
+}
+.sdb-home-cat-card:hover .sdb-home-cat-glow { opacity:1; transform:translate(-50%,-50%) scale(1.07); }
+.sdb-home-cat-icon {
+  position:relative; width:66px; height:66px; border-radius:50%;
+  display:flex; align-items:center; justify-content:center; color:#FFF8EC;
+  border:1.4px solid rgba(255,247,233,.55);
+  background:radial-gradient(circle at 50% 42%, rgba(255,245,220,.16) 0%, rgba(255,245,220,.05) 62%, rgba(255,245,220,0) 100%);
+  box-shadow:inset 0 0 18px rgba(255,240,205,.16), 0 0 16px rgba(255,236,196,.13);
+  backdrop-filter:blur(.5px);
+}
+.sdb-home-cat-icon svg { display:block; width:30px; height:30px; }
+
+/* typography sits ON the photograph */
+.sdb-home-cat-text { align-self:end; display:flex; flex-direction:column; gap:5px; }
+.sdb-home-cat-label {
+  font-family:var(--font-sans); font-size:14.5px; font-weight:700; line-height:1.1;
+  letter-spacing:.115em; text-transform:uppercase; color:#FFFFFF;
+  text-shadow:0 1px 6px rgba(0,0,0,.55);
+}
+.sdb-home-cat-tag {
+  font-family:var(--font-sans); font-size:11.5px; font-weight:400; line-height:1.25;
+  letter-spacing:.015em; color:rgba(255,250,240,.78); text-shadow:0 1px 5px rgba(0,0,0,.5);
+}
+@media (prefers-reduced-motion:reduce) {
+  .sdb-home-cat-card, .sdb-home-cat-card img, .sdb-home-cat-glow { transition:none; }
+  .sdb-home-cat-card:hover { transform:none; }
+  .sdb-home-cat-card:hover img { transform:scale(1.01); }
+}
+
+
+/* ── "Must Read" shelf ── */
+.sdb-mr-hdr { display:flex; align-items:flex-end; justify-content:space-between; gap:18px; margin-bottom:22px; flex-wrap:wrap; }
+.sdb-mr-eyebrow-row { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.sdb-mr-eyebrow-icon { display:flex; color:var(--maroon-deep); }
+.sdb-mr-eyebrow-icon svg { width:19px; height:19px; }
+.sdb-mr-eyebrow-text { font-family:var(--font-sans); font-size:11px; font-weight:700; letter-spacing:.20em; text-transform:uppercase; color:var(--maroon-deep); }
+.sdb-mr-title { font-family:var(--font-hero); font-size:clamp(21px,1.9vw,26px); font-weight:700; color:var(--maroon-deep); letter-spacing:-.005em;text-align:left;}
+.sdb-mr-title-dark   { color:#241611; }
+.sdb-mr-title-accent { color:var(--maroon-deep); }
+.sdb-mr-viewall {
+    background:transparent; border:none; cursor:pointer;
+  font-family:var(--font-sans); font-size:11.5px; font-weight:700; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--maroon); white-space:nowrap; padding:6px 2px;
+  transition:color var(--ease)
+}
+.sdb-mr-viewall:hover { color:var(--gold-dim); border-color:var(--gold-dim); gap:9px; }
+
+.sdb-mr-carousel { position:relative; }
+.sdb-mr-arrow {
+  position:absolute; top:calc(50% - 14px); transform:translateY(-50%);
+  width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:#FFFDF8; border:1px solid rgba(139,0,0,.14); box-shadow:0 6px 18px rgba(80,0,0,.16);
+  color:var(--maroon-deep); cursor:pointer; z-index:3;
+  transition:background .2s ease, color .2s ease, box-shadow .2s ease;
+}
+.sdb-mr-arrow svg { width:15px; height:15px; }
+.sdb-mr-arrow:hover { background:var(--maroon-deep); color:#FFF6DF; box-shadow:0 8px 22px rgba(80,0,0,.26); }
+.sdb-mr-arrow-left  { left:-20px; }
+.sdb-mr-arrow-right { right:-20px; }
+
+.sdb-home-book-grid {
+  display:flex; gap:18px; overflow-x:auto; scroll-snap-type:x proximity;
+  scrollbar-width:none; padding:4px 12px 8px;
+}
+.sdb-home-book-grid::-webkit-scrollbar { display:none; }
+.sdb-home-book-card {
+  position:relative; flex:0 0 calc((100% - 5 * 18px) / 6); scroll-snap-align:start;
+  cursor:pointer; text-align:left; display:flex; flex-direction:column;
+  background:var(--cream); border:1.5px solid rgba(139,0,0,.14); border-radius:var(--radius-md);
+  overflow:hidden; box-shadow:0 4px 14px rgba(80,0,0,.08);
+  transition:transform var(--ease), box-shadow var(--ease), border-color var(--ease);
+}
+.sdb-home-book-card:hover {
+  transform:translateY(-4px); box-shadow:0 10px 24px rgba(80,0,0,.20);
+  border-color:rgba(139,0,0,.32);
+}
+.sdb-mr-bookmark {
+  position:absolute; top:12px; right:12px; z-index:4;
+  width:29px; height:29px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  background:var(--maroon-deep); color:#FFF6DF; border:1.5px solid rgba(255,255,255,.30);
+  box-shadow:0 4px 10px rgba(0,0,0,.26); cursor:pointer;
+  transition:transform .2s ease, background .2s ease;
+}
+.sdb-mr-bookmark svg { width:12px; height:12px; }
+.sdb-mr-bookmark:hover { transform:scale(1.09); }
+.sdb-mr-bookmark.on { background:var(--gold-dim); }
+.sdb-book-cover-area-alt {
+  width:100%; height:190px; flex-shrink:0; box-sizing:border-box;
+  background:rgba(139,0,0,.05);
+  border-bottom:1.5px solid rgba(139,0,0,.10);
+  display:flex; align-items:center; justify-content:center;
+  padding:12px; /* even inset on every side so covers of any aspect ratio sit framed the same way */
+}
+.sdb-book-cover-area-alt img,
+.sdb-book-cover-area-alt > div {
+  max-width:100% !important; max-height:100% !important;
+  width:auto !important; height:auto !important; border-radius:4px !important;
+  object-fit:contain !important; /* show the whole cover, uncropped, instead of cropping to fill */
+  border:1.5px solid rgba(139,0,0,.16) !important; /* frame sits flush on the cover's own edges, not the padded box */
+  box-shadow:0 2px 8px rgba(0,0,0,.18);
+}
+.sdb-home-book-body { padding:14px 16px 16px; display:flex; flex-direction:column; flex:1; }
+.sdb-home-book-title {
+  font-family:var(--font-sans); font-size:15px; font-weight:800;
+  color:#241611; line-height:1.32;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+  min-height:2.6em; /* reserves 2 lines so 1-line and 2-line titles keep every card the same height */
+}
+.sdb-home-book-author {
+  font-family:var(--font-sans); font-weight:600; letter-spacing:.03em;
+  font-size:11px; text-transform:uppercase; color:var(--text-muted); margin-top:6px; line-height:1.4;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
+}
+.sdb-mr-underline { display:block; width:24px; height:2px; background:var(--maroon-deep); margin-top:10px; border-radius:2px; flex-shrink:0; }
+
+/* ── promo / footer banner — diagonal maroon panel bleeding into the photo,
+   thin gold seam at the cut, richer layered shadow ── */
+.sdb-home-footer-banner {
+  position:relative; display:block; border-radius:14px; overflow:hidden;
+  height:clamp(190px,17.5vw,232px); min-height:0;
+  border:1px solid rgba(201,168,76,.38);
+  box-shadow:
+    0 18px 40px rgba(40,8,8,.30),
+    0 4px 12px rgba(40,8,8,.22),
+    inset 0 1px 0 rgba(255,255,255,.06);
+  margin-bottom:6px;
+}
+.sdb-home-footer-media { position:absolute; inset:0; z-index:0; overflow:hidden; }
+.sdb-home-footer-media img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; display:block; }
+/* warm colour-wash so the photograph reads as one palette with the maroon panel */
+.sdb-home-footer-media::before {
+  content:''; position:absolute; inset:0; z-index:1; pointer-events:none;
+  background:
+    linear-gradient(100deg,#4A0000 0%,rgba(74,0,0,.85) 30%,rgba(74,0,0,.30) 46%,rgba(74,0,0,0) 58%),
+    linear-gradient(0deg,rgba(40,10,0,.22) 0%,rgba(40,10,0,0) 40%);
+}
+.sdb-home-footer-content {
+  position:relative; z-index:2; height:100%; flex:none;
+  width:min(56%,480px); display:flex; flex-direction:column; justify-content:center;
+  align-items:flex-start; text-align:left;
+  padding:0 30px 0 38px;
+  background:linear-gradient(105deg,#4A0000 0%,#6E0000 66%,rgba(110,0,0,.35) 74%,rgba(110,0,0,0) 82%);
+  clip-path:polygon(0 0,100% 0,74% 100%,0 100%);
+}
+.sdb-home-footer-eyebrow-row { display:flex; align-items:center; gap:10px; margin-bottom:14px; }
+.sdb-home-footer-eyebrow-line { width:26px; height:1px; background:var(--gold-light); flex-shrink:0; }
+.sdb-home-footer-title {
+  font-family:var(--font-sans); font-size:11px; font-weight:600; letter-spacing:.14em;
+  text-transform:uppercase; color:rgba(255,249,241,.88); margin:0;
+}
+.sdb-home-footer-sub {
+  font-family:var(--font-hero); font-size:clamp(19px,2vw,26px); line-height:1.22; margin-bottom:20px;
+}
+.sdb-home-footer-sub-main { display:block; font-weight:700; color:#FFF9F1; }
+.sdb-home-footer-sub-accent { display:block; font-style:italic; font-weight:600; color:var(--gold-light); }
+.sdb-home-footer-actions { display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.sdb-home-footer-btn {
+  display:inline-flex; align-items:center; gap:8px; padding:12px 22px; border-radius:999px;
+  font-family:var(--font-sans); font-size:11.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+  border:1.5px solid transparent; cursor:pointer; white-space:nowrap;
+  transition:transform var(--ease),box-shadow var(--ease),background var(--ease),border-color var(--ease);
+}
+.sdb-home-footer-btn-gold {
+  background:linear-gradient(135deg,var(--gold-light) 0%,var(--gold-dim) 100%);
+  color:var(--maroon-deep); box-shadow:0 6px 16px rgba(0,0,0,.28);
+}
+.sdb-home-footer-btn-gold:hover { transform:translateY(-1px); box-shadow:0 9px 20px rgba(0,0,0,.34); }
+.sdb-home-footer-btn-gold svg { width:14px; height:14px; transition:transform var(--ease); }
+.sdb-home-footer-btn-gold:hover svg { transform:translateX(3px); }
+.sdb-home-footer-btn-outline {
+  background:rgba(255,255,255,.02); border-color:rgba(245,228,168,.55); color:#FFF6DF;
+}
+.sdb-home-footer-btn-outline:hover { background:rgba(245,228,168,.12); border-color:var(--gold-light); }
+
+/* ── site footer — maroon band, same width and height as the top navbar ── */
+.sdb-sitefoot {
+  display:flex; align-items:center; justify-content:center; gap:24px;
+  margin:20px 0 0; padding:8px 26px;            /* no side bleed → exactly the navbar's width */
+  height:auto; min-height:var(--topbar-h);      /* same height as the navbar (grows only if the text wraps on phones) */
+  background:linear-gradient(180deg,#6E0000 0%,var(--maroon-deep) 100%);
+  border-top:2px solid rgba(201,168,76,.32);
+}
+.sdb-sitefoot-text {
+  flex:1 1 auto; text-align:center;
+  font-family:var(--font-display); font-weight:600; text-transform:uppercase;   /* Cinzel — formal inscriptional capitals */
+  font-size:clamp(11px,1.1vw,15px); letter-spacing:.16em; line-height:1.5;
+  color:#F3E3C4; opacity:.72; text-shadow:0 1px 2px rgba(0,0,0,.30);            /* 72% opacity (70–75%) */
+}
+.sdb-sitefoot-dot { color:var(--gold); margin:0 1em; font-size:.8em; vertical-align:.12em; }
+@media (max-width:640px) {
+  .sdb-sitefoot-text { letter-spacing:.08em; }
+  .sdb-sitefoot-dot { margin:0 .55em; }
+}
+
+/* ── hero CTA buttons: rectangular, uppercase, matches reference ── */
+.sdb-home-cta {
+  text-transform:uppercase; letter-spacing:.08em; font-size:12px; font-weight:700;
+  border-radius:6px; padding:12px 24px;
+}
+
+/* ── responsive ── */
+@media (max-width:1100px) {
+  .sdb-home-book-card { flex-basis:calc((100% - 2 * 18px) / 3); }
+}
+@media (max-width:900px) {
+  .sdb-home-hero { flex-direction:column; align-items:stretch; padding:0; min-height:0; margin:-22px -20px 0; }
+  .sdb-home-hero-media { position:relative; inset:auto; order:-1; width:100%; max-width:none; height:210px; }
+  .sdb-home-hero-media::after { background:
+    linear-gradient(180deg,rgba(248,240,221,0) 40%,rgba(240,220,175,.60) 64%,rgba(248,240,221,.92) 84%,#F8F0DD 100%),
+    linear-gradient(0deg,rgba(24,10,2,.24) 0%,rgba(24,10,2,0) 14%); }
+  .sdb-home-hero-text { flex:1 1 auto; max-width:none; padding:22px 22px 44px; text-align:left; }
+  .sdb-home-hero-sub { max-width:none; }
+  .sdb-home-stats-bar { flex-wrap:wrap; margin-top:-30px; }
+  .sdb-home-stat { flex:1 1 50%; border-right:none; border-bottom:1px solid rgba(139,0,0,.12); padding:18px 10px; }
+  .sdb-home-cat-card { flex:0 0 190px; min-width:190px; max-width:190px; }
+  .sdb-home-cat-icon { width:60px; height:60px; }
+  .sdb-home-cat-icon svg { width:27px; height:27px; }
+  .sdb-home-footer-banner { display:flex; flex-direction:column; height:auto; }
+  .sdb-home-footer-media { position:relative; inset:auto; height:170px; }
+  .sdb-home-footer-content {
+    position:relative; z-index:2; width:100%; height:auto; clip-path:none;
+    background:linear-gradient(160deg,#4A0000 0%,#6E0000 100%);
+    padding:22px 22px 26px; align-items:flex-start;
+  }
+}
+@media (max-width:640px) {
+  .sdb-home-cat-rail { gap:12px; }
+  .sdb-home-cat-card { flex:0 0 164px; min-width:164px; max-width:164px; }
+  .sdb-home-cat-icon { width:54px; height:54px; }
+  .sdb-home-cat-icon svg { width:24px; height:24px; }
+  .sdb-home-cat-glow { width:120px; height:120px; }
+  .sdb-home-cat-label { font-size:13px; letter-spacing:.1em; }
+  .sdb-home-cat-tag { font-size:10.5px; }
+  .sdb-home-book-card { flex-basis:calc((100% - 1 * 18px) / 2); }
+}
 
 /* ════════ RESPONSIVE ════════ */
 @media (max-width:1280px) { .sdb-stats-grid { grid-template-columns:repeat(2,1fr); } }
 @media (max-width:1024px) {
-  .sdb-content { padding:22px 20px; }
+  .sdb-module { padding:22px 20px; }
+  .sdb-home-hero { margin:-22px -20px 0; }
+  .sdb-mr-carousel { margin:0 -20px; }
+  .sdb-home-footer-banner { margin:0 -20px; border-radius:0; }
+  .sdb-sitefoot { margin:18px 0 0; padding:8px 26px; }
   .sdb-navlinks { display:none; }
   .sdb-hamburger { display:flex; }
   .sdb-mobnav.open { display:flex; }
@@ -814,33 +1389,109 @@ button { cursor:pointer; }
   .sdb-profile-chip { padding:5px; gap:0; }
   .sdb-chip-caret { display:none; }
   .sdb-stats-grid { grid-template-columns:repeat(2,1fr); gap:12px; }
-  .sdb-content { padding:14px 14px 28px; }
+  .sdb-module { padding:14px 14px 28px; }
+  .sdb-home-hero { margin:-14px -14px 0; }
+  .sdb-mr-carousel { margin:0 -14px; }
+  .sdb-home-footer-banner { margin:0 -14px; border-radius:0; }
+  .sdb-sitefoot { margin:16px 0 0; padding:8px 14px; gap:14px; }
   .sdb-navbar { padding:0 14px; }
   .sdb-brand-title { font-size:14px; }
   .sdb-book-grid { grid-template-columns:repeat(2,1fr) !important; }
   .sdb-form-row { grid-template-columns:1fr; }
   .sdb-form-row-3 { grid-template-columns:1fr; }
-  .sdb-catalog-hero-title { font-size:22px !important; }
+  .sdb-page-hero-title { font-size:22px !important; }
 }
 @media (max-width:480px) {
   .sdb-stats-grid { grid-template-columns:1fr; }
   .sdb-book-grid  { grid-template-columns:repeat(2,1fr) !important; }
-  .sdb-content { padding:10px 10px 24px; }
+  .sdb-module { padding:10px 10px 24px; }
+  .sdb-home-hero { margin:-10px -10px 0; }
+  .sdb-mr-carousel { margin:0 -10px; }
+  .sdb-home-footer-banner { margin:0 -10px; border-radius:0; }
+  .sdb-sitefoot { margin:14px 0 0; padding:8px 10px; gap:10px; }
   .sdb-dropdown { width:200px; }
 }
 @media (max-width:360px) {
   .sdb-book-grid { grid-template-columns:1fr !important; }
 }
 
-/* ════════════════════════════════════════════════════════════════
-   NOTIFICATIONS — ported 1:1 from Dashboard.css (Librarian dashboard)
-   so the Student bell dropdown + notification history page match the
-   Librarian dashboard notification UI exactly (layout, spacing,
-   typography, item structure, unread indicator, timestamp, icon
-   treatment, hover, read/unread behavior). Class names kept as
-   lm-notif-* on purpose -- same unmodified rules, reused here so the
-   two dashboards never visually drift apart.
-   ════════════════════════════════════════════════════════════════ */
+
+.sdb-page-hero {
+  
+  position:relative; width:100%; margin:0 0 24px;
+  overflow:hidden; min-height:clamp(112px,8.4vw,140px);
+  background:var(--bg-base); border:none; border-radius:0; box-shadow:none;
+}
+.sdb-page-hero-inner {
+  /* re-applies .sdb-module's own max-width+padding just for the text, so the
+     title lines up with the search bar / cards below it. */
+  position:relative; z-index:1; height:100%; max-width:1520px; margin:0 auto;
+  padding:0 30px; display:flex; align-items:center; justify-content:flex-start;
+}
+.sdb-page-hero-media {
+  position:absolute; top:0; right:0; bottom:0; width:62%;
+  z-index:0; overflow:hidden;
+}
+.sdb-page-hero-media img {
+  width:100%; height:100%; object-fit:cover; object-position:center; display:block;
+  filter:blur(2.5px); transform:scale(1.05); /* soft focus; scale hides the blurred edges */
+}
+.sdb-page-hero-media::after {      /* the photo melts into the copy — same long, smooth fade as the Dashboard */
+  content:''; position:absolute; inset:0; pointer-events:none;
+  background:
+    linear-gradient(90deg,
+      #F8F0DD 0%,
+      rgba(248,240,221,.92) 9%,
+      rgba(243,231,199,.76) 18%,
+      rgba(238,219,175,.56) 28%,
+      rgba(232,204,150,.36) 38%,
+      rgba(232,204,150,.18) 48%,
+      rgba(232,204,150,.07) 57%,
+      rgba(232,204,150,0) 66%
+    );
+}
+.sdb-page-hero::after {            /* very light top/bottom shading, laid across the FULL width so there is no seam */
+  content:''; position:absolute; inset:0; z-index:0; pointer-events:none;
+  background:linear-gradient(180deg,rgba(30,14,4,.035) 0%,rgba(30,14,4,0) 14%,rgba(30,14,4,0) 80%,rgba(24,10,2,.05) 100%);
+}
+.sdb-page-hero-text {
+  flex:0 1 720px; max-width:720px; padding:14px 0 16px 14px; text-align:left;
+}
+.sdb-page-hero-title {
+  font-family:var(--font-hero); font-weight:700; letter-spacing:-.005em; text-align:left;
+  font-size:clamp(26px,2.9vw,42px); line-height:1.12; color:var(--maroon-deep); margin:0 0 8px;
+}
+.sdb-page-hero-sub {
+  font-family:var(--font-sans); font-size:clamp(13px,1.05vw,15.5px); font-weight:500; line-height:1.45;
+  text-align:left; color:var(--maroon); margin:0;
+}
+/* the inner grid's own padding tracks .sdb-module's padding at every step —
+   the 1024px step lines up with the navbar's own collapse into the
+   hamburger/mobile-nav, so the whole page reflows together. */
+@media (max-width:1024px) {
+  .sdb-page-hero { margin-bottom:20px; }
+  .sdb-page-hero-inner { padding:0 20px; }
+  .sdb-page-hero-media { width:100%; }
+  .sdb-page-hero-media::after {
+    background:linear-gradient(90deg,var(--bg-base) 0%,rgba(248,240,221,.92) 40%,rgba(240,220,175,.55) 70%,rgba(232,204,150,.25) 100%);
+  }
+}
+@media (max-width:768px) {
+  .sdb-page-hero { margin-bottom:16px; min-height:auto; }
+  .sdb-page-hero-inner { padding:0 14px; }
+  .sdb-page-hero-text { padding:20px 0 20px 4px; }
+}
+@media (max-width:480px) {
+  /* on the smallest screens the photo is dropped entirely so the banner
+     is just flat page background — the seamless, no-shadow look the
+     rest of the mobile UI (hamburger nav, stacked cards) already has */
+  .sdb-page-hero { margin-bottom:14px; }
+  .sdb-page-hero-inner { padding:0 10px; }
+  .sdb-page-hero-media { display:none; }
+  .sdb-page-hero-text { padding:16px 0; max-width:100%; }
+}
+
+
 .lm-notif-wrap {
   position: relative;
   overflow: visible;
@@ -872,11 +1523,7 @@ button { cursor:pointer; }
   100% { transform: scale(1); }
 }
 
-/* Invisible click-catcher behind the dropdown — closes it on outside click,
-   same as any anchored menu (Gmail/Facebook-style). No dark dimming here on
-   purpose: a small anchored dropdown shouldn't blackout the whole screen
-   the way a true full-page modal would. Portaled to <body> right alongside
-   .lm-notif-panel so it sits above everything else too. */
+
 .lm-notif-backdrop {
   position: fixed;
   inset: 0;
@@ -885,15 +1532,7 @@ button { cursor:pointer; }
 }
 
 .lm-notif-panel {
-  /* Portaled straight into <body> (see Dashboard.jsx). Rendering it outside
-     the sticky topbar is what actually fixes the "panel goes blank" bug —
-     see the comment above notifBtnRef in Dashboard.jsx for why.
-     Anchored directly under the bell (top/right set inline from the
-     button's real position — see notifPanelPos in Dashboard.jsx) instead of
-     a full-height drawer docked to the edge of the screen, so it reads as
-     something that belongs to the icon rather than a box floating alone in
-     the corner. Light parchment body + a maroon/gold header band gives it
-     some contrast against the all-maroon chrome elsewhere in the app. */
+  
   position: fixed;
   top: 68px;
   right: 24px;
@@ -916,12 +1555,7 @@ button { cursor:pointer; }
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-/* Little caret that points back at the bell, positioned dynamically via
-   notifPanelPos.arrowRight so it lines up with the button even as the
-   topbar reflows across breakpoints. Sits half-behind the panel's top edge
-   (same z-index stack, same fill color as the header) so the bottom half
-   blends into the header and only the top half peeks up as a clean arrow
-   against the topbar. */
+
 .lm-notif-caret {
   position: fixed;
   top: 58px;
@@ -1043,9 +1677,7 @@ button { cursor:pointer; }
   outline-offset: 2px;
 }
 
-/* "New" / "Earlier" section headings inside the list. "See all" is
-   attached ONLY to whichever heading renders first (see Dashboard.jsx) so
-   it never competes visually with "Mark all as read" up in the header. */
+
 .lm-notif-section-head {
   display: flex;
   align-items: center;
@@ -1248,8 +1880,7 @@ button { cursor:pointer; }
 }
 .lm-notif-clear-btn:hover { color: var(--maroon-mid); }
 
-/* Rows that can't (or only partly can) take the librarian to a specific
-   record — see getNotifTarget() in Dashboard.jsx. */
+
 .lm-notif-row.unlinked { cursor: default; }
 .lm-notif-row.unlinked:hover { background: transparent; }
 .lm-notif-row.unlinked .lm-notif-icon { opacity: 0.7; }
@@ -1278,11 +1909,7 @@ button { cursor:pointer; }
   border: 1px solid rgba(139,0,0,0.12);
 }
 
-/* ============================================================
-   "See all" — full notification history, rendered as a real in-page
-   section (module header + stat cards + filters + panel), the same way
-   every other page in the app is composed — not a floating overlay.
-   ============================================================ */
+
 .lm-notif-hist-page .lm-module-header { align-items: center; }
 
 .lm-notif-hist-panel {
@@ -1350,16 +1977,12 @@ button { cursor:pointer; }
   .lm-notif-hist-list { max-height: none; }
 }
 
-/* Phones — panel becomes a fixed, near-full-width sheet anchored under
-   the top bar instead of a right-aligned dropdown, so it never runs off
-   the edge of small screens. */
+
 @media (max-width: 768px) {
   .lm-notif-panel { width: 340px; }
 }
 
-/* Phones — the side drawer becomes a fixed, near-full-width sheet anchored
-   under the top bar instead of a right-docked drawer, so it never runs off
-   the edge of small screens. */
+
 @media (max-width: 560px) {
   .lm-notif-panel {
     position: fixed;
@@ -1640,18 +2263,11 @@ button { cursor:pointer; }
 
 `;
 
-/* ═══════════════════════════════════════════════
-   NOTIFICATIONS — module-scope helpers
-   Mirrors Dashboard.jsx (Librarian) exactly: same shape, same "New"/
-   "Earlier" grouping, same read/unread model — just scoped to this
-   student's own borrow requests instead of a campus's.
-═══════════════════════════════════════════════ */
+
 const STUDENT_NOTIF_MAX = 15;
 const STUDENT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // last 24h shown on first load, same as Dashboard.jsx
 
-// Only the notification types a student can actually receive. Kept as a
-// subset of the same keys used in notificationPrefs.js / Dashboard.jsx so
-// icon/color/label never drift between the two dashboards.
+
 const STUDENT_NOTIF_TYPES = {
   BORROW_APPROVED:  { label: 'Approved',  color: '#3F6B4A' },
   BORROW_CANCELLED: { label: 'Rejected',  color: '#8B3A3A' },
@@ -1662,11 +2278,7 @@ function buildStudentNotification({ id, type, title, message, createdAt, extra =
   return { id, type, title, message, createdAt, extra, read: false };
 }
 
-// Where a clicked notification takes the student. An approved/rejected
-// request doesn't correspond to one fixed row anywhere (same reasoning as
-// Dashboard.jsx's getNotifTarget for BORROW_APPROVED/BORROW_CANCELLED), so
-// this opens the general History tab. Every type resolves to a target so
-// every notification is clickable.
+
 function getStudentNotifTarget(n) {
   switch (n?.type) {
     case 'BORROW_APPROVED':
@@ -1727,6 +2339,7 @@ const Ic = {
   close:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>,
   search:    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>,
   book:      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
+  bookmark:  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M6 2a2 2 0 0 0-2 2v18l8-5.2L20 22V4a2 2 0 0 0-2-2H6z"/></svg>,
   check:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>,
   clock:     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
   return:    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-4.95"/></svg>,
@@ -1742,8 +2355,6 @@ const Ic = {
   eyeOn:     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
   eyeOff:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>,
   chevDown:  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><polyline points="6 9 12 15 18 9"/></svg>,
-  moon:      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>,
-  sun:       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>,
 };
 
 /* ═══════════════════════════════════════════════
@@ -1753,10 +2364,7 @@ function fmtDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' });
 }
-// Matches BookManagement.jsx's fmtTime/fmtFull exactly, so the timestamps a
-// student sees in their History tab always agree with what the librarian
-// sees in Book Management → Transaction History for the same borrowing
-// (same locale, same 12hr time format).
+
 function fmtTime(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', hour12:true });
@@ -1778,23 +2386,13 @@ function daysUntil(iso) {
   return Math.ceil((new Date(iso).getTime() - Date.now()) / 86400000);
 }
 
-/* ═══════════════════════════════════════════════
-   ABSTRACT PARSING
-   `books.abstract_text` is stored as a JSON string produced by the OCR
-   pipeline (Book Management → upload abstract image), shaped like
-   { heading, paragraphs: [...], subheadings: [...], keywords: [...] }.
-   It must be parsed before display — rendering it as-is shows the raw
-   JSON to the student. Mirrors Book_Catalog.jsx's parseAbstractData /
-   mergeFragmentedParagraphs so the same stored data reads identically
-   in both the librarian and student views.
-═══════════════════════════════════════════════ */
+
 function parseAbstractData(raw) {
   if (!raw) return null;
   if (typeof raw === 'object') return raw;
   try {
     const parsed = JSON.parse(raw);
-    // Guard against a JSON value that isn't the expected shape (e.g. a
-    // plain JSON-encoded string or number) — treat it as plain text.
+   
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return { heading: '', paragraphs: [String(parsed)], keywords: [] };
     }
@@ -1805,12 +2403,7 @@ function parseAbstractData(raw) {
   }
 }
 
-/**
- * Merges paragraph fragments that were split mid-sentence by OCR.
- * A fragment is considered "incomplete" if it does not end with
- * sentence-terminating punctuation (. ! ? :) — those get joined
- * with the next fragment using a single space.
- */
+
 function mergeFragmentedParagraphs(paragraphs = [], subheadings = []) {
   const merged = [];
   let buffer = '';
@@ -1832,19 +2425,12 @@ function mergeFragmentedParagraphs(paragraphs = [], subheadings = []) {
   return merged;
 }
 
-/* Elegant "book page" rendering of a parsed abstract — heading, gold rule,
-   justified serif paragraphs with subheadings, and a keyword row. Used
-   anywhere a student can view a book's abstract, so it never shows raw
-   JSON or an unformatted text blob again. */
-function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxParagraphs = null }) {
+
+function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxParagraphs = null, plain = false }) {
   const data = parseAbstractData(raw);
   if (!data) return null;
 
-  // OCR sometimes picks up a byline/credit line from the scanned page (e.g.
-  // "Eloisa M. Macalinao III") as if it were a real paragraph of the
-  // abstract. It isn't — it's noise that duplicates the author already
-  // shown at the top of the card, so filter fragments that are clearly
-  // just the author's name before rendering.
+
   const looksLikeByline = (text) => {
     if (!authorName) return false;
     const norm = (s) => s.toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
@@ -1866,7 +2452,11 @@ function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxPar
     <div>
       {(data.heading || fallbackTitle) && (
         <>
-          <div style={{
+          <div style={plain ? {
+            fontFamily: "'Playfair Display',var(--font-display),serif",
+            fontSize: 22, fontWeight: 700, color: 'var(--text-primary)',
+            marginBottom: 10, lineHeight: 1.25, textAlign: 'left',
+          } : {
             fontFamily: '"Georgia","Times New Roman",serif',
             fontSize: compact ? 15 : 18, fontWeight: 700, color: '#5A0000',
             letterSpacing: '0.08em', textTransform: 'uppercase',
@@ -1874,10 +2464,10 @@ function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxPar
           }}>
             {data.heading || fallbackTitle}
           </div>
-          <div style={{
+          {!plain && <div style={{
             width: 44, height: 2, marginBottom: 14,
             background: 'linear-gradient(90deg,#C9A84C,transparent)', borderRadius: 2,
-          }} />
+          }} />}
         </>
       )}
       {paragraphs.map((para, i) => {
@@ -1897,9 +2487,9 @@ function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxPar
         return (
           <p key={i} style={{
             fontSize: compact ? 12.5 : 13.5, color: 'var(--text-secondary)',
-            fontFamily: '"Georgia","Times New Roman",serif',
-            lineHeight: compact ? 1.7 : 1.85, textAlign: 'justify',
-            textIndent: '1.6em', margin: '0 0 10px 0',
+            fontFamily: plain ? 'var(--font-sans)' : '"Georgia","Times New Roman",serif',
+            lineHeight: plain ? 1.75 : (compact ? 1.7 : 1.85), textAlign: plain ? 'left' : 'justify',
+            textIndent: plain ? 0 : '1.6em', margin: '0 0 10px 0',
           }}>
             {para}
           </p>
@@ -1927,12 +2517,7 @@ function AbstractBlock({ raw, fallbackTitle, authorName, compact = false, maxPar
   );
 }
 
-/* Status badge config
-   NOTE: 'active' is a legacy status value some older `borrow_requests` rows
-   still carry (meaning "borrowed, not yet returned"). We no longer treat it
-   as its own state in the UI — normalizeStatus() below folds it into
-   'approved' everywhere, so a borrowed-but-not-returned book just reads
-   "Approved" like any other approved request. */
+
 function normalizeStatus(status) {
   const s = status?.toLowerCase();
   return s === 'active' ? 'approved' : s;
@@ -2028,6 +2613,23 @@ function BookCover({ src, title, width = 80, height = 110 }) {
   );
 }
 
+
+function PageHero({ title, sub }) {
+  return (
+    <div className="sdb-page-hero">
+      <div className="sdb-page-hero-media">
+        <img src="/HeroBanner.png" alt="" onError={e => { e.target.style.display = 'none'; }} />
+      </div>
+      <div className="sdb-page-hero-inner">
+        <div className="sdb-page-hero-text">
+          <h1 className="sdb-page-hero-title">{title}</h1>
+          {sub && <p className="sdb-page-hero-sub">{sub}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Loading spinner */
 function Spinner() {
   return <div className="sdb-loading"><div className="sdb-spinner" /><span style={{ color:'var(--text-muted)', fontSize:13 }}>Loading…</span></div>;
@@ -2061,14 +2663,68 @@ function useToast() {
   return { toast, show };
 }
 
-/* ═══════════════════════════════════════════════════════
-   PAGE: DASHBOARD HOME
-═══════════════════════════════════════════════════════ */
+
+const CatIcon = ({ children }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"
+       strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+
+const HOME_CATEGORIES = [
+  { key: 'Fiction',     label: 'Fiction',     tag: 'Explore Stories',  img: '/Fiction.jpg',
+    icon: <CatIcon><path d="M12 7v13" /><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z" /></CatIcon> },
+  { key: 'Non-Fiction', label: 'Non-Fiction', tag: 'Expand Knowledge', img: '/Non-Fiction.jpg',
+    icon: <CatIcon><path d="M4 4v16" /><path d="M8.5 7v13" /><path d="M13 5.5v14.5" /><path d="m17.2 6.6 3.4 13.1" /></CatIcon> },
+  { key: 'Science',     label: 'Science',     tag: 'Discover Truths',  img: '/Science.jpg',
+    icon: <CatIcon><path d="M9 3h6" /><path d="M10 3v6.2L4.8 18a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3L14 9.2V3" /><path d="M7.5 15h9" /></CatIcon> },
+  { key: 'Technology',  label: 'Technology',  tag: 'Shape Tomorrow',   img: '/technology.jpg',
+    icon: <CatIcon><rect x="6" y="6" width="12" height="12" rx="1.6" /><rect x="10" y="10" width="4" height="4" rx=".6" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.6 4.6l2 2M17.4 17.4l2 2M19.4 4.6l-2 2M6.6 17.4l-2 2" /></CatIcon> },
+  { key: 'History',     label: 'History',     tag: 'Relive the Past',  img: '/History.jpg',
+    icon: <CatIcon><path d="M3.5 21h17" /><path d="M6 21V9.5M10 21V9.5M14 21V9.5M18 21V9.5" /><path d="m3 8.5 9-5.2 9 5.2" /></CatIcon> },
+  { key: 'Education',   label: 'Education',   tag: 'Empower Minds',    img: '/Education.jpg',
+    icon: <CatIcon><path d="M2 9.5 12 5l10 4.5-10 4.5-10-4.5z" /><path d="M6 11.5V16c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4.5" /><path d="M21 9.5V15" /></CatIcon> },
+];
+
+
+function CountUp({ value, loading, duration = 2000 }) {
+  const [shown, setShown] = useState(0);
+  const startedRef = useRef(false);
+  const rafRef  = useRef(null);
+
+  useEffect(() => {
+    if (loading || startedRef.current) return undefined;
+    const target = Number(value) || 0;
+
+    const reduce = typeof window !== 'undefined' && window.matchMedia
+      && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) { startedRef.current = true; setShown(target); return undefined; }
+
+    startedRef.current = true;
+    let t0 = null;
+    const tick = (now) => {
+      if (t0 === null) t0 = now;
+      const p = Math.min(1, (now - t0) / duration);
+      setShown(Math.floor(p * target));
+      if (p < 1) rafRef.current = requestAnimationFrame(tick);
+      else setShown(target);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
+  }, [value, loading, duration]);
+
+  if (loading) return <span className="sdb-home-stat-dash">—</span>;
+  return <span className="sdb-home-stat-num">{shown}</span>;
+}
+
 function PageHome({ user, profile, onNavigate }) {
+  const { toast, show: showToast } = useToast();
   const [stats,  setStats]  = useState({ borrowed:0, returned:0, available:0, favorites:0 });
-  const [acts,   setActs]   = useState([]);
   const [loadSt, setLoadSt] = useState(true);
-  const [loadAc, setLoadAc] = useState(true);
+
+  // "Must Read" shelf — top favorited titles (falls back to newest approved titles)
+  const [mustRead, setMustRead] = useState([]);
+  const [loadMR,   setLoadMR]   = useState(true);
+  const [mrFavIds, setMrFavIds] = useState(new Set());
+  const mrTrackRef = useRef(null);
 
   const firstName = profile?.first_name || user?.user_metadata?.first_name || user?.email?.split('@')[0] || 'Student';
   const lastName  = profile?.last_name  || user?.user_metadata?.last_name  || '';
@@ -2078,7 +2734,7 @@ function PageHome({ user, profile, onNavigate }) {
   const initials  = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'S';
 
   useEffect(() => {
-    if (!user?.id) { setLoadSt(false); setLoadAc(false); return; }
+    if (!user?.id) { setLoadSt(false); return; }
     (async () => {
       try {
         const [a, b, c, d] = await Promise.all([
@@ -2091,100 +2747,294 @@ function PageHome({ user, profile, onNavigate }) {
         ]);
         setStats({ borrowed:a.count||0, returned:b.count||0, available:c.count||0, favorites:d.count||0 });
       } catch(e){ console.error('[Home stats]',e); } finally { setLoadSt(false); }
-
-      try {
-        // NOTE: borrow_requests has no `updated_at` column — decisions are
-        // timestamped on `reviewed_at` (set when a librarian approves/
-        // rejects), same column the notification system already relies on
-        // elsewhere in this file. Selecting `updated_at` made Postgrest
-        // reject the whole query, which is why this silently showed
-        // "No activity yet" even with borrowed books on record.
-        const { data, error } = await supabase.from('borrow_requests')
-          .select('id,book_title,status,created_at,reviewed_at')
-          .eq('student_id',user.id)
-          .order('created_at',{ascending:false,nullsFirst:false}).limit(8);
-        if (error) throw error;
-        setActs(data || []);
-      } catch(e){ console.error('[Home acts]',e); } finally { setLoadAc(false); }
     })();
   }, [user?.id]);
 
-  const actIcon = (s) => {
-    if (s==='returned') return { color:'#64b5f6', dot:'#64b5f6', label:'Returned',  icon:Ic.return };
-    if (s==='approved' || s==='active') return { color:'#81c784', dot:'#81c784', label:'Approved',  icon:Ic.check  };
-    if (s==='rejected') return { color:'#ef9a9a', dot:'#ef9a9a', label:'Rejected',  icon:Ic.close  };
-    return                     { color:'#C9A84C', dot:'#C9A84C', label:'Pending',   icon:Ic.clock  };
+  useEffect(() => {
+    (async () => {
+      try {
+        const THIRTY_DAYS_AGO = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+        const { data: borrowRows, error: brErr } = await supabase
+          .from('borrowings')
+          .select('book_id, book_title')
+          .gte('borrowed_at', THIRTY_DAYS_AGO);
+        
+        if (brErr) console.warn('[Home mustRead] borrowings query unavailable, falling back:', brErr.message);
+
+        const idCount    = {}; // book_id -> { count, title }
+        const titleCount = {}; // book_title -> count   (rows with no book_id)
+        (borrowRows || []).forEach(r => {
+          if (!r.book_id && !r.book_title) return;
+          if (r.book_id) {
+            const k = String(r.book_id);
+            if (!idCount[k]) idCount[k] = { count: 0, title: r.book_title };
+            idCount[k].count++;
+          } else {
+            titleCount[r.book_title] = (titleCount[r.book_title] || 0) + 1;
+          }
+        });
+        const ranked = [
+          ...Object.entries(idCount).map(([id, v]) => ({ id, title: v.title, count: v.count, byId: true })),
+          ...Object.entries(titleCount).map(([title, count]) => ({ id: null, title, count, byId: false })),
+        ].sort((a, b) => b.count - a.count);
+
+        const norm = s => (s || '').trim().toLowerCase();
+
+       
+        const { data: approvedBooks, error: booksErr } = await (() => {
+          let q = supabase
+            .from('books')
+            .select('*')
+            .eq('registration_status', 'approved');
+  
+          if (profile?.campus_id) q = q.eq('campus_id', profile.campus_id);
+          return q.order('created_at', { ascending: false }).limit(500);
+        })();
+        if (booksErr) console.warn('[Home mustRead] books lookup failed:', booksErr.message);
+
+        const bookById    = {};
+        const bookByTitle = {};
+        (approvedBooks || []).forEach(b => {
+          if (b.id)    bookById[String(b.id)] = b;
+          if (b.title) bookByTitle[norm(b.title)] = b;
+        });
+
+        const list = [];
+        const usedTitles = new Set();
+        for (const entry of ranked) {
+          if (list.length >= 6) break;
+          const rec = (entry.byId ? bookById[entry.id] : null) || bookByTitle[norm(entry.title)];
+          if (!rec) continue; // borrowed title no longer exists in the catalog
+          const key = norm(rec.title);
+          if (usedTitles.has(key)) continue; // same title already counted (once by id, once by legacy title-only rows)
+          usedTitles.add(key);
+          list.push(rec);
+        }
+
+        if (list.length < 6) {
+         
+          for (const b of (approvedBooks || [])) {
+            if (list.length >= 6) break;
+            const key = norm(b.title);
+            if (usedTitles.has(key)) continue;
+            usedTitles.add(key);
+            list.push(b);
+          }
+        }
+        setMustRead(list.slice(0, 6));
+      } catch (e) { console.error('[Home mustRead] threw an exception:', e); }
+      finally { setLoadMR(false); }
+    })();
+  }, [profile?.campus_id]);
+
+  
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('student_favorites').select('book_id').eq('student_id', user.id);
+        if (error) { console.warn('[Home mustRead favorites]', error.message); return; }
+        setMrFavIds(new Set((data || []).map(r => r.book_id)));
+      } catch (e) { console.warn('[Home mustRead favorites]', e); }
+    })();
+  }, [user?.id]);
+
+  const toggleMrFav = async (e, bookId) => {
+    e.stopPropagation();
+    if (!user?.id || !bookId) return;
+    const isOn = mrFavIds.has(bookId);
+    try {
+      if (isOn) {
+        const { error } = await supabase.from('student_favorites')
+          .delete().eq('student_id', user.id).eq('book_id', bookId);
+        if (error) { console.error('[Home fav remove]', error); showToast(`Could not remove favorite: ${error.message}`, true); return; }
+        setMrFavIds(prev => { const n = new Set(prev); n.delete(bookId); return n; });
+        setStats(st => ({ ...st, favorites: Math.max(0, st.favorites - 1) }));
+        showToast('Removed from favorites.');
+      } else {
+        const { error } = await supabase.from('student_favorites')
+          .insert({ student_id: user.id, book_id: bookId });
+        if (error) { console.error('[Home fav add]', error); showToast(`Could not add favorite: ${error.message}`, true); return; }
+        setMrFavIds(prev => new Set(prev).add(bookId));
+        setStats(st => ({ ...st, favorites: st.favorites + 1 }));
+        showToast('Added to favorites \u2665');
+      }
+    } catch (err) { console.error('[Home fav toggle]', err); showToast('Could not update favorite.', true); }
   };
 
-  const StatCard = ({ icon, label, value, loading }) => (
-    <div className="sdb-stat-card">
-      <div className="sdb-stat-icon">{icon}</div>
-      <div className="sdb-stat-label">{label}</div>
-      <div className="sdb-stat-value">{loading ? '—' : value}</div>
-    </div>
-  );
+  const scrollMustRead = (dir) => {
+    const track = mrTrackRef.current;
+    if (!track) return;
+    const card = track.querySelector('.sdb-home-book-card');
+    const step = card ? card.getBoundingClientRect().width + 18 : track.clientWidth * 0.8;
+    track.scrollBy({ left: dir * step, behavior: 'smooth' });
+  };
 
   return (
     <div className="sdb-module">
-      {/* Welcome */}
-      <div className="sdb-welcome-card">
-        <div style={{ display:'flex', alignItems:'center', gap:18 }}>
-          <div style={{ width:64, height:64, borderRadius:'50%', border:'2.5px solid rgba(201,168,76,.60)', overflow:'hidden', background:'linear-gradient(135deg,#8B0000,#5A0000)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, boxShadow:'0 4px 14px rgba(0,0,0,.45)' }}>
-            {profile?.avatar_url
-              ? <img src={profile.avatar_url} alt="av" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{e.target.style.display='none';}} />
-              : <span style={{ fontFamily:'var(--font-display)', fontSize:22, fontWeight:700, color:'#F5E4A8' }}>{initials}</span>
-            }
+      {/* ═══ Hero ═══ */}
+      <div className="sdb-home-hero">
+        <div className="sdb-home-hero-text">
+          <div className="sdb-home-hero-eyebrow">Welcome back, {firstName}</div>
+          <h1 className="sdb-home-hero-title">Where knowledge<br />meets every mind.</h1>
+          <p className="sdb-home-hero-sub">Your next favorite story is just a page away.</p>
+          <div className="sdb-home-hero-actions">
+            <button className="sdb-btn sdb-btn-primary sdb-home-cta" onClick={() => onNavigate('catalog')}>
+              Browse Now
+            </button>
+            <button className="sdb-btn sdb-btn-ghost sdb-home-cta" onClick={() => onNavigate('history')}>
+              History
+            </button>
           </div>
+        </div>
+        <div className="sdb-home-hero-media">
+          <img src="/DashboardCover.png" alt="" onError={e => { e.target.style.display = 'none'; }} />
+        </div>
+      </div>
+
+      {/* ═══ Stats strip ═══ */}
+      <div className="sdb-home-stats-bar">
+        <div className="sdb-home-stat st-borrowed">
+          <div className="sdb-home-stat-value"><CountUp value={stats.borrowed} loading={loadSt} /></div>
+          <div className="sdb-home-stat-label">Book Borrowed</div>
+        </div>
+        <div className="sdb-home-stat st-returned">
+          <div className="sdb-home-stat-value"><CountUp value={stats.returned} loading={loadSt} /></div>
+          <div className="sdb-home-stat-label">Book Returned</div>
+        </div>
+        <div className="sdb-home-stat st-available">
+          <div className="sdb-home-stat-value"><CountUp value={stats.available} loading={loadSt} /></div>
+          <div className="sdb-home-stat-label">Available Now</div>
+        </div>
+        <div className="sdb-home-stat st-favorites">
+          <div className="sdb-home-stat-value"><CountUp value={stats.favorites} loading={loadSt} /></div>
+          <div className="sdb-home-stat-label">Favorites Saved</div>
+        </div>
+      </div>
+
+      {/* ═══ Browse by Category ═══ */}
+      <div className="sdb-home-section">
+        <div className="sdb-home-section-hdr">
           <div>
-            <div style={{ fontSize:12, letterSpacing:'.22em', textTransform:'uppercase', color:'#B8912B', fontFamily:'var(--font-display)', marginBottom:4,textAlign: 'left' }}>Welcome back</div>
-            <div className="sdb-hero-name" style={{ fontFamily:'var(--font-display)', fontSize:'clamp(16px,2.2vw,22px)', fontWeight:700, color:'var(--maroon-deep)', letterSpacing:'.04em' }}>{fullName || 'Student'}</div>
-            <div style={{ fontFamily:'var(--font-sans)', fontSize:12.5, color:'var(--text-muted)', marginTop:2,textAlign: 'left' }}>
-              {[course, year].filter(Boolean).join(' • ') || 'PSU Library Member'}
-            </div>
+            
+            <div className="sdb-home-eyebrow">Browse by Category</div>
+            <div className="sdb-home-section-title">Find Your Next Read</div>
+          
           </div>
+          <button className="sdb-home-viewall" onClick={() => onNavigate('catalog')}>View All Categories →</button>
         </div>
-        <button className="sdb-btn sdb-btn-primary" onClick={() => onNavigate('catalog')} style={{ fontSize:12.5 }}>
-          {Ic.catalog}&nbsp; Browse Catalog
-        </button>
+        <div className="sdb-home-cat-rail">
+          {HOME_CATEGORIES.map(cat => (
+            <button
+              key={cat.key} type="button" className="sdb-home-cat-card"
+              onClick={() => onNavigate('catalog', cat.key)} title={`Browse ${cat.label}`}
+            >
+              <img src={cat.img} alt="" loading="lazy" onError={e => { e.target.style.opacity = 0; }} />
+              <span className="sdb-home-cat-overlay">
+                <span className="sdb-home-cat-iconwrap">
+                  <span className="sdb-home-cat-glow" aria-hidden="true" />
+                  <span className="sdb-home-cat-icon">{cat.icon}</span>
+                </span>
+                <span className="sdb-home-cat-text">
+                  <span className="sdb-home-cat-label">{cat.label}</span>
+                  <span className="sdb-home-cat-tag">{cat.tag}</span>
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="sdb-stats-grid">
-        <StatCard icon={Ic.book}    label="Books Borrowed"  value={stats.borrowed}  loading={loadSt} />
-        <StatCard icon={Ic.check}   label="Books Returned"  value={stats.returned}  loading={loadSt} />
-        <StatCard icon={Ic.catalog} label="Available Now"   value={stats.available} loading={loadSt} />
-        <StatCard icon={Ic.heart}   label="Favorites Saved" value={stats.favorites} loading={loadSt} />
-      </div>
-
-      {/* Recent Activity */}
-      <div className="sdb-panel">
-        <div className="sdb-panel-hdr">
-          <span>Recent Activity</span>
-          <button className="sdb-btn sdb-btn-ghost" style={{ fontSize:11, padding:'5px 12px' }} onClick={() => onNavigate('history')}>View All</button>
+      {/* ═══ Must Read ═══ */}
+      <div className="sdb-home-section">
+        <div className="sdb-mr-hdr">
+          <div>
+            <div className="sdb-mr-eyebrow-row">
+              <span className="sdb-mr-eyebrow-text">Must Read</span>
+            </div>
+            <h2 className="sdb-mr-title">
+              <span className="sdb-mr-title-dark">Readers'</span>{' '}
+              <span className="sdb-mr-title-accent">All-Time Favorites</span>
+            </h2>
+          </div>
+          <button className="sdb-mr-viewall" onClick={() => onNavigate('catalog', '', profile?.campus_id ? String(profile.campus_id) : '')}>
+            View All Books <span aria-hidden="true">→</span>
+          </button>
         </div>
-        {loadAc ? <Spinner /> : acts.length === 0 ? (
+        {loadMR ? <Spinner /> : mustRead.length === 0 ? (
           <div className="sdb-empty">
-            <div className="sdb-empty-icon">📚</div>
-            <div className="sdb-empty-text">No activity yet</div>
-            <div className="sdb-empty-sub">Start browsing the catalog to borrow books.</div>
-            <div style={{ marginTop:16 }}>
-              <button className="sdb-btn sdb-btn-primary" style={{ fontSize:12 }} onClick={() => onNavigate('catalog')}>Browse Books</button>
+            <div className="sdb-empty-icon">📖</div>
+            <div className="sdb-empty-text">No borrowing activity in the last 30 days</div>
+            <div className="sdb-empty-sub">Once students start borrowing books, the most-borrowed titles will show up here.</div>
+          </div>
+        ) : (
+          <div className="sdb-mr-carousel">
+            <div className="sdb-home-book-grid" ref={mrTrackRef}>
+              {mustRead.map(b => {
+                const isFav = mrFavIds.has(b.id);
+                return (
+                  <div key={b.id} className="sdb-bk-card sdb-mr-bk-card" onClick={() => onNavigate('catalog', '', profile?.campus_id ? String(profile.campus_id) : '')}>
+                    <button
+                      type="button"
+                      className="sdb-bk-bookmark"
+                      onClick={(e) => toggleMrFav(e, b.id)}
+                      title={isFav ? 'Saved to Favorites' : 'Save to Favorites'}
+                      aria-label={isFav ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <svg viewBox="0 0 24 24" fill={isFav ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round"><path d="M6 2a2 2 0 0 0-2 2v18l8-5.2L20 22V4a2 2 0 0 0-2-2H6z" /></svg>
+                    </button>
+                    <div className="sdb-bk-cover">
+                      <BookCover src={b.cover_image_url || b.cover_url} title={b.title} width="100%" height="100%" />
+                    </div>
+                    <div className="sdb-bk-info">
+                      <div className="sdb-bk-title">{b.title}</div>
+                      <div className="sdb-bk-author">{b.author || b.authors || ''}</div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
-        ) : acts.map(a => {
-          const c = actIcon(a.status);
-          return (
-            <div key={a.id} className="sdb-activity-item">
-              <span className="sdb-activity-dot" style={{ color:c.dot, background:c.dot }} />
-              <div className="sdb-activity-text">
-                <span style={{ color:'var(--maroon)', fontWeight:700, fontSize:10, marginRight:6 }}>{c.label}</span>
-                {a.book_title || 'Book'}
-              </div>
-              <span className="sdb-activity-time">{relAgo(a.reviewed_at||a.created_at)}</span>
-            </div>
-          );
-        })}
+        )}
       </div>
+
+      {/* ═══ Promo banner — diagonal maroon panel over full-bleed photo ═══ */}
+      <div className="sdb-home-footer-banner">
+        <div className="sdb-home-footer-media">
+          <img src="/FooterCover.jpg" alt="" onError={e => { e.target.style.display = 'none'; }} />
+        </div>
+        <div className="sdb-home-footer-content">
+          <div className="sdb-home-footer-eyebrow-row">
+            <span className="sdb-home-footer-eyebrow-line" />
+            <div className="sdb-home-footer-title">Read something unforgettable today.</div>
+          </div>
+          <div className="sdb-home-footer-sub">
+            <span className="sdb-home-footer-sub-main">There's always another</span>
+            <span className="sdb-home-footer-sub-accent">story waiting for you.</span>
+          </div>
+          <div className="sdb-home-footer-actions">
+            <button
+              type="button"
+              className="sdb-home-footer-btn sdb-home-footer-btn-gold"
+              onClick={() => onNavigate('catalog')}
+            >
+              Browse Books
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="sdb-home-footer-btn sdb-home-footer-btn-outline"
+              onClick={() => onNavigate('history')}
+            >
+              My History
+            </button>
+          </div>
+        </div>
+      </div>
+      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
     </div>
   );
 }
@@ -2192,12 +3042,53 @@ function PageHome({ user, profile, onNavigate }) {
 /* ═══════════════════════════════════════════════════════
    PAGE: BROWSE CATALOG
 ═══════════════════════════════════════════════════════ */
-function PageCatalog({ user }) {
+/* Icons + facts grid for the Book Details popup */
+const bdSvg = (children) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{children}</svg>
+);
+const BD_ICONS = {
+  book:      bdSvg(<><path d="M2.5 5.6C5 4.6 8.4 4.7 12 6.6c3.6-1.9 7-2 9.5-1V19c-2.5-1-5.9-.9-9.5 1-3.6-1.9-7-2-9.5-1z" /><path d="M12 6.6V20" /></>),
+  isbn:      bdSvg(<path d="M4.5 5v14M8 5v14M11 5v14M14 5v14M17 5v14M19.5 5v14" />),
+  calendar:  bdSvg(<><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" /><path d="M3.5 10h17M8 3v4M16 3v4" /></>),
+  grid:      bdSvg(<><rect x="4" y="4" width="7" height="7" rx="1.6" /><rect x="13" y="4" width="7" height="7" rx="1.6" /><rect x="4" y="13" width="7" height="7" rx="1.6" /><rect x="13" y="13" width="7" height="7" rx="1.6" /></>),
+  globe:     bdSvg(<><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.6 2.6 3.9 5.6 3.9 9s-1.3 6.4-3.9 9c-2.6-2.6-3.9-5.6-3.9-9S9.4 5.6 12 3z" /></>),
+  pages:     bdSvg(<><path d="M7 3.5h7.5L19 8v12.5H7z" /><path d="M14 3.5V8.5h5M9.5 12.5h6M9.5 16h6" /></>),
+  edition:   bdSvg(<><rect x="4" y="4" width="16" height="16" rx="3" /><path d="M12 4v16M4 12h8" /></>),
+  pin:       bdSvg(<><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></>),
+  publisher: bdSvg(<path d="M4 20V9l8-5 8 5v11M3 20h18M9.5 20v-6h5v6" />),
+};
+/* items = [[label, iconKey, value], …] — rows with no value are skipped */
+function BdFacts({ items }) {
+  return (
+    <div className="sdb-bd-facts">
+      {items.filter(([, , v]) => v !== undefined && v !== null && v !== '').map(([k, icon, v]) => (
+        <div key={k} className="sdb-bd-fact">
+          <span className="sdb-bd-fact-ico">{BD_ICONS[icon]}</span>
+          <div className="sdb-bd-fact-txt">
+            <div className="sdb-bd-fact-k">{k}</div>
+            <div className="sdb-bd-fact-v">{v}</div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* "Online Books" category — shows only Open Library (online) books. Open Library has millions of
+   titles, so with an empty search box it lists a starter search (change the word below); typing in
+   the search box narrows it to whatever the student is looking for. */
+const ONLINE_CATEGORY = 'Online Books';
+const ONLINE_BOOKS_DEFAULT_QUERY = 'textbook';
+
+function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
   const [books,     setBooks]     = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [search,    setSearch]    = useState('');
-  const [catF,      setCatF]      = useState('');
+  const [catF,      setCatF]      = useState(initialCategory);
   const [availF,    setAvailF]    = useState('');
+  const [campusF,   setCampusF]   = useState(initialCampus);
+  const [campuses,  setCampuses]  = useState([]);
+  const onlineOnly = catF === ONLINE_CATEGORY;   // "Online Books" selected → only Open Library books
   const [favIds,    setFavIds]    = useState(new Set());
   const [selected,  setSelected]  = useState(null);
   const { toast, show } = useToast();
@@ -2238,6 +3129,21 @@ function PageCatalog({ user }) {
       });
 
       setBooks(withCopies);
+
+      // Campus names for the campus filter — books only store campus_id.
+      try {
+        const { data: allCampuses } = await supabase.from('campuses').select('id, campus_name').order('campus_name');
+        let campusRows = allCampuses || [];
+        if (!campusRows.length) {
+          const campusIds = [...new Set(withCopies.map(b => b.campus_id).filter(Boolean))];
+          if (campusIds.length) {
+            const { data: byIds } = await supabase.from('campuses').select('id, campus_name').in('id', campusIds);
+            campusRows = byIds || [];
+          }
+        }
+        setCampuses(campusRows.filter(c => c.campus_name));
+      } catch (e) { console.warn('[Catalog campuses]', e); }
+
       if (user?.id) {
         const { data:fv } = await supabase.from('student_favorites').select('book_id').eq('student_id',user.id);
         setFavIds(new Set((fv||[]).map(f=>f.book_id)));
@@ -2266,13 +3172,14 @@ function PageCatalog({ user }) {
   // keystroke or on the initial (empty-search) catalog load. A request-id
   // guard drops any response that's no longer the latest one in flight.
   useEffect(() => {
-    const q = search.trim();
+    const typed = search.trim();
+    const q = typed.length >= 2 ? typed : (onlineOnly ? ONLINE_BOOKS_DEFAULT_QUERY : '');
     if (q.length < 2) { setOlResults([]); setOlError(null); setOlLoading(false); return; }
 
     setOlLoading(true);
     const myReqId = ++olReqId.current;
     const handle = setTimeout(async () => {
-      const { results, error } = await searchOpenLibrary(q, { limit: 8 });
+      const { results, error } = await searchOpenLibrary(q, { limit: onlineOnly ? 24 : 8 });
       if (myReqId !== olReqId.current) return; // a newer search superseded this one
       setOlResults(results);
       setOlError(error);
@@ -2280,15 +3187,28 @@ function PageCatalog({ user }) {
     }, 500);
 
     return () => clearTimeout(handle);
-  }, [search]);
+  }, [search, onlineOnly]);
 
-  const categories = [...new Set(books.map(b=>b.category||b.genre).filter(Boolean))].sort();
+  // Standard genres (same list as the Home category rail) + "Others" + any other
+  // category/genre found on the books themselves, de-duplicated ignoring case.
+  const categories = (() => {
+    const seen = new Map();
+    [...HOME_CATEGORIES.map(c => c.key), 'Others', ...books.map(b => b.category || b.genre)]
+      .filter(Boolean)
+      .forEach(c => { const k = String(c).trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, String(c).trim()); });
+    return [...seen.values()].sort((a, b) => {
+      if (a.toLowerCase() === 'others') return 1;
+      if (b.toLowerCase() === 'others') return -1;
+      return a.localeCompare(b);
+    });
+  })();
 
   const filtered = books.filter(b => {
     const q  = search.toLowerCase();
     const ok = !q || [b.title,b.author,b.authors,b.isbn].some(v=>(v||'').toLowerCase().includes(q));
     const cat = b.category || b.genre || '';
-    return ok && (!catF||cat===catF) && (!availF||(availF==='available'?(b.available_copies??1)>0:(b.available_copies??1)<=0));
+    if (onlineOnly) return false;
+    return ok && (!catF||cat.toLowerCase()===catF.toLowerCase()) && (!campusF||String(b.campus_id)===campusF) && (!availF||(availF==='available'?(b.available_copies??1)>0:(b.available_copies??1)<=0));
   });
 
   // Open Library results respect the same category/availability filters
@@ -2296,7 +3216,7 @@ function PageCatalog({ user }) {
   // borrowable right now, since external copies don't have a copy count.
   const filteredOl = olResults.filter(b => {
     const cat = (b.category || '').toLowerCase();
-    const matchesCat = !catF || cat === catF.toLowerCase() || cat.includes(catF.toLowerCase());
+    const matchesCat = onlineOnly || !catF || cat === catF.toLowerCase() || cat.includes(catF.toLowerCase());
     if (!matchesCat) return false;
     if (!availF) return true;
     const readableNow = b.availability.canRead || b.availability.canBorrow;
@@ -2329,39 +3249,47 @@ function PageCatalog({ user }) {
   };
 
   return (
-    <div className="sdb-module">
-      {/* Header */}
-      <div className="sdb-module-header">
-        <div>
-          <div className="sdb-module-title sdb-catalog-hero-title" style={{ fontSize:26, textAlign:'left' }}>My Book Catalog</div>
-          <div className="sdb-module-sub">Find the book and resources you need, all in one place.</div>
-        </div>
-      </div>
-
+    <>
+      <PageHero title="Explore Our Collection" sub="Find the book and resources you need, all in one place." />
+      <div className="sdb-module sdb-cat-module">
+      <div className="sdb-cat-panel">
       {/* Filters */}
-      <div className="sdb-filters">
-        <div className="sdb-search-wrap">
-          <span className="sdb-search-icon">{Ic.search}</span>
-          <input className="sdb-input" style={{ paddingLeft:36 }} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by title, author, or ISBN…" />
+      <div className="sdb-cat-toolbar">
+        <div className="sdb-cat-search">
+          <span className="sdb-cat-search-icon">{Ic.search}</span>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search by title, author, or ISBN…" />
         </div>
-        <select className="sdb-select" value={catF} onChange={e=>setCatF(e.target.value)}>
+        <select className="sdb-cat-pillselect" value={catF} onChange={e=>setCatF(e.target.value)}>
           <option value="">All Categories</option>
           {categories.map(c=><option key={c} value={c}>{c}</option>)}
+          <option value={ONLINE_CATEGORY}>{ONLINE_CATEGORY}</option>
         </select>
-        <select className="sdb-select" value={availF} onChange={e=>setAvailF(e.target.value)}>
+        {campuses.length > 0 && (
+          <select className="sdb-cat-pillselect" value={campusF} onChange={e=>setCampusF(e.target.value)}
+            disabled={onlineOnly} title={onlineOnly ? 'Campus does not apply to online books' : undefined}
+            style={onlineOnly ? { opacity:.5, cursor:'not-allowed' } : undefined}>
+            <option value="">All Campuses</option>
+            {campuses.map(c=><option key={c.id} value={String(c.id)}>{c.campus_name}</option>)}
+          </select>
+        )}
+        <select className="sdb-cat-pillselect" value={availF} onChange={e=>setAvailF(e.target.value)}>
           <option value="">All Availability</option>
           <option value="available">Available</option>
           <option value="unavailable">Unavailable</option>
         </select>
-        <div className="sdb-count">
-          {loading
+        <div className="sdb-cat-count">
+          {Ic.book}
+          {onlineOnly
+            ? (olLoading ? 'Loading…' : `${filteredOl.length} online book${filteredOl.length!==1?'s':''}`)
+            : loading
             ? 'Loading…'
             : `${filtered.length} book${filtered.length!==1?'s':''}${filteredOl.length ? ` · ${filteredOl.length} from Open Library` : ''}`}
         </div>
       </div>
 
+      <div className="sdb-cat-body">
       {/* Book grid */}
-      {loading ? (
+      {onlineOnly ? null : loading ? (
         <div className="sdb-book-grid">
           {Array.from({length:8}).map((_,i)=>(
             <div key={i} className="sdb-skeleton" style={{ height:280, borderRadius:'var(--radius-lg)' }} />
@@ -2370,28 +3298,23 @@ function PageCatalog({ user }) {
       ) : filtered.length===0 ? (
         <div className="sdb-empty"><div className="sdb-empty-icon">🔍</div><div className="sdb-empty-text">No books found</div><div className="sdb-empty-sub">Try different keywords or clear the filters.</div></div>
       ) : (
-        <div className="sdb-book-grid">
+        <div className="sdb-book-grid sdb-bk-grid">
           {filtered.map(book=>{
             const isFav = favIds.has(book.id);
-            const copies = book.available_copies ?? book.copies ?? 1;
-            const ab = availCfg(copies);
             return (
-              <div key={book.id} className="sdb-book-card" onClick={()=>setSelected(book)}>
-                <div className="sdb-book-cover-area">
-                  <BookCover src={book.cover_image_url||book.cover_url} title={book.title} width="100%" height={120} />
-                  
+              <div key={book.id} className="sdb-bk-card" onClick={()=>setSelected(book)}>
+                <button type="button" className="sdb-bk-bookmark" onClick={e=>toggleFav(e,book.id)} title={isFav?'Saved':'Save'} aria-label={isFav?'Remove from saved':'Save book'}>
+                  <svg viewBox="0 0 24 24" fill={isFav?'currentColor':'none'} stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round"><path d="M6 2a2 2 0 0 0-2 2v18l8-5.2L20 22V4a2 2 0 0 0-2-2H6z"/></svg>
+                </button>
+                <div className="sdb-bk-cover">
+                  <BookCover src={book.cover_image_url||book.cover_url} title={book.title} width="100%" height="100%" />
                 </div>
-                <div className="sdb-book-body">
-                  <div className="sdb-book-title">{book.title}</div>
-                  <div className="sdb-book-author">{book.author||book.authors}</div>
-                  {(book.category||book.genre)&&<span className="sdb-book-genre">{book.category||book.genre}</span>}
-                  <div style={{ marginTop:8 }}><Badge {...ab} /></div>
-                  <div className="sdb-book-actions">
-                    <button className="sdb-btn sdb-btn-primary" style={{ flex:1,fontSize:11,padding:'6px 10px' }} onClick={e=>{e.stopPropagation();setSelected(book);}}>View Details</button>
-                    <button className="sdb-tbl-btn sdb-tbl-edit" style={{ padding:'6px 9px' }} onClick={e=>toggleFav(e,book.id)} title={isFav?'Saved':'Save'}>
-                      {isFav ? Ic.heartFill : Ic.heart}
-                    </button>
-                  </div>
+                <div className="sdb-bk-info">
+                  <div className="sdb-bk-title">{book.title}</div>
+                  <div className="sdb-bk-author">{book.author||book.authors}</div>
+                </div>
+                <div className="sdb-bk-foot">
+                  <button type="button" className="sdb-bk-btn" onClick={e=>{e.stopPropagation();setSelected(book);}}>View Details</button>
                 </div>
               </div>
             );
@@ -2400,7 +3323,7 @@ function PageCatalog({ user }) {
       )}
 
       {/* Open Library results — only appears once there's a real search term */}
-      {search.trim().length >= 2 && (
+      {(search.trim().length >= 2 || onlineOnly) && (
         <>
           <div className="sdb-ol-section-label">
             <span>From Open Library</span>
@@ -2416,31 +3339,30 @@ function PageCatalog({ user }) {
           ) : filteredOl.length === 0 ? (
             <div className="sdb-ol-error">No matching Open Library results for this search.</div>
           ) : (
-            <div className="sdb-book-grid">
+            <div className="sdb-book-grid sdb-bk-grid">
               {filteredOl.map(book => (
-                <div key={book.id} className="sdb-book-card" onClick={()=>setSelected(book)}>
-                  <div className="sdb-book-cover-area" style={{ position:'relative' }}>
-                    <span className="sdb-ol-tag">Open Library</span>
-                    <BookCover src={book.cover_image_url} title={book.title} width="100%" height={120} />
+                <div key={book.id} className="sdb-bk-card" onClick={()=>setSelected(book)}>
+                  <span className="sdb-ol-tag">Open Library</span>
+                  <div className="sdb-bk-cover">
+                    <BookCover src={book.cover_image_url} title={book.title} width="100%" height="100%" />
                   </div>
-                  <div className="sdb-book-body">
-                    <div className="sdb-book-title">{book.title}</div>
-                    <div className="sdb-book-author">{book.author}{book.year ? ` · ${book.year}` : ''}</div>
-                    {book.category && <span className="sdb-book-genre">{book.category}</span>}
-                    <div><span className="sdb-ol-status">{book.availability.label}</span></div>
-                    <div className="sdb-book-actions">
-                      <button className="sdb-btn sdb-btn-ghost" style={{ flex:1,fontSize:11,padding:'6px 10px' }} onClick={e=>{e.stopPropagation();setSelected(book);}}>View Details</button>
-                      {(book.availability.canRead || book.availability.canBorrow) && (
-                        <button
-                          className="sdb-btn sdb-btn-ol-read"
-                          style={{ flex:1,fontSize:11,padding:'6px 10px' }}
-                          onClick={e=>{ e.stopPropagation(); openExternal(book.availability.actionUrl); }}
-                          title="Opens the official Open Library / Internet Archive page in a new tab"
-                        >
-                          {book.availability.canRead ? 'Read Free' : 'Borrow'}
-                        </button>
-                      )}
-                    </div>
+                  <div className="sdb-bk-info">
+                    <div className="sdb-bk-title">{book.title}</div>
+                    <div className="sdb-bk-author">{book.author}{book.year ? ` · ${book.year}` : ''}</div>
+                    <span className="sdb-ol-status">{book.availability.label}</span>
+                  </div>
+                  <div className="sdb-bk-foot sdb-bk-foot-row">
+                    <button type="button" className="sdb-bk-btn" onClick={e=>{e.stopPropagation();setSelected(book);}}>View Details</button>
+                    {(book.availability.canRead || book.availability.canBorrow) && (
+                      <button
+                        type="button"
+                        className="sdb-bk-btn sdb-bk-btn-read"
+                        onClick={e=>{ e.stopPropagation(); openExternal(book.availability.actionUrl); }}
+                        title="Opens the official Open Library / Internet Archive page in a new tab"
+                      >
+                        {book.availability.canRead ? 'Read Free' : 'Borrow'}
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -2448,106 +3370,99 @@ function PageCatalog({ user }) {
           )}
         </>
       )}
+      </div>
+      </div>
 
       {/* Book detail modal */}
       {selected && selected.source === 'openlibrary' ? (
         <Modal maxWidth={800} onClose={()=>setSelected(null)}>
-          <div className="sdb-modal-hdr">
-            <div>
-              <div className="sdb-modal-title">Book Details</div>
-              <div className="sdb-modal-sub">{selected.category || 'Open Library'}</div>
+          <div className="sdb-bd-hdr">
+            <span className="sdb-bd-hdr-ico">{BD_ICONS.book}</span>
+            <div className="sdb-bd-hdr-text">
+              <div className="sdb-bd-hdr-title">Book Details</div>
+              <div className="sdb-bd-hdr-sub">{selected.category || 'Open Library'}</div>
             </div>
             <button className="sdb-modal-close" onClick={()=>setSelected(null)}>{Ic.close}</button>
           </div>
-          <div className="sdb-modal-body" style={{ display:'flex', gap:24, flexWrap:'wrap' }}>
-            {/* Left */}
-            <div style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:12,flexShrink:0 }}>
-              <BookCover src={selected.cover_image_url_lg||selected.cover_image_url} title={selected.title} width={120} height={170} />
-              <span className="sdb-ol-tag" style={{ position:'static' }}>Open Library</span>
-              <span className="sdb-ol-status">{selected.availability.label}</span>
-            </div>
-            {/* Right */}
-            <div style={{ flex:1, minWidth:200 }}>
-              <h2 style={{ fontFamily:'var(--font-display)', fontSize:19, fontWeight:700, color:'var(--text-primary)', letterSpacing:'.03em', margin:'0 0 5px' }}>{selected.title}</h2>
-              <div style={{ fontFamily:'var(--font-sans)', fontSize:14, color:'var(--text-secondary)', marginBottom:18 }}>by {selected.author||'—'}</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'9px 22px', marginBottom:18 }}>
-                {[['ISBN',selected.isbn],['Published',selected.year],['Category',selected.category]].filter(([,v])=>v).map(([k,v])=>(
-                  <div key={k}>
-                    <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.10em', textTransform:'uppercase', color:'var(--text-dim)', marginBottom:2 }}>{k}</div>
-                    <div style={{ fontSize:13, color:'var(--text-secondary)' }}>{v}</div>
-                  </div>
-                ))}
+          <div className="sdb-modal-body sdb-bd-body">
+            <aside className="sdb-bd-side">
+              <div className="sdb-bd-cover">
+                <BookCover src={selected.cover_image_url_lg||selected.cover_image_url} title={selected.title} width="100%" height="100%" />
               </div>
-              <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', borderTop:'1px solid rgba(139,0,0,.12)', paddingTop:14 }}>
+              <span className="sdb-ol-tag" style={{ position:'static' }}>Open Library</span>
+              <span className="sdb-ol-status" style={{ marginTop:0 }}>{selected.availability.label}</span>
+              {selected.availability.canRead ? (
+                <button className="sdb-bd-btn sdb-bd-btn-gold" onClick={()=>openExternal(selected.availability.actionUrl)}>Read Free</button>
+              ) : selected.availability.canBorrow ? (
+                <button className="sdb-bd-btn sdb-bd-btn-gold" onClick={()=>openExternal(selected.availability.actionUrl)}>Borrow on Open Library</button>
+              ) : null}
+              <button className="sdb-bd-btn sdb-bd-btn-ghost" onClick={()=>openExternal(selected.olUrl)}>View on Open Library</button>
+            </aside>
+            <section className="sdb-bd-main">
+              <h2 className="sdb-bd-title">{selected.title}</h2>
+              <div className="sdb-bd-by">by {selected.author||'—'}</div>
+              <BdFacts items={[['ISBN','isbn',selected.isbn],['Published','calendar',selected.year],['Category','grid',selected.category]]} />
+              <div className="sdb-bd-note">
                 This title comes from Open Library, not the university library system. Reading and borrowing happen on Open Library / Internet Archive's own site — nothing is copied into this catalog.
               </div>
-            </div>
-          </div>
-          <div className="sdb-modal-foot" style={{ justifyContent:'flex-start', gap:10 }}>
-            {selected.availability.canRead ? (
-              <button className="sdb-btn sdb-btn-ol-read" onClick={()=>openExternal(selected.availability.actionUrl)}>Read Free</button>
-            ) : selected.availability.canBorrow ? (
-              <button className="sdb-btn sdb-btn-ol-read" onClick={()=>openExternal(selected.availability.actionUrl)}>Borrow on Open Library</button>
-            ) : (
-              <span className="sdb-ol-status">{selected.availability.label}</span>
-            )}
-            <button className="sdb-btn sdb-btn-ghost" onClick={()=>openExternal(selected.olUrl)}>View on Open Library</button>
+            </section>
           </div>
         </Modal>
       ) : selected && (
         <Modal maxWidth={800} onClose={()=>setSelected(null)}>
-          <div className="sdb-modal-hdr">
-            <div><div className="sdb-modal-title">Book Details</div><div className="sdb-modal-sub">{selected.category||selected.genre||'Library Catalog'}</div></div>
+          <div className="sdb-bd-hdr">
+            <span className="sdb-bd-hdr-ico">{BD_ICONS.book}</span>
+            <div className="sdb-bd-hdr-text">
+              <div className="sdb-bd-hdr-title">Book Details</div>
+              <div className="sdb-bd-hdr-sub">{selected.category||selected.genre||'Library Catalog'}</div>
+            </div>
             <button className="sdb-modal-close" onClick={()=>setSelected(null)}>{Ic.close}</button>
           </div>
-          <div className="sdb-modal-body" style={{ display:'flex', gap:24, flexWrap:'wrap' }}>
-            {/* Left */}
-            <div style={{ display:'flex',flexDirection:'column',alignItems:'center',gap:12,flexShrink:0 }}>
-              <BookCover src={selected.cover_image_url||selected.cover_url} title={selected.title} width={120} height={170} />
+          <div className="sdb-modal-body sdb-bd-body">
+            <aside className="sdb-bd-side">
+              <div className="sdb-bd-cover">
+                <BookCover src={selected.cover_image_url||selected.cover_url} title={selected.title} width="100%" height="100%" />
+              </div>
               <Badge {...availCfg(selected.available_copies??selected.copies??1)} />
-              <div style={{ display:'flex', gap:2 }}>{[1,2,3,4,5].map(s=><span key={s}>{s<=(selected.rating||4)?Ic.star:Ic.starOff}</span>)}</div>
-              <div style={{ fontFamily:'var(--font-sans)', fontSize:11.5, color:'var(--text-muted)', textAlign:'center' }}>
+              <div className="sdb-bd-copies">
                 {selected.available_copies??selected.copies??1} cop{(selected.available_copies??selected.copies??1)===1?'y':'ies'} available
               </div>
-            </div>
-            {/* Right */}
-            <div style={{ flex:1, minWidth:200 }}>
-              <h2 style={{ fontFamily:'var(--font-display)', fontSize:19, fontWeight:700, color:'var(--text-primary)', letterSpacing:'.03em', margin:'0 0 5px' }}>{selected.title}</h2>
-              <div style={{ fontFamily:'var(--font-sans)', fontSize:14, color:'var(--text-secondary)', marginBottom:18 }}>by {selected.author||selected.authors||'—'}</div>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'9px 22px', marginBottom:18 }}>
-                {[['ISBN',selected.isbn],['Publisher',selected.publisher],['Published',selected.year||selected.publication_year],['Category',selected.category||selected.genre],['Language',selected.language||'English'],['Pages',selected.pages],['Edition',selected.edition],['Location',selected.shelf_location]].filter(([,v])=>v).map(([k,v])=>(
-                  <div key={k}>
-                    <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.10em', textTransform:'uppercase', color:'var(--text-dim)', marginBottom:2 }}>{k}</div>
-                    <div style={{ fontSize:13, color:'var(--text-secondary)' }}>{v}</div>
-                  </div>
-                ))}
-              </div>
+              <button className="sdb-bd-btn sdb-bd-btn-fav" onClick={e=>toggleFav(e,selected.id)}>
+                <span className="sdb-bd-btn-lbl">{BD_ICONS.book}{favIds.has(selected.id)?'Saved to Favorites':'Add to Favorites'}</span>
+                {favIds.has(selected.id)?Ic.heartFill:Ic.heart}
+              </button>
+            </aside>
+            <section className="sdb-bd-main">
+              <h2 className="sdb-bd-title">{selected.title}</h2>
+              <div className="sdb-bd-by">by {selected.author||selected.authors||'—'}</div>
+              <BdFacts items={[
+                ['ISBN','isbn',selected.isbn],
+                ['Published','calendar',selected.year||selected.publication_year],
+                ['Category','grid',selected.category||selected.genre],
+                ['Language','globe',selected.language||'English'],
+                ['Pages','pages',selected.pages],
+                ['Edition','edition',selected.edition],
+                ['Location','pin',selected.shelf_location],
+                ['Publisher','publisher',selected.publisher],
+              ]} />
               {(selected.abstract_text||selected.description) && (
-                <div style={{ borderTop:'1px solid rgba(139,0,0,.12)', paddingTop:16 }}>
-                  <div style={{ fontSize:9.5, fontWeight:700, letterSpacing:'.10em', textTransform:'uppercase', color:'var(--text-dim)', marginBottom:10 }}>
-                    {selected.abstract_text?'Abstract':'Description'}
-                  </div>
+                <>
+                  <div className="sdb-bd-abs-hd">{BD_ICONS.book}<span>{selected.abstract_text?'Abstract':'Description'}</span></div>
                   {selected.abstract_text ? (
-                    <AbstractBlock raw={selected.abstract_text} fallbackTitle={selected.title} authorName={selected.author||selected.authors} />
+                    <AbstractBlock raw={selected.abstract_text} fallbackTitle={selected.title} authorName={selected.author||selected.authors} plain />
                   ) : (
-                    <p style={{ fontFamily:'var(--font-sans)', fontSize:13, color:'var(--text-secondary)', lineHeight:1.75, margin:0 }}>{selected.description}</p>
+                    <p className="sdb-bd-desc">{selected.description}</p>
                   )}
-                </div>
+                </>
               )}
-            </div>
-          </div>
-          {/* Footer stays pinned below the scrollable content, so the CTA
-              never ends up crammed against the tail end of a long abstract. */}
-          <div className="sdb-modal-foot" style={{ justifyContent:'flex-start' }}>
-            <button className="sdb-btn sdb-btn-primary" onClick={e=>toggleFav(e,selected.id)}>
-              {favIds.has(selected.id)?Ic.heartFill:Ic.heart}&nbsp;{favIds.has(selected.id)?'Saved to Favorites':'Add to Favorites'}
-            </button>
+            </section>
           </div>
         </Modal>
       )}
 
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
     </div>
+    </>
   );
 }
 
@@ -2623,14 +3538,12 @@ function PageFavorites({ user, onNavigate }) {
   };
 
   return (
-    <div className="sdb-module">
-      <div className="sdb-module-header">
-        <div>
-          <div className="sdb-module-title">Favorites</div>
-         
-        </div>
-      </div>
+    <>
+      <PageHero title="My Favorites" sub="Books you saved, all in one place, ready when you need them." />
+      <div className="sdb-module sdb-cat-module">
 
+      <div className="sdb-cat-panel">
+      <div className="sdb-hist-inner">
       {loading ? (
         <div className="sdb-table-wrap"><div style={{ padding:30 }}><Spinner /></div></div>
       ) : books.length===0 ? (
@@ -2652,7 +3565,7 @@ function PageFavorites({ user, onNavigate }) {
               <th>Genre</th>
               <th>Copies</th>
               <th>Status</th>
-              <th></th>
+              <th>Action</th>
             </tr></thead>
             <tbody>
               {books.map(book=>{
@@ -2685,6 +3598,8 @@ function PageFavorites({ user, onNavigate }) {
           </table>
         </div>
       )}
+      </div>
+      </div>
 
       {selected && (
         <Modal maxWidth={560} onClose={()=>setSelected(null)}>
@@ -2716,6 +3631,7 @@ function PageFavorites({ user, onNavigate }) {
       )}
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
     </div>
+    </>
   );
 }
 
@@ -2832,14 +3748,12 @@ function PageHistory({ user }) {
   });
 
   return (
-    <div className="sdb-module">
-      <div className="sdb-module-header">
-        <div>
-          <div className="sdb-module-title">Borrowing History</div>
-          
-        </div>
-      </div>
+    <>
+      <PageHero title="Borrowing History" sub="Track what you borrowed, due dates, and return status." />
+      <div className="sdb-module sdb-cat-module">
 
+      <div className="sdb-cat-panel">
+      <div className="sdb-hist-inner">
       <div className="sdb-filters">
         <div className="sdb-search-wrap">
           <span className="sdb-search-icon">{Ic.search}</span>
@@ -2901,8 +3815,11 @@ function PageHistory({ user }) {
           </tbody>
         </table>
       </div>
+      </div>
+      </div>
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
     </div>
+    </>
   );
 }
 
@@ -3431,9 +4348,8 @@ export default function StudentDashboard({ user, onSignOut }) {
   const [profileOpen, setProfileOpen] = useState(false);
   const [showLogout,  setShowLogout]  = useState(false);
   const [profile,     setProfile]     = useState(null);
-  const [darkMode,    setDarkMode]    = useState(() => {
-    try { return localStorage.getItem('sdb-theme') === 'dark'; } catch { return false; }
-  });
+  const [catalogCategory, setCatalogCategory] = useState(''); // category to pre-filter Browse Catalog with, set via navigate('catalog', key)
+  const [catalogCampus, setCatalogCampus] = useState(''); // campus_id to pre-filter Browse Catalog with, set via navigate('catalog', category, campusId)
   const profileMenuRef = useRef(null);
 
   /* ═══════════════ NOTIFICATIONS ═══════════════
@@ -3966,11 +4882,6 @@ export default function StudentDashboard({ user, onSignOut }) {
       .catch(e => console.warn('[Profile fetch]',e?.message));
   }, [user?.id]);
 
-  /* Persist theme choice */
-  useEffect(() => {
-    try { localStorage.setItem('sdb-theme', darkMode ? 'dark' : 'light'); } catch {}
-  }, [darkMode]);
-
   /* Close the profile dropdown on outside click / Escape */
   useEffect(() => {
     if (!profileOpen) return;
@@ -3981,10 +4892,11 @@ export default function StudentDashboard({ user, onSignOut }) {
     return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onEsc); };
   }, [profileOpen]);
 
-  const navigate = useCallback((tab) => {
+  const navigate = useCallback((tab, category = '', campus = '') => {
     setActiveTab(tab);
     setMobileOpen(false);
     setProfileOpen(false);
+    if (tab === 'catalog') { setCatalogCategory(category); setCatalogCampus(campus); }
     if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   }, []);
 
@@ -4004,7 +4916,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   const content = () => {
     switch(activeTab) {
       case 'home':      return <PageHome      user={user} profile={profile} onNavigate={navigate} />;
-      case 'catalog':   return <PageCatalog   user={user} />;
+      case 'catalog':   return <PageCatalog   user={user} initialCategory={catalogCategory} initialCampus={catalogCampus} />;
       case 'favorites': return <PageFavorites user={user} onNavigate={navigate} />;
       case 'history':   return <PageHistory   user={user} />;
       case 'profile':   return <PageProfile   user={user} profile={profile} onProfileUpdate={setProfile} />;
@@ -4016,7 +4928,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   return (
     <>
       <style>{CSS}</style>
-      <div className={`sdb-shell${darkMode?' sdb-dark':''}`}>
+      <div className="sdb-shell">
 
         {/* ═══ TOP NAVBAR ═══ */}
         <header className="sdb-navbar">
@@ -4200,15 +5112,6 @@ export default function StudentDashboard({ user, onSignOut }) {
                     </button>
                   ))}
 
-                  <div className="sdb-dropdown-toggle-wrap">
-                    <span className="sdb-dropdown-toggle-label">{darkMode?Ic.moon:Ic.sun} Dark Mode</span>
-                    <button className="sdb-toggle-track" type="button"
-                      style={{ background:darkMode?'linear-gradient(135deg,#8B0000,#5A0000)':'rgba(139,0,0,.18)' }}
-                      onClick={()=>setDarkMode(v=>!v)} title="Toggle dark mode">
-                      <div className="sdb-toggle-thumb" style={{ left:darkMode?22:3 }} />
-                    </button>
-                  </div>
-
                   <div className="sdb-dropdown-sep" />
                   <button className="sdb-dropdown-item danger" onClick={()=>{setProfileOpen(false);setShowLogout(true);}}>
                     {Ic.logout} Sign Out
@@ -4230,7 +5133,17 @@ export default function StudentDashboard({ user, onSignOut }) {
 
         {/* ═══ MAIN ═══ */}
         <div className="sdb-main">
-          <main className="sdb-content">{historyOpen ? renderStudentNotifHistoryPage() : content()}</main>
+          <main className="sdb-content">
+            {historyOpen ? renderStudentNotifHistoryPage() : content()}
+
+            {!historyOpen && activeTab === 'home' && (
+              <footer className="sdb-sitefoot">
+                <div className="sdb-sitefoot-text">
+                  Pampanga State University<span className="sdb-sitefoot-dot">•</span>Librascan System<span className="sdb-sitefoot-dot">•</span>2026
+                </div>
+              </footer>
+            )}
+          </main>
         </div>
       </div>
 
