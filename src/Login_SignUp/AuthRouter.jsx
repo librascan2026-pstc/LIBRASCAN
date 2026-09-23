@@ -4,6 +4,7 @@ import LoginPage          from './LoginPage';
 import SignupPage         from './SignupPage';
 import ForgotPasswordPage from './ForgotPasswordPage';
 import ResetPasswordPage  from './ResetPasswordPage';
+import ConfirmLoginPage   from './ConfirmLoginPage';
 
 const variants = {
   enter: (dir) => ({
@@ -20,17 +21,29 @@ const variants = {
   }),
 };
 
-const PAGE_ORDER = ['login', 'signup', 'forgot-password', 'reset-password'];
+const PAGE_ORDER = ['login', 'signup', 'forgot-password', 'reset-password', 'confirm-login'];
 
 // URL <-> page mapping, same pattern as SuperAdminLayout: gives each auth
 // screen a real, addressable, bookmarkable/back-buttonable browser URL
-// (/login, /signup, /forgot-password, /reset-password) via the native
-// History API — no router dependency required.
+// (/login, /signup, /forgot-password, /reset-password, /confirm-login) via
+// the native History API — no router dependency required.
+//
+// 'confirm-login' is the public "Yes, it's me" / "No, secure my account"
+// landing page that the login-confirmation EMAIL links point at
+// (/confirm-login?token=...&action=yes|no). Without this entry the app has
+// no idea what to do with that path, falls back to the default page, and
+// renders the ordinary Login screen in that tab instead — which looks like
+// (and effectively is) "a second place you can log in" from the email link.
+// Registering it here is what makes that tab show ConfirmLoginPage instead,
+// which only ever confirms/denies the pending sign-in and never signs
+// anyone in itself; the ORIGINAL tab is the only place the login actually
+// completes (see LoginPage's confirmation poll -> finishLogin()).
 const PATH_BY_PAGE = {
   'login':            '/login',
   'signup':           '/signup',
   'forgot-password':  '/forgot-password',
   'reset-password':   '/reset-password',
+  'confirm-login':    '/confirm-login',
 };
 const PAGE_BY_PATH = Object.fromEntries(
   Object.entries(PATH_BY_PAGE).map(([key, path]) => [path, key])
@@ -140,6 +153,17 @@ export default function AuthRouter({ initialPage = 'login', onLoginSuccess, onGo
               onGoLogin={() => go('login')}
               onResetSuccess={() => go('login')}
               onGoLanding={handleGoLanding}
+            />
+          )}
+          {page === 'confirm-login' && (
+            // Deliberately NOT given onLoginSuccess / any way to sign the
+            // user in — this tab only reports "confirmed" / "denied" back
+            // to the server. The tab that's actually waiting on
+            // signInWithPassword() (LoginPage) polls that result itself and
+            // is the only place commitUser()/onLoginSuccess() ever run.
+            <ConfirmLoginPage
+              onGoForgot={() => go('forgot-password')}
+              onGoLogin={() => go('login')}
             />
           )}
         </motion.div>

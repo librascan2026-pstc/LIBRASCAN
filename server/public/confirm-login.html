@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LibraScan — Confirm Sign-In</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; min-height: 100%; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(160deg,#FFFCF2,#f6ecd6);
+    font-family: 'Crimson Pro', Georgia, serif;
+    padding: 20px;
+  }
+  .card {
+    max-width: 440px; width: 100%; background: #fff; border-radius: 18px;
+    border: 1px solid rgba(139,0,0,0.14); box-shadow: 0 12px 40px rgba(0,0,0,0.10);
+    padding: 36px 32px; text-align: center;
+  }
+  .brand {
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: #8B0000; font-weight: 700; margin: 0 0 18px;
+  }
+  h1 { font-family: Georgia, serif; font-size: 21px; color: #3a2410; margin: 0 0 10px; }
+  p { font-size: 14px; color: #5a4326; line-height: 1.65; margin: 0 0 6px; }
+  .warn { color: #8B0000; font-weight: 700; }
+  .btn {
+    display: inline-block; margin-top: 18px; padding: 11px 22px; border-radius: 22px;
+    border: none; cursor: pointer; font-family: inherit; font-size: 13px; font-weight: 700;
+    text-decoration: none;
+  }
+  .btn-primary { background: linear-gradient(135deg,#8B0000,#6B0000); color: #F5E4A8; }
+  .btn-secondary { background: rgba(139,0,0,0.08); color: #8B0000; }
+  .device-line {
+    display: inline-flex; align-items: center; gap: 8px; margin: 0 0 16px;
+    padding: 8px 14px; border-radius: 20px; background: rgba(139,0,0,0.06);
+    border: 1px solid rgba(139,0,0,0.14); font-size: 12.5px; color: #5a4326;
+  }
+  .spinner {
+    width: 16px; height: 16px; border-radius: 50%;
+    border: 2.5px solid rgba(139,0,0,0.20); border-top-color: #8B0000;
+    animation: spin 0.8s linear infinite; display: inline-block; vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+  <div class="card" id="card">
+    <p class="brand">LibraScan</p>
+    <p><span class="spinner"></span>Checking that link&hellip;</p>
+  </div>
+
+  <script>
+    // Filled in by the server when it serves this file — no build step, no
+    // bundler, no dependency on the frontend app's own routing. This page
+    // does exactly one thing: confirm/deny the sign-in with the server the
+    // moment it loads, then tell the person to go back to the original tab.
+    var FRONTEND_ORIGIN = "__FRONTEND_ORIGIN__";
+    var card = document.getElementById('card');
+
+    function render(html) {
+      card.innerHTML = '<p class="brand">LibraScan</p>' + html;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    var params = new URLSearchParams(window.location.search);
+    var token  = params.get('token');
+    var action = params.get('action');
+
+    if (!token || (action !== 'yes' && action !== 'no')) {
+      render(
+        '<h1>Link not valid</h1>' +
+        '<p>We couldn\u2019t match this link to a pending sign-in. It may have already been used, or the link was copied incorrectly.</p>' +
+        '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
+      );
+    } else {
+      // Same-origin request — this page is served by the same backend that
+      // owns /api/mfa/*, so no CORS setup is needed for this call at all.
+      fetch('/api/mfa/confirm-login-device', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: token, action: action }),
+      })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (json) {
+            return { ok: res.ok, json: json };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok) throw new Error(result.json.error || 'Something went wrong.');
+          var status = result.json.status;
+          var firstName = result.json.firstName ? escapeHtml(result.json.firstName) : '';
+          var device = result.json.device ? escapeHtml(result.json.device) : '';
+          var location = result.json.location ? escapeHtml(result.json.location) : '';
+          // Same idea as the email: show which device and where this sign-in
+          // came from, so whoever's reading can tell at a glance if it's them.
+          var deviceLine = (device || location)
+            ? '<div class="device-line"><span>' + (device || 'Unknown device') + '</span>' +
+              (location ? '<span style="opacity:.5">&middot;</span><span>&#128205; ' + location + '</span>' : '') +
+              '</div>'
+            : '';
+
+          if (status === 'confirmed') {
+            render(
+              deviceLine +
+              '<h1>Login confirmed successfully &#10003;</h1>' +
+              '<p>Thanks' + (firstName ? ', ' + firstName : '') + ' &mdash; that sign-in has been approved. ' +
+              'Go back to the original LibraScan tab; it&rsquo;s watching for this and will finish signing you in within a few seconds. You can close this tab.</p>'
+            );
+          } else if (status === 'denied') {
+            render(
+              deviceLine +
+              '<h1>That sign-in is blocked</h1>' +
+              '<p>Good call' + (firstName ? ', ' + firstName : '') + ' &mdash; that login attempt has been rejected. ' +
+              'The original login page has been told to block it, and we removed every device we&rsquo;d previously trusted on this account so nothing else can skip straight past this check either.</p>' +
+              '<p class="warn">Please change your password to secure your account.</p>' +
+              '<a class="btn btn-primary" href="' + FRONTEND_ORIGIN + '/forgot-password">Change My Password</a>'
+            );
+          } else if (status === 'expired') {
+            render(
+              deviceLine +
+              '<h1>This link expired</h1>' +
+              '<p>That confirmation link is no longer valid. If someone is still trying to sign in, go back to the login page &mdash; a new email (or the code-entry option) will be waiting there.</p>' +
+              '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
+            );
+          } else {
+            render(
+              '<h1>Link not valid</h1>' +
+              '<p>We couldn\u2019t match this link to a pending sign-in. It may have already been used, or the link was copied incorrectly.</p>' +
+              '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
+            );
+          }
+        })
+        .catch(function () {
+          render(
+            '<h1>Something went wrong</h1>' +
+            '<p>We couldn\u2019t reach the server just now. Please try the link again in a moment.</p>' +
+            '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
+          );
+        });
+    }
+  </script>
+</body>
+</html>

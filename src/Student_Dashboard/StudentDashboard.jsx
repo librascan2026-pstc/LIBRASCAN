@@ -18,6 +18,7 @@ import {
   markAllNotifHistoryRead,
   clearNotifHistory,
 } from '../Admin_Dashboard/notificationHistory';
+import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
 
 /* ═══════════════════════════════════════════════════════════════
    INLINE STYLES  — mirrors every token in Dashboard.css exactly
@@ -4135,6 +4136,141 @@ function PageProfile({ user, profile, onProfileUpdate }) {
 }
 
 /* ═══════════════════════════════════════════════════════
+   "View Logins" — collapsible list of signed-in devices, nested in the
+   Security panel below. Logging a device out goes through the server
+   (/api/mfa/sessions/revoke): it kills that device's Supabase session for
+   real (not just hides the row) and, if it had been trusted, removes it
+   from the trusted-devices table too.
+═══════════════════════════════════════════════════════ */
+function LoginSessionsPanel({ show }) {
+  const [open, setOpen]           = useState(false);
+  const [loading, setLoading]     = useState(false);
+  const [loaded, setLoaded]       = useState(false);
+  const [sessions, setSessions]   = useState([]);
+  const [revokingId, setRevokingId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const rows = await getSessions();
+      setSessions(rows);
+      setLoaded(true);
+    } catch (e) {
+      show(e.message || 'Could not load your logins.', true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) load();
+  };
+
+  const handleLogout = async (session) => {
+    if (revokingId) return;
+    setRevokingId(session.id);
+    try {
+      await revokeSession(session.id);
+      setSessions(list => list.filter(s => s.id !== session.id));
+      show(`Logged out ${session.device}.`);
+    } catch (e) {
+      show(e.message || 'Could not log that device out.', true);
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const timeAgo = (iso) => {
+    const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (mins < 1)  return 'Just now';
+    if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24)  return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+    return `${Math.round(hrs / 24)} day(s) ago`;
+  };
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <button
+        type="button"
+        onClick={toggle}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 10, padding: '13px 16px', cursor: 'pointer', textAlign: 'left',
+          background: 'rgba(139,0,0,0.04)', border: '1px solid rgba(139,0,0,0.10)', borderRadius: 10,
+        }}
+      >
+        <div>
+          <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: 'var(--text-primary)' }}>View Logins</div>
+          <div style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+            See every device signed in to your account and log any of them out.
+          </div>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.18s', flexShrink: 0, color: 'var(--text-muted)' }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div style={{ marginTop: 10, border: '1px solid rgba(139,0,0,0.08)', borderRadius: 10, padding: '4px 14px' }}>
+          {loading && <p style={{ fontFamily: 'var(--font-sans)', fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 0' }}>Loading your logins…</p>}
+          {!loading && sessions.length === 0 && (
+            <p style={{ fontFamily: 'var(--font-sans)', fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 0' }}>No other active logins found.</p>
+          )}
+          {!loading && sessions.map(s => (
+            <div key={s.id} style={{
+              display: 'flex', alignItems: 'center', gap: 13, padding: '11px 0',
+              borderBottom: '1px solid rgba(139,0,0,0.07)',
+            }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: 8, background: 'rgba(139,0,0,0.05)',
+                border: '1px solid rgba(139,0,0,0.10)', display: 'flex', alignItems: 'center',
+                justifyContent: 'center', color: 'var(--text-muted)', flexShrink: 0,
+              }}>
+                {/iphone|android|mobile/i.test(s.device)
+                  ? <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                  : <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {s.device}
+                  {s.current && (
+                    <span style={{
+                      display: 'inline-block', padding: '1px 8px', borderRadius: 20, marginLeft: 7,
+                      fontSize: 10.5, fontWeight: 700, verticalAlign: 'middle',
+                      background: 'rgba(46,125,50,0.09)', color: '#2E7D32', border: '1px solid rgba(46,125,50,0.20)',
+                    }}>Current</span>
+                  )}
+                </div>
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>{s.location}</div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontFamily: 'var(--font-sans)', fontSize: 12, color: 'var(--text-muted)' }}>{timeAgo(s.lastSeenAt)}</div>
+                {!s.current && (
+                  <button
+                    onClick={() => handleLogout(s)}
+                    disabled={revokingId === s.id}
+                    style={{
+                      background: 'none', border: 'none', padding: 0, marginTop: 4, display: 'block',
+                      fontSize: 11.5, color: '#C0392B', cursor: 'pointer', fontFamily: 'var(--font-sans)',
+                    }}
+                  >
+                    {revokingId === s.id ? 'Logging out…' : 'Logout'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
    PAGE: SETTINGS
 ═══════════════════════════════════════════════════════ */
 function PageSettings({ user, onSignOut }) {
@@ -4152,10 +4288,48 @@ function PageSettings({ user, onSignOut }) {
   const notifPrefTypes = getNotifPrefTypesForRole('student');
   const notifOnCount = notifPrefTypes.filter(t => notifPrefs[t.key] !== false).length;
 
+  // Two-factor authentication (email OTP) — same on/off toggle the Librarian
+  // Manager's Settings page uses, just surfaced here for student accounts.
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaLoading, setMfaLoading] = useState(true);
+  const [mfaBusy,    setMfaBusy]    = useState(false);
+
   useEffect(() => {
     setNotifPrefs(getNotifPrefs(user?.id));
     setNotifSound(getNotifSoundEnabled(user?.id));
   }, [user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setMfaLoading(true);
+    getMfaStatus()
+      .then(status => { if (!cancelled) setMfaEnabled(!!status.mfaEnabled); })
+      .catch(err => console.error('[Settings] getMfaStatus failed:', err))
+      .finally(() => { if (!cancelled) setMfaLoading(false); });
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  const handleMfaToggle = async (next) => {
+    if (mfaBusy) return;
+    setMfaBusy(true);
+    try {
+      const result = next ? await enableMfa() : await disableMfa();
+      setMfaEnabled(!!result.mfaEnabled);
+      show(next
+        ? 'Two-factor authentication enabled. You\'ll get a code by email each time you sign in on a new device.'
+        : 'Two-factor authentication turned off.');
+    } catch (e) {
+      console.error('[Settings] MFA toggle failed:', e);
+      show(e.message || 'Could not update two-factor authentication.', true);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleForgetDevice = () => {
+    forgetThisDevice(user?.id);
+    show('This device is no longer trusted — you\'ll be asked for a code on your next sign-in.');
+  };
 
   const handleNotifPrefToggle = (key, label) => {
     const next = notifPrefs[key] === false;
@@ -4323,6 +4497,39 @@ function PageSettings({ user, onSignOut }) {
         <div style={{ fontFamily:'var(--font-sans)',fontSize:13,color:'var(--text-secondary)',lineHeight:1.75 }}>
           Your personal information is used exclusively for library management within the PSU Library System and is not shared with third parties.
         </div>
+      </div>
+
+      {/* Security */}
+      <div className="sdb-panel" style={{ marginBottom:18 }}>
+        <div className="sdb-panel-hdr">
+          <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.shield} Security</span>
+        </div>
+
+        <Toggle
+          label="Two-Factor Authentication"
+          desc={mfaLoading
+            ? 'Checking status…'
+            : "Get a 6-digit code by email each time you sign in on a device we don't recognize"}
+          value={mfaEnabled}
+          onChange={handleMfaToggle}
+        />
+
+        {mfaEnabled && (
+          <div style={{
+            display:'flex', alignItems:'center', justifyContent:'space-between',
+            gap:10, marginTop:14, flexWrap:'wrap',
+          }}>
+            <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', lineHeight:1.6 }}>
+              Chose "remember this device" on a shared or public computer by mistake?
+            </div>
+            <button type="button" className="sdb-btn sdb-btn-ghost" style={{ fontSize:11.5, padding:'6px 14px' }}
+              onClick={handleForgetDevice}>
+              Forget This Device
+            </button>
+          </div>
+        )}
+
+        <LoginSessionsPanel show={show} />
       </div>
 
       {/* Account */}

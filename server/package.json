@@ -1,0 +1,18 @@
+{
+  "name": "librascan-2fa-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Tiny Node/Express service that issues & verifies LibraScan's email-OTP 2FA codes. Uses plain SMTP via Nodemailer, so it works with any mailbox (Gmail, Outlook, Zoho, your own domain) — no paid email API required.",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "nodemailer": "^6.9.14"
+  }
+}

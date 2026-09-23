@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
 import {
   getNotifPrefTypesForRole,
   getNotifPrefs,
@@ -1131,6 +1132,22 @@ function AvatarUpload({ avatarUrl, initials, displayName, roleLabel, uid, onToas
   );
 }
 
+// Lives at module level on purpose. When this was declared *inside*
+// ProfileTab, every keystroke created a brand-new component type, so React
+// unmounted and remounted the <input> and it lost focus after one character.
+function ProfileField({ label, fkey, readOnly = false, type = 'text', form, editing, errors, onChange }) {
+  return (
+    <div className="set-prof-field">
+      <label className="set-prof-flabel">{label}</label>
+      {editing && !readOnly
+        ? <input className="set-prof-finput" type={type} value={form[fkey]} onChange={e => onChange(fkey, e.target.value)} />
+        : <div className={`set-prof-fvalue${form[fkey] ? '' : ' empty'}`}>{form[fkey] || 'Not set'}</div>
+      }
+      {errors[fkey] && <span className="s-err" style={{ marginTop: 4 }}>{errors[fkey]}</span>}
+    </div>
+  );
+}
+
 function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   const firstName  = profile?.first_name  || user?.user_metadata?.first_name  || '';
   const lastName   = profile?.last_name   || user?.user_metadata?.last_name   || '';
@@ -1156,6 +1173,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
 
   // Field names below map to the columns that actually exist on
   // `profiles`: first_name, last_name, middle_name, username.
+  const editingRef = useRef(false); // kept in sync below, read by the effect
   const [form, setForm] = useState({
     first_name:  firstName,
     last_name:   lastName,
@@ -1164,6 +1182,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
     email:       email,
   });
   useEffect(() => {
+    if (editingRef.current) return; // a profile/user refresh must not wipe half-typed edits
     setForm(f => ({
       ...f,
       first_name:  profile?.first_name  || user?.user_metadata?.first_name || '',
@@ -1176,6 +1195,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
 
   const [errors, setErrors] = useState({});
   const [editing, setEditing] = useState(false);
+  editingRef.current = editing;
   const [saving,  setSaving]  = useState(false);
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
 
@@ -1245,15 +1265,74 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
     if (!uid) { onToast('Profile not found. Please refresh.', false); return; }
     setSaving(true);
     try {
+      const newEmail = form.email.trim().toLowerCase();
+      const emailChanged = newEmail && newEmail !== email.toLowerCase();
+
+      // Check for a conflict BEFORE touching anything, so a duplicate
+      // email fails fast with a clear reason instead of the generic
+      // "Error updating user" GoTrue returns for that same case.
+      if (emailChanged) {
+        const { data: dup, error: dupErr } = await supabaseAdmin
+          .from('profiles')
+          .select('id')
+          .ilike('email', newEmail)
+          .neq('id', uid)
+          .maybeSingle();
+        if (dupErr) console.warn('[Profile save] duplicate-email check skipped:', dupErr.message);
+        if (dup) {
+          onToast('That email address is already used by another account.', false);
+          setSaving(false);
+          return;
+        }
+      }
+
+      // Email changes go through the admin (service-role) client FIRST,
+      // before touching the profiles row, so a failure here doesn't leave
+      // profiles.email and the real auth.users.email out of sync with
+      // each other (that mismatch is what made this look "half saved").
+      if (emailChanged) {
+        // email_confirm: true makes the new address take effect
+        // immediately in Supabase auth — no confirmation link required.
+        // Deliberate: Supabase's built-in email sender is currently
+        // rate-limited on this project (bounce-rate notice from Supabase),
+        // so the normal supabase.auth.updateUser({ email }) flow would
+        // silently sit "pending confirmation" forever.
+        const { error: adminErr } = await supabaseAdmin.auth.admin.updateUserById(uid, {
+          email: newEmail,
+          email_confirm: true,
+        });
+        if (adminErr) {
+          // Log the full error object — GoTrue's .message is often just
+          // "Error updating user"; .status / .code (visible in the
+          // console) usually says what actually went wrong.
+          console.error('[Profile save] auth email update failed:', adminErr);
+          const detail = adminErr.status ? ` (status ${adminErr.status})` : '';
+          onToast(`Email update failed: ${adminErr.message}${detail}. Name/username were not saved either, so nothing is out of sync.`, false);
+          setSaving(false);
+          return;
+        }
+      }
+
       const { error: pErr } = await supabase.from('profiles').update({
         first_name:  form.first_name.trim(),
         last_name:   form.last_name.trim(),
         middle_name: form.middle_name.trim(),
         username:    form.username.trim(),
-        email:       form.email.trim(),
+        email:       newEmail,
         updated_at:  new Date().toISOString(),
       }).eq('id', uid);
-      if (pErr) throw pErr;
+      if (pErr) {
+        // The auth email (if changed) already succeeded at this point —
+        // don't silently lose that fact.
+        onToast(
+          emailChanged
+            ? `Email updated, but saving the rest of the profile failed: ${pErr.message}`
+            : pErr.message,
+          false
+        );
+        setSaving(false);
+        return;
+      }
 
       // Keep auth user_metadata in sync as a best-effort step. A stale or
       // just-refreshed session can momentarily report "Auth session
@@ -1261,28 +1340,6 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
       // succeeded, so a metadata-only failure is non-fatal and never
       // blocks the save.
       const metaUpdate = { first_name: form.first_name.trim(), last_name: form.last_name.trim() };
-      const emailChanged = form.email.trim() && form.email.trim() !== email;
-
-      if (emailChanged) {
-        // Email changes go through the admin (service-role) client with
-        // email_confirm: true so the new address takes effect immediately
-        // in Supabase auth — no confirmation link required. This is
-        // deliberate: Supabase's built-in email sender is currently
-        // rate-limited on this project (bounce-rate notice from Supabase),
-        // so the normal supabase.auth.updateUser({ email }) flow would
-        // silently sit "pending confirmation" forever, which is exactly
-        // the symptom of the email field looking editable but never
-        // actually updating.
-        const { error: adminErr } = await supabaseAdmin.auth.admin.updateUserById(uid, {
-          email: form.email.trim(),
-          email_confirm: true,
-        });
-        if (adminErr) {
-          onToast(`Name/username saved, but email update failed: ${adminErr.message}`, false);
-          setSaving(false);
-          return;
-        }
-      }
 
       try {
         const { error: mErr } = await supabase.auth.updateUser({ data: metaUpdate });
@@ -1307,16 +1364,7 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
     finally { setSaving(false); }
   };
 
-  const Field = ({ label, fkey, readOnly = false, type = 'text' }) => (
-    <div className="set-prof-field">
-      <label className="set-prof-flabel">{label}</label>
-      {editing && !readOnly
-        ? <input className="set-prof-finput" type={type} value={form[fkey]} onChange={e => set(fkey, e.target.value)} />
-        : <div className={`set-prof-fvalue${form[fkey] ? '' : ' empty'}`}>{form[fkey] || 'Not set'}</div>
-      }
-      {errors[fkey] && <span className="s-err" style={{ marginTop: 4 }}>{errors[fkey]}</span>}
-    </div>
-  );
+  const fieldProps = { form, editing, errors, onChange: set };
 
   return (
     <div>
@@ -1408,18 +1456,185 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
         </div>
 
         <div className="set-prof-grid">
-          <Field label="First Name"    fkey="first_name" />
-          <Field label="Middle Name"   fkey="middle_name" />
-          <Field label="Last Name"     fkey="last_name" />
-          <Field label="Username"      fkey="username" />
-          <Field label="Email Address" fkey="email" type="email" />
+          <ProfileField {...fieldProps} label="First Name" fkey="first_name" />
+          <ProfileField {...fieldProps} label="Middle Name" fkey="middle_name" />
+          <ProfileField {...fieldProps} label="Last Name" fkey="last_name" />
+          <ProfileField {...fieldProps} label="Username" fkey="username" />
+          <ProfileField {...fieldProps} label="Email Address" fkey="email" type="email" />
         </div>
       </div>
     </div>
   );
 }
 
-function SecurityTab({ onToast }) {
+// "View Logins" — the collapsible list of signed-in devices nested inside
+// the Security card. Logging out a device here goes through the server
+// (see /api/mfa/sessions/revoke): it kills that device's Supabase session
+// for real (not just hides the row) and, if it had been trusted, removes it
+// from mfa_trusted_devices too.
+function LoginSessionsPanel({ onToast }) {
+  const [open,      setOpen]      = useState(false);
+  const [loading,   setLoading]   = useState(false);
+  const [loaded,    setLoaded]    = useState(false);
+  const [sessions,  setSessions]  = useState([]);
+  const [revokingId, setRevokingId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const rows = await getSessions();
+      setSessions(rows);
+      setLoaded(true);
+    } catch (err) {
+      onToast(err.message || 'Could not load your logins.', false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && !loaded) load();
+  };
+
+  const handleLogout = async (session) => {
+    if (revokingId) return;
+    setRevokingId(session.id);
+    try {
+      await revokeSession(session.id);
+      setSessions(list => list.filter(s => s.id !== session.id));
+      onToast(`Logged out ${session.device}.`, true);
+    } catch (err) {
+      onToast(err.message || 'Could not log that device out.', false);
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const timeAgo = (iso) => {
+    const diffMs = Date.now() - new Date(iso).getTime();
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 1)  return 'Just now';
+    if (mins < 60) return `${mins} min${mins === 1 ? '' : 's'} ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24)  return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+    const days = Math.round(hrs / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  };
+
+  const DesktopIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+    </svg>
+  );
+  const MobileIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
+    </svg>
+  );
+
+  return (
+    <div style={{ marginTop: 14 }}>
+      <button
+        type="button"
+        onClick={toggle}
+        className="s-mfa-bar"
+        style={{ width: '100%', cursor: 'pointer', border: '1px solid rgba(139,0,0,0.10)', textAlign: 'left' }}
+      >
+        <div>
+          <div className="s-mfa-label">View Logins</div>
+          <div className="s-mfa-desc">See every device signed in to your account and log any of them out.</div>
+        </div>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"
+          style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.18s', flexShrink: 0, color: 'var(--text-muted)' }}>
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <div className="s-card" style={{ marginTop: 10, boxShadow: 'none' }}>
+          {loading && <p className="s-card-sub" style={{ margin: 0 }}>Loading your logins…</p>}
+          {!loading && sessions.length === 0 && (
+            <p className="s-card-sub" style={{ margin: 0 }}>No other active logins found.</p>
+          )}
+          {!loading && sessions.map(s => (
+            <div key={s.id} className="s-session">
+              <div className="s-ses-ico">
+                {/iphone|android|mobile/i.test(s.device) ? <MobileIcon /> : <DesktopIcon />}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="s-ses-name">
+                  {s.device}
+                  {s.current && <span className="s-cur">Current</span>}
+                </div>
+                <div className="s-ses-meta">{s.location}</div>
+              </div>
+              <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{timeAgo(s.lastSeenAt)}</div>
+                {!s.current && (
+                  <button className="s-revoke" onClick={() => handleLogout(s)} disabled={revokingId === s.id}>
+                    {revokingId === s.id ? 'Logging out…' : 'Logout'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SecurityTab({ onToast, uid, profile }) {
+
+  const isManager = (profile?.role || 'library_manager') === 'library_manager';
+
+  // --- Email OTP 2FA state ---
+  // Plain on/off toggle now — no confirmation-code step on enable. The
+  // email OTP challenge (sendOtp/verifyOtp) still happens at sign-in time
+  // per the login flow (see LoginPage.jsx); it's just not part of this
+  // Settings toggle anymore.
+  const [mfaLoading, setMfaLoading] = useState(true);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaBusy,    setMfaBusy]    = useState(false);
+
+  useEffect(() => {
+    if (!isManager) { setMfaLoading(false); return; }
+    let cancelled = false;
+    getMfaStatus()
+      .then(s => { if (!cancelled) setMfaEnabled(!!s.mfaEnabled); })
+      .catch(() => { if (!cancelled) onToast('Could not reach the 2FA service.', false); })
+      .finally(() => { if (!cancelled) setMfaLoading(false); });
+    return () => { cancelled = true; };
+  }, [isManager]);
+
+  const handleEnableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      await enableMfa();
+      setMfaEnabled(true);
+      onToast('Two-factor authentication is now on for this account.', true);
+    } catch (err) {
+      onToast(err.message, false);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleDisableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      await disableMfa();
+      setMfaEnabled(false);
+      forgetThisDevice(uid);
+      onToast('Two-factor authentication turned off.', true);
+    } catch (err) {
+      onToast(err.message, false);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
 
   const [pw,     setPw]     = useState({ old: '', newPw: '', confirm: '' });
   const [pwErr,  setPwErr]  = useState({});
@@ -1500,86 +1715,44 @@ function SecurityTab({ onToast }) {
 
       <div className="s-card">
         <p className="s-card-h">Two-Factor Authentication</p>
-        <p className="s-card-sub">Require a one-time code from your phone in addition to your password at every sign-in.</p>
+        <p className="s-card-sub">Require a one-time code sent to your email in addition to your password at sign-in.</p>
 
-        <div className="s-mfa-bar">
-          <div>
-            <div className="s-mfa-label">Authenticator App (TOTP)</div>
-            <div className="s-mfa-desc">Disabled — toggle to begin setup.</div>
-          </div>
-          <div className="s-mfa-right">
-            <span className="s-pill off">
-              <span className="s-dot" />
-              Disabled
-            </span>
-            <Toggle
-              id="mfa-toggle"
-              checked={false}
-              onChange={() => {}}
-              disabled={true}
-            />
-          </div>
-        </div>
-
-        <div className="s-alert info">
+        {!isManager ? (
+          <div className="s-alert info">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
             </svg>
-            <span>
-              Two-factor authentication is coming soon. This feature is currently unavailable.
-            </span>
+            <span>Two-factor authentication currently applies to Library Manager accounts.</span>
           </div>
-      </div>
-    </div>
-  );
-}
-function SessionsTab({ onSignOut }) {
-  const SESSIONS = [
-    { device: 'This Device',        browser: 'Chrome on Windows 11',  location: 'Pampanga, PH', time: 'Active now',  current: true  },
-    { device: 'Mobile Phone',       browser: 'Safari on iPhone',      location: 'Pampanga, PH', time: '2 hours ago', current: false },
-    { device: 'Library Computer 3', browser: 'Firefox on Windows 10', location: 'Pampanga, PH', time: 'Yesterday',   current: false },
-  ];
-
-  const DesktopIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
-    </svg>
-  );
-  const MobileIcon = () => (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
-    </svg>
-  );
-
-  return (
-    <div style={{ maxWidth: 660 }}>
-      <div className="s-card" style={{ marginBottom: 20 }}>
-        <p className="s-card-h">Active Sessions</p>
-        <p className="s-card-sub">Devices currently signed in to your account.</p>
-
-        {SESSIONS.map((s, i) => (
-          <div key={i} className="s-session">
-            <div className="s-ses-ico">
-              {/iphone|android|mobile/i.test(s.browser) ? <MobileIcon /> : <DesktopIcon />}
-            </div>
-            <div style={{ flex: 1 }}>
-              <div className="s-ses-name">
-                {s.device}
-                {s.current && <span className="s-cur">Current</span>}
+        ) : (
+          <>
+            <div className="s-mfa-bar">
+              <div>
+                <div className="s-mfa-label">Email One-Time Code</div>
+                <div className="s-mfa-desc">
+                  {mfaLoading ? 'Checking status…'
+                    : mfaEnabled ? "We'll email you a 6-digit code on any new sign-in."
+                    : 'Disabled — toggle to turn it on.'}
+                </div>
               </div>
-              <div className="s-ses-meta">{s.browser} · {s.location}</div>
+              <div className="s-mfa-right">
+                <span className={`s-pill ${mfaEnabled ? 'on' : 'off'}`}>
+                  <span className="s-dot" />
+                  {mfaEnabled ? 'Enabled' : 'Disabled'}
+                </span>
+                <Toggle
+                  id="mfa-toggle"
+                  checked={mfaEnabled}
+                  disabled={mfaLoading || mfaBusy}
+                  onChange={() => (mfaEnabled ? handleDisableMfa() : handleEnableMfa())}
+                />
+              </div>
             </div>
-            <div style={{ textAlign: 'right', flexShrink: 0 }}>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{s.time}</div>
-              {!s.current && <button className="s-revoke">Revoke</button>}
-            </div>
-          </div>
-        ))}
+          </>
+        )}
+
+        <LoginSessionsPanel onToast={onToast} />
       </div>
-
-
     </div>
   );
 }
@@ -1624,7 +1797,7 @@ export default function Settings({ user, onSignOut }) {
       </div>
 
       {tab === 'profile'       && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
-      {tab === 'security'      && <SecurityTab onToast={toast} />}
+      {tab === 'security'      && <SecurityTab onToast={toast} uid={user?.id} profile={profile} />}
       {tab === 'notifications' && <NotificationsTab uid={user?.id} onToast={toast} />}
     </div>
   );

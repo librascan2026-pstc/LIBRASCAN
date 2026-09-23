@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { AuthContext } from './useAuth';
+import { isMfaPending, clearMfaPending } from '../utils/mfaClient';
 
 // useAuth() itself now lives in ./useAuth.js — this file exports the
 // AuthProvider component ONLY, which keeps it a valid React Fast Refresh
@@ -58,6 +59,18 @@ export function AuthProvider({ children }) {
           return;
         }
         const u = session?.user ?? null;
+        // A Supabase session can exist here (signInWithPassword already
+        // resolved it) while the account is still mid-2FA — e.g. this is a
+        // second tab in the same browser, such as the one opened by tapping
+        // "Yes, it's me" / "No, secure my account" in the confirmation
+        // email. Never treat that as signed in; only the tab that actually
+        // finishes 2FA (via commitUser -> clearMfaPending) may.
+        if (u && isMfaPending(u.id)) {
+          setUser(null);
+          setRole(null);
+          setLoading(false);
+          return;
+        }
         setUser(u);
         if (u) await fetchProfile(u.id); 
         else setRole(null);
@@ -77,6 +90,15 @@ export function AuthProvider({ children }) {
       if (event === 'USER_UPDATED') return;
 
       const u = session?.user ?? null;
+      // Same guard as the initial getSession() check above — a token
+      // refresh or storage event firing in a not-yet-2FA'd tab must not
+      // suddenly promote it to signed in either.
+      if (u && isMfaPending(u.id)) {
+        setUser(null);
+        setProfile(null);
+        setRole(null);
+        return;
+      }
       setUser(u);
       if (u) await fetchProfile(u.id); // resolves the real role from DB
       else { setProfile(null); setRole(null); }
@@ -89,6 +111,7 @@ export function AuthProvider({ children }) {
   }, [fetchProfile]);
 
   const signOut = async () => {
+    const uid = user?.id;
     try {
 
       const { error } = await supabase.auth.signOut({ scope: 'local' });
@@ -98,7 +121,7 @@ export function AuthProvider({ children }) {
     } catch (err) {
       console.warn('[AuthContext] signOut threw (non-fatal):', err);
     } finally {
-  
+      if (uid) clearMfaPending(uid);
       setUser(null);
       setRole(null);
       setProfile(null);
@@ -111,6 +134,11 @@ export function AuthProvider({ children }) {
   };
 
   const commitUser = async (sessionUser) => {
+    // This is the one place a login is actually considered finished — no
+    // 2FA required, OTP verified, or the "Yes, it's me" email confirmed.
+    // Clearing the marker here (rather than in LoginPage) means every path
+    // that ends in commitUser is covered automatically.
+    clearMfaPending(sessionUser.id);
     setUser(sessionUser);
     await fetchProfile(sessionUser.id); 
   };
