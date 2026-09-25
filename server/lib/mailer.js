@@ -1,22 +1,69 @@
-import nodemailer from 'nodemailer';
+// ============================================================================
+// LibraScan — email sending via Brevo's HTTPS API (https://api.brevo.com).
+//
+// WHY NOT SMTP ANYMORE: Railway (and most cloud hosts) block or heavily
+// throttle outbound SMTP connections (ports 587/465) to providers like
+// Gmail — that's what was causing every send to fail with "Connection
+// timeout". Brevo's API runs entirely over normal HTTPS (port 443, the same
+// port everything else on the internet uses), so it isn't affected by that
+// block at all.
+//
+// SETUP (one-time):
+//   1. Sign up at https://www.brevo.com (free tier: 300 emails/day).
+//   2. Senders & IP → Senders → Add a sender → verify librascann2026@gmail.com
+//      (just click the confirmation link Brevo emails you — no DNS needed).
+//   3. Settings (top right) → SMTP & API → API Keys → Generate a new API key.
+//   4. In Railway → Variables, add BREVO_API_KEY = <that key>, and make sure
+//      SMTP_FROM is still set to the sender you verified in step 2.
+//   5. Redeploy.
+// ============================================================================
 
-// Plain SMTP transport — this is the part that gives you "no limitation for
-// email provider": Gmail, Outlook, Zoho, Yahoo, or a custom domain's mail
-// server all work here unchanged, just by editing the SMTP_* values in
-// server/.env. None of them require a paid plan for the volumes a library
-// login flow generates.
-const transporter = nodemailer.createTransport({
-  host: process.env.SMTP_HOST,
-  port: Number(process.env.SMTP_PORT || 587),
-  secure: process.env.SMTP_SECURE === 'true', // true only for port 465
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-});
+const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
+function parseFrom(raw) {
+  // SMTP_FROM is stored as `"LibraScan <librascann2026@gmail.com>"` — pull the
+  // display name and email apart the way Brevo's API wants them.
+  const fallback = { name: 'LibraScan', email: process.env.SMTP_USER || '' };
+  if (!raw) return fallback;
+  const match = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
+  if (match) return { name: match[1].trim() || fallback.name, email: match[2].trim() };
+  return { name: fallback.name, email: raw.trim() };
+}
+
+async function sendViaBrevo({ to, subject, html, text }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  if (!apiKey) {
+    throw new Error('BREVO_API_KEY is not set. Add it in Railway → Variables.');
+  }
+
+  const sender = parseFrom(process.env.SMTP_FROM);
+
+  const res = await fetch(BREVO_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'api-key': apiKey,
+    },
+    body: JSON.stringify({
+      sender,
+      to: [{ email: to }],
+      subject,
+      htmlContent: html,
+      textContent: text,
+    }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`Brevo API error ${res.status}: ${body.slice(0, 300)}`);
+  }
+}
+
+/** Kept for parity with the old mailer.js — nothing to "verify" with an HTTP API. */
 export async function verifyMailer() {
-  await transporter.verify();
+  if (!process.env.BREVO_API_KEY) {
+    throw new Error('BREVO_API_KEY is not set. Add it in Railway → Variables.');
+  }
 }
 
 export async function sendOtpEmail({ to, name, code, purpose }) {
@@ -39,8 +86,7 @@ export async function sendOtpEmail({ to, name, code, purpose }) {
     </p>
   </div>`;
 
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM || `"LibraScan" <${process.env.SMTP_USER}>`,
+  await sendViaBrevo({
     to,
     subject: `${code} — ${purpose === 'enable' ? 'confirm your email' : 'your LibraScan sign-in code'}`,
     html,
@@ -53,12 +99,6 @@ export async function sendOtpEmail({ to, name, code, purpose }) {
 // device (the 6-digit code above is kept only as the "try another way"
 // fallback). Two big buttons, "Yes, it's me" / "No, secure my account",
 // link straight to the public /confirm-login page with the one-time token.
-//
-// Styled after the Facebook/Google "new login" pattern: a dark device card
-// up top with the browser/OS and, crucially, WHERE the sign-in came from
-// (city/region/country from the requester's IP) — that location is usually
-// the single fastest way for someone to tell "yes that's me on my phone" vs
-// "that's not anywhere I've been", so it's the most prominent fact in here.
 // ---------------------------------------------------------------------------
 export async function sendLoginConfirmationEmail({ to, name, confirmUrl, denyUrl, device, location, ip }) {
   const deviceLabel   = device || 'Unknown device';
@@ -112,8 +152,7 @@ export async function sendLoginConfirmationEmail({ to, name, confirmUrl, denyUrl
     </div>
   </div>`;
 
-  await transporter.sendMail({
-    from: process.env.SMTP_FROM || `"LibraScan" <${process.env.SMTP_USER}>`,
+  await sendViaBrevo({
     to,
     subject: 'Confirm it\u2019s you — new LibraScan sign-in',
     html,
