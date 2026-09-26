@@ -20,14 +20,26 @@
 
 const BREVO_API_URL = 'https://api.brevo.com/v3/smtp/email';
 
-function parseFrom(raw) {
-  // SMTP_FROM is stored as `"LibraScan <librascann2026@gmail.com>"` — pull the
-  // display name and email apart the way Brevo's API wants them.
-  const fallback = { name: 'LibraScan', email: process.env.SMTP_USER || '' };
-  if (!raw) return fallback;
-  const match = raw.match(/^"?([^"<]*)"?\s*<([^>]+)>$/);
-  if (match) return { name: match[1].trim() || fallback.name, email: match[2].trim() };
-  return { name: fallback.name, email: raw.trim() };
+/**
+ * Sender is read from two DEDICATED variables instead of being parsed out of
+ * SMTP_FROM's `"Name <email>"` text — regex-parsing that string turned out
+ * to be fragile (a stray quote/backslash from how the value got pasted into
+ * Railway silently blanked out the email, which is what caused Brevo's
+ * "valid sender email required" error). Set these two plain variables in
+ * Railway → Variables:
+ *   SENDER_EMAIL = librascann2026@gmail.com   (must exactly match the address
+ *                  verified under Brevo → Senders, IP, and Domains)
+ *   SENDER_NAME  = LibraScan                   (optional — defaults below)
+ */
+function getSender() {
+  const email = (process.env.SENDER_EMAIL || process.env.SMTP_USER || '').trim();
+  const name = (process.env.SENDER_NAME || 'LibraScan').trim();
+  if (!email) {
+    throw new Error(
+      'No sender email configured. Set SENDER_EMAIL in Railway → Variables to the address verified in Brevo (e.g. librascann2026@gmail.com).'
+    );
+  }
+  return { name, email };
 }
 
 async function sendViaBrevo({ to, subject, html, text }) {
@@ -36,7 +48,7 @@ async function sendViaBrevo({ to, subject, html, text }) {
     throw new Error('BREVO_API_KEY is not set. Add it in Railway → Variables.');
   }
 
-  const sender = parseFrom(process.env.SMTP_FROM);
+  const sender = getSender();
 
   const res = await fetch(BREVO_API_URL, {
     method: 'POST',
