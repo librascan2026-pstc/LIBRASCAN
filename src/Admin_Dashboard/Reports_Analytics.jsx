@@ -2926,23 +2926,50 @@ export default function ReportsAnalytics() {
       const periodBorrowingsForStudents = (borrowings||[]).filter(
         b => b.borrowed_at && new Date(b.borrowed_at).getTime() >= sinceTime
       );
+      // A student can rack up borrows two ways: through their own account
+      // (student_number stored directly on the row) or via their physical
+      // ID being scanned at the desk (BookManagement doesn't populate the
+      // student_number column for that flow — it only embeds the number in
+      // student_name as "Name [Number]"). Group by the actual student
+      // number — pulled from either source — so both count as one student
+      // on the leaderboard instead of splitting into separate entries.
+      const extractEmbeddedNo = (name) => String(name||'').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
+      const cleanDisplayName  = (name) => String(name||'').replace(/\s*\[.*?\]\s*$/, '').trim();
+      const studentKey = (b) => {
+        const num = String(b.student_number||'').trim() || extractEmbeddedNo(b.student_name);
+        // No number at all (very old/legacy rows) — fall back to name so
+        // they still show up, just ungrouped.
+        return num || `name:${cleanDisplayName(b.student_name).toLowerCase()}`;
+      };
+
       const stuBorrows  = {};
       const stuReturned = {};
       const stuMeta     = {};
       periodBorrowingsForStudents.forEach(b=>{
         if(!b.student_name) return;
-        stuBorrows[b.student_name]  = (stuBorrows[b.student_name]||0)+1;
-        if(b.returned_at) stuReturned[b.student_name] = (stuReturned[b.student_name]||0)+1;
-        if(!stuMeta[b.student_name]) stuMeta[b.student_name]={ student_number: b.student_number||'', program: b.student_program||'' };
+        const key = studentKey(b);
+        stuBorrows[key]  = (stuBorrows[key]||0)+1;
+        if(b.returned_at) stuReturned[key] = (stuReturned[key]||0)+1;
+        const num = String(b.student_number||'').trim() || extractEmbeddedNo(b.student_name);
+        // Keep the most complete meta seen for this student (prefer a row
+        // that actually has an explicit student_number/program over one
+        // that only had the embedded-in-name number).
+        if(!stuMeta[key] || (!stuMeta[key].student_number && num)) {
+          stuMeta[key] = {
+            student_name:   cleanDisplayName(b.student_name) || stuMeta[key]?.student_name || b.student_name,
+            student_number: num || stuMeta[key]?.student_number || '',
+            program:        b.student_program || stuMeta[key]?.program || '',
+          };
+        }
       });
       const topStudents = Object.entries(stuBorrows)
         .sort((a,b)=>b[1]-a[1]).slice(0,50)
-        .map(([name,borrows],i)=>({
-          student_name: name,
+        .map(([key,borrows],i)=>({
+          student_name: stuMeta[key]?.student_name || key,
           borrows,
-          returned: stuReturned[name]||0,
-          student_number: stuMeta[name]?.student_number||'',
-          program: stuMeta[name]?.program||'',
+          returned: stuReturned[key]||0,
+          student_number: stuMeta[key]?.student_number||'',
+          program: stuMeta[key]?.program||'',
           rank: i+1,
         }));
       const progCount = {};

@@ -101,6 +101,25 @@ function LinkBtn({ onClick, children, style = {} }) {
   );
 }
 
+// "x****b@domain.com" — same masking style as the "Check your emails" screen.
+function maskEmail(email) {
+  if (!email) return '';
+  const [local, domain] = email.split('@');
+  if (!domain) return email;
+  if (local.length <= 2) return `${local[0]}***@${domain}`;
+  return `${local[0]}****${local[local.length - 1]}@${domain}`;
+}
+
+// First name if we have it from signup metadata, else the email's local
+// part, else a plain fallback — used for the small "Name · LibraScan" line.
+function pendingDisplayName(user) {
+  const meta = user?.user_metadata || {};
+  const full = [meta.first_name, meta.last_name].filter(Boolean).join(' ').trim();
+  if (full) return full;
+  if (user?.email) return user.email.split('@')[0];
+  return 'there';
+}
+
 function ErrorBox({ message }) {
   return (
     <motion.div
@@ -572,7 +591,11 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'Sign-In Blocked'
                    : confirmStatus === 'expired' ? 'Link Expired'
-                   : 'Check Your Email'
+                   // pending: rendered left-aligned inside the pane itself
+                   // below instead of AuthLayout's centered heading — kept
+                   // empty here so AuthLayout doesn't also print a centered
+                   // one above it.
+                   : ''
                    )
                  : 'Welcome Back';
   const subtitle = screen === 'captcha' ? 'Complete the security check to proceed'
@@ -580,7 +603,7 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'We stopped that sign-in'
                    : confirmStatus === 'expired' ? 'Request a new link below'
-                   : 'Confirm it\u2019s you from your inbox'
+                   : '' // pending: same reasoning as title above
                    )
                  : 'Sign in to your library account';
 
@@ -809,70 +832,98 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             style={{ display: 'flex', flexDirection: 'column' }}
           >
             {confirmStatus === 'pending' && (
-              <>
-                <div style={{
-                  background: 'rgba(201,168,76,0.12)',
-                  border: '1px solid rgba(201,168,76,0.38)',
-                  borderRadius: 10, padding: '10px 13px',
-                  fontSize: 12.5, fontFamily: FONT_BODY, color: '#5a3010',
-                  marginBottom: 14, lineHeight: 1.6,
+              <div style={{ textAlign: 'left' }}>
+                <p style={{
+                  margin: '0 0 4px', fontSize: 11, fontWeight: 700,
+                  fontFamily: FONT_SANS, letterSpacing: '0.04em',
+                  color: '#8B0000', textAlign: 'left',
                 }}>
-                  This account has two-factor authentication on. We emailed a
-                  confirmation to <strong>{pendingUser?.email}</strong> — open it
-                  and tap <strong>"Yes, it's me"</strong> to continue, or{' '}
-                  <strong>"No, secure my account"</strong> to block it. The link
-                  expires in 10 minutes.
+                  {pendingDisplayName(pendingUser)} &middot; LibraScan
+                </p>
+
+                <h2 style={{
+                  margin: '0 0 6px', fontFamily: FONT_DISPLAY, fontSize: 24,
+                  fontWeight: 700, color: '#4a1200', textAlign: 'left',
+                }}>
+                  Check your emails
+                </h2>
+
+                <p style={{
+                  margin: '0 0 14px', fontSize: 12.5, fontWeight: 700,
+                  fontFamily: FONT_BODY, color: '#8B0000', textAlign: 'left',
+                }}>
+                  We sent a confirmation to your email {maskEmail(pendingUser?.email)}
+                </p>
+
+                <p style={{
+                  margin: '0 0 4px', fontSize: 13, lineHeight: 1.6,
+                  fontFamily: FONT_BODY, color: '#5a4326', textAlign: 'left',
+                }}>
+                  Check your emails there and approve the login to continue
+                </p>
+
+                <img
+                  src="/confirmation.png"
+                  alt="Illustration of confirming a sign-in from an email"
+                  style={{
+                    width: '100%', height: 'auto', display: 'block',
+                    borderRadius: 14, marginBottom: 16,
+                  }}
+                />
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                  <span style={{
+                    width: 16, height: 16, borderRadius: '50%',
+                    border: '2.5px solid rgba(139,0,0,0.20)', borderTopColor: '#8B0000',
+                    animation: 'lm-spin 0.8s linear infinite', flexShrink: 0,
+                  }} />
+                  <span style={{ fontFamily: FONT_BODY, fontSize: 13.5, fontWeight: 700, color: '#5a2800' }}>
+                    Waiting for approval&hellip;
+                  </span>
+                </div>
+                <style>{'@keyframes lm-spin { to { transform: rotate(360deg); } }'}</style>
+
+                <p style={{
+                  margin: '4px 0 0', fontSize: 12, textAlign: 'left',
+                  fontFamily: FONT_BODY, color: '#8a7250',
+                }}>
+                  It may take a few minutes to get the notification.
                   {confirmResent && (
                     <span style={{ color: '#2e7d32', fontWeight: 600, display: 'block', marginTop: 4 }}>
                       ✓ A new confirmation email was sent.
                     </span>
                   )}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, justifyContent: 'center', margin: '18px 0' }}>
-                  <span style={{
-                    width: 18, height: 18, borderRadius: '50%',
-                    border: '2.5px solid rgba(139,0,0,0.20)', borderTopColor: '#8B0000',
-                    animation: 'lm-spin 0.8s linear infinite',
-                  }} />
-                  <span style={{ fontFamily: FONT_BODY, fontSize: 13, color: '#7a4020' }}>
-                    Waiting for confirmation…
-                  </span>
-                </div>
-                <style>{'@keyframes lm-spin { to { transform: rotate(360deg); } }'}</style>
-
-                <AnimatePresence>
-                  {confirmError && <div style={{ marginTop: 4 }}><ErrorBox message={confirmError} /></div>}
-                </AnimatePresence>
-
-                <p style={{
-                  margin: '10px 0 0', fontSize: 12.5, lineHeight: 1.5,
-                  fontFamily: FONT_BODY, color: '#7a4020',
-                }}>
-                  {rememberMe
-                    ? 'Remember me is on — once confirmed, this device won\u2019t be asked again for 30 days.'
-                    : 'Want to skip this step here in future? Go back and tick \u201CRemember me\u201D.'}
                 </p>
 
-                <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginTop: 16, flexWrap: 'wrap', gap: 8,
-                }}>
-                  <BackToLoginBtn onClick={() => {
-                    clearInterval(confirmPollRef.current);
-                    setScreen('login'); setCaptchaOk(false); setConfirmError('');
-                  }} />
-                  <LinkBtn onClick={handleResendConfirmation} style={{ fontSize: 12, opacity: confirmResendIn > 0 ? 0.5 : 1 }}>
+                <AnimatePresence>
+                  {confirmError && <div style={{ marginTop: 10 }}><ErrorBox message={confirmError} /></div>}
+                </AnimatePresence>
+
+                <PrimaryButton onClick={switchToOtp} style={{ marginTop: 16 }}>
+                  Try another way
+                </PrimaryButton>
+
+                <div style={{ textAlign: 'center', marginTop: 10 }}>
+                  <LinkBtn
+                    onClick={handleResendConfirmation}
+                    style={{ fontSize: 11.5, opacity: confirmResendIn > 0 ? 0.5 : 1 }}
+                  >
                     {confirmResendIn > 0 ? `Resend in ${confirmResendIn}s` : 'Resend email'}
                   </LinkBtn>
                 </div>
 
-                <div style={{ textAlign: 'center', marginTop: 12 }}>
-                  <LinkBtn onClick={switchToOtp} style={{ fontSize: 12 }}>
-                    Try another way — get a code instead
+                <div style={{ textAlign: 'center', marginTop: 10 }}>
+                  <LinkBtn
+                    onClick={() => {
+                      clearInterval(confirmPollRef.current);
+                      setScreen('login'); setCaptchaOk(false); setConfirmError('');
+                    }}
+                    style={{ fontSize: 12.5, textDecoration: 'none', fontWeight: 700 }}
+                  >
+                    Back to login
                   </LinkBtn>
                 </div>
-              </>
+              </div>
             )}
 
             {confirmStatus === 'denied' && (

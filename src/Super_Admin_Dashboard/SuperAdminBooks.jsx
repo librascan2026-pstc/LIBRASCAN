@@ -572,7 +572,7 @@ export default function SuperAdminBooks() {
       if (genreFilter !== 'all' && b.genre !== genreFilter) return false;
       if (activeTab === 'book' && statusFilter !== 'all' && b.status !== statusFilter) return false;
       if (!q) return true;
-      const hay = [b.title, b.authors, b.isbn, b.campus?.campus_name].filter(Boolean).join(' ').toLowerCase();
+      const hay = [b.title, b.authors, b.isbn, b.call_number, b.campus?.campus_name].filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
     });
   }, [baseBooks, search, campusFilter, genreFilter, statusFilter, activeTab]);
@@ -855,7 +855,7 @@ export default function SuperAdminBooks() {
                   <table className="sab-table">
                     <thead>
                       <tr>
-                        {['Book', 'Campus', 'ISBN', 'Genre', 'Copies', 'Submitted', 'Action'].map(h => <th key={h}>{h}</th>)}
+                        {['Book', 'Campus', 'ISBN', 'Call No.', 'Genre', 'Copies', 'Submitted', 'Action'].map(h => <th key={h}>{h}</th>)}
                       </tr>
                     </thead>
                     <tbody>
@@ -876,6 +876,7 @@ export default function SuperAdminBooks() {
                           </td>
                           <td><span className="sab-code-badge">{b.campus?.campus_name || 'Unassigned'}</span></td>
                           <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.isbn || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.call_number || '—'}</span></td>
                           <td>{b.genre ? <span className="sab-genre-badge">{b.genre}</span> : '—'}</td>
                           <td>
                             <span className="sab-copies">{b.copies}</span>
@@ -931,7 +932,7 @@ export default function SuperAdminBooks() {
                   <table className="sab-table">
                     <thead>
                       <tr>
-                        {['Book', 'Campus', 'ISBN', 'Genre', 'Copies', 'Status'].map(h => <th key={h}>{h}</th>)}
+                        {['Book', 'Campus', 'ISBN', 'Call No.', 'Genre', 'Copies', 'Status'].map(h => <th key={h}>{h}</th>)}
                       </tr>
                     </thead>
                     <tbody>
@@ -952,6 +953,7 @@ export default function SuperAdminBooks() {
                           </td>
                           <td><span className="sab-code-badge">{b.campus?.campus_name || 'Unassigned'}</span></td>
                           <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.isbn || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.call_number || '—'}</span></td>
                           <td>{b.genre ? <span className="sab-genre-badge">{b.genre}</span> : '—'}</td>
                           <td>
                             <span className="sab-copies">
@@ -1063,6 +1065,10 @@ export default function SuperAdminBooks() {
                 <div className="sab-modal-field">
                   <div className="sab-modal-field-label"><Hash size={12} />ISBN</div>
                   <div className="sab-modal-field-value">{viewBook.isbn || '—'}</div>
+                </div>
+                <div className="sab-modal-field">
+                  <div className="sab-modal-field-label"><Hash size={12} />Call Number</div>
+                  <div className="sab-modal-field-value">{viewBook.call_number || '—'}</div>
                 </div>
                 <div className="sab-modal-field">
                   <div className="sab-modal-field-label"><User size={12} />Publisher</div>

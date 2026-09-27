@@ -7,7 +7,13 @@
 // ============================================================================
 
 const HISTORY_PREFIX = 'librascan_notif_history_';
-const HISTORY_MAX = 300; // generous cap so localStorage doesn't grow unbounded
+// Raised from 300 — that cap, combined with the (now-removed) 24h fetch
+// window in Dashboard.jsx/StudentDashboard.jsx, was quietly rotating out
+// older activity. localStorage has no hard limit that 2000 small JSON
+// entries (roughly a few hundred KB total) will realistically hit, so this
+// is effectively "keep everything" for normal day-to-day use while still
+// guarding against unbounded growth forever.
+const HISTORY_MAX = 2000;
 
 // Historical cleanup: an earlier version of this app briefly logged QR
 // check-in/attendance scans as notifications (tagged BORROW_REQUEST,
@@ -88,4 +94,28 @@ export function markAllNotifHistoryRead(uid) {
 export function clearNotifHistory(uid) {
   try { localStorage.removeItem(historyKey(uid)); } catch { /* storage unavailable */ }
   return [];
+}
+
+/**
+ * Removes a single entry from the persisted history by id — the per-row
+ * "Delete this notification" action in the bell dropdown / "See all" page.
+ * Unlike clearNotifHistory (which wipes everything), this only drops the
+ * one entry so the rest of the log is untouched.
+ */
+export function deleteNotifHistoryEntry(uid, id) {
+  const existing = getNotifHistory(uid);
+  const next = existing.filter(n => n.id !== id);
+  try { localStorage.setItem(historyKey(uid), JSON.stringify(next)); } catch { /* storage unavailable */ }
+  return next;
+}
+
+/**
+ * Re-inserts a previously-deleted entry — backs the "Undo" action shown
+ * right after a delete. Thin wrapper around addNotifHistory so the entry
+ * merges back into its correct sorted position (and dedupes safely if it
+ * was somehow never fully removed) rather than just being unshifted on.
+ */
+export function restoreNotifHistoryEntry(uid, notif) {
+  if (!notif) return getNotifHistory(uid);
+  return addNotifHistory(uid, [notif]);
 }

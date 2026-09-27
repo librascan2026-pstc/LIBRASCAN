@@ -26,10 +26,6 @@ function deviceKey(uid) { return `${DEVICE_KEY_PREFIX}${uid}`; }
 // needed it) clears the marker.
 // ----------------------------------------------------------------------------
 const MFA_PENDING_PREFIX = 'librascan_mfa_pending_';
-// Longer than both the OTP (5 min) and email-confirmation (10 min) windows,
-// so an abandoned login attempt (tab closed mid-2FA) can't permanently lock
-// a later, legitimate login out of every tab.
-const MFA_PENDING_TTL_MS = 15 * 60 * 1000;
 
 function mfaPendingKey(uid) { return `${MFA_PENDING_PREFIX}${uid}`; }
 
@@ -43,16 +39,26 @@ export function clearMfaPending(userId) {
   try { localStorage.removeItem(mfaPendingKey(userId)); } catch { /* storage unavailable */ }
 }
 
-/** True if this user has a Supabase session that hasn't cleared 2FA yet. */
+/**
+ * True if this user has a Supabase session that hasn't cleared 2FA yet.
+ *
+ * Deliberately NO time-based expiry here anymore. An earlier version
+ * auto-cleared this after 15 minutes so an abandoned login (tab closed
+ * mid-2FA) couldn't get permanently "stuck" — but the real Supabase session
+ * this flag is guarding stays valid far longer than 15 minutes, so the
+ * actual effect was: a login nobody ever confirmed quietly turned into a
+ * fully signed-in session on its own, just by waiting past the timer (open
+ * a fresh tab 15+ minutes later and it lets you straight into the
+ * dashboard, still unconfirmed). An unconfirmed login has to stay untrusted
+ * for as long as its session exists — there's no safe amount of time after
+ * which "never confirmed" quietly becomes "fine now". This only ever gets
+ * cleared for real by commitUser(), once 2FA is actually completed — which
+ * is also exactly what unblocks a later, genuine login attempt on this
+ * browser, so nothing gets permanently stuck either.
+ */
 export function isMfaPending(userId) {
   try {
-    const raw = localStorage.getItem(mfaPendingKey(userId));
-    if (!raw) return false;
-    if (Date.now() - Number(raw) > MFA_PENDING_TTL_MS) {
-      localStorage.removeItem(mfaPendingKey(userId));
-      return false;
-    }
-    return true;
+    return !!localStorage.getItem(mfaPendingKey(userId));
   } catch { return false; }
 }
 

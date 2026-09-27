@@ -17,6 +17,8 @@ import {
   markNotifHistoryRead,
   markAllNotifHistoryRead,
   clearNotifHistory,
+  deleteNotifHistoryEntry,
+  restoreNotifHistoryEntry,
 } from '../Admin_Dashboard/notificationHistory';
 import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
 
@@ -267,6 +269,8 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
   color:rgba(255,236,190,.88); text-align:left;
 }
 .sdb-mobnav-item.active { background:rgba(201,168,76,.20); color:#FFE97A; font-weight:700; }
+.sdb-mobnav-item.danger { color:#ffb4a8; }
+.sdb-mobnav-sep { height:1px; background:rgba(245,228,168,.18); margin:6px 4px; }
 
 /* ════════ MAIN / CONTENT ════════ */
 .sdb-main { flex:1; display:flex; flex-direction:column; width:100%; }
@@ -353,6 +357,81 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
   border-bottom:1px solid rgba(139,0,0,.14);
   display:flex; align-items:center; justify-content:space-between; gap:8px;
 
+}
+
+/* ════════ SETTINGS TABS — matches Super Admin Settings' tab bar ════════ */
+.sdb-stabs { display:flex; border-bottom:1px solid rgba(139,0,0,0.18); margin-bottom:24px; gap:0; }
+.sdb-stab {
+  display:inline-flex; align-items:center; gap:7px;
+  padding:10px 22px; border:none; border-bottom:2px solid transparent;
+  margin-bottom:-1px; background:transparent;
+  font-family:var(--font-sans); font-size:13px; font-weight:500;
+  color:var(--text-muted); cursor:pointer;
+  transition:color .15s, border-color .15s; white-space:nowrap;
+}
+.sdb-stab:hover { color:var(--text-secondary); }
+.sdb-stab.on { font-weight:700; color:var(--maroon); border-bottom-color:var(--maroon); }
+
+/* ════════ SETTINGS — single framed panel (tab bar + active tab's content
+   sit inside ONE border, same card language as the Browse Catalog /
+   Borrowing History panel — .sdb-cat-panel) ════════ */
+.sdb-settings-panel {
+  position:relative;
+  background:linear-gradient(160deg,#FBF4E6 0%,#F6ECDA 100%);
+  border:1px solid rgba(139,0,0,.14); border-radius:22px;
+  padding:22px 24px 26px; overflow:hidden;
+  box-shadow:0 4px 20px rgba(80,0,0,.06);
+}
+.sdb-settings-panel > .sdb-stabs { margin-bottom:22px; }
+/* PageProfile renders its own .sdb-module wrapper — neutralize its
+   max-width/margin/padding only when it lands inside this framed panel,
+   so the profile tab's content still fits flush inside the one border
+   instead of getting a second, nested block. */
+.sdb-settings-panel .sdb-module { max-width:none; margin:0; padding:0; animation:none; }
+.sdb-settings-panel .sdb-panel:last-child { margin-bottom:0; }
+@media (max-width:640px) {
+  .sdb-settings-panel { padding:16px 16px 20px; border-radius:16px; }
+}
+
+/* ════════ FLOATING LOGOUT — matches Super Admin Settings' floating button ════════ */
+.sdb-fab {
+  position:fixed; bottom:30px; right:30px; z-index:400;
+  display:flex; align-items:center; justify-content:flex-start;
+  height:54px; width:54px; padding:0; border-radius:27px;
+  border:1.6px solid rgba(255,255,255,.28); cursor:pointer;
+  background:linear-gradient(135deg, #E5533E 0%, var(--maroon-mid) 55%, var(--maroon-deep) 100%);
+  color:#fff; overflow:hidden;
+  box-shadow:0 6px 20px rgba(139,0,0,.38), 0 2px 8px rgba(0,0,0,.20), 0 0 0 6px rgba(139,0,0,.07);
+  transition:width .36s cubic-bezier(.34,1.45,.44,1), background .28s ease,
+    border-color .28s ease, color .28s ease, box-shadow .28s ease,
+    padding .32s ease, transform .2s ease;
+}
+.sdb-fab:hover, .sdb-fab:focus-visible {
+  width:168px; padding:0 22px 0 16px; gap:12px; transform:translateY(-2px);
+  background:linear-gradient(135deg, #F0664F 0%, #A30000 55%, var(--maroon-deep) 100%);
+  border-color:rgba(255,255,255,.42);
+  box-shadow:0 10px 28px rgba(139,0,0,.48), 0 3px 10px rgba(0,0,0,.24), 0 0 0 7px rgba(139,0,0,.10);
+}
+.sdb-fab:active { transform:translateY(-2px) scale(.97); }
+.sdb-fab-icon {
+  flex-shrink:0; display:flex; align-items:center; justify-content:center;
+  width:54px; height:54px; margin-left:-1.6px; border-radius:50%;
+  background:rgba(0,0,0,.16); box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.30);
+  color:#fff; filter:drop-shadow(0 1px 2px rgba(0,0,0,.45));
+  transition:width .36s cubic-bezier(.34,1.45,.44,1), margin .36s cubic-bezier(.34,1.45,.44,1),
+    background .28s ease, transform .28s ease;
+}
+.sdb-fab:hover .sdb-fab-icon, .sdb-fab:focus-visible .sdb-fab-icon {
+  width:22px; height:22px; margin-left:0; background:transparent; box-shadow:none; transform:scale(1.04);
+}
+.sdb-fab-icon svg { display:block; }
+.sdb-fab-label {
+  font-family:var(--font-sans); font-size:13.5px; font-weight:700; letter-spacing:.02em;
+  white-space:nowrap; color:#FFF6E8; opacity:0; transform:translateX(-6px);
+  transition:opacity .2s ease, transform .2s ease;
+}
+.sdb-fab:hover .sdb-fab-label, .sdb-fab:focus-visible .sdb-fab-label {
+  opacity:1; transform:none; transition-delay:.12s;
 }
 
 /* ════════ WELCOME CARD (student-specific, light hero — matches Super Admin hero) ════════ */
@@ -601,7 +680,8 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
    NOTE: z-index lives on the PANEL, not the module — a z-index on the module would trap the book-details
    modal (position:fixed) inside a low stacking context, underneath the navbar. */
 .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-46px; }
-.sdb-page-hero + .sdb-module.sdb-cat-module .sdb-cat-panel { z-index:2; box-shadow:0 12px 32px rgba(80,0,0,.16),0 3px 8px rgba(80,0,0,.08); }
+.sdb-page-hero + .sdb-module.sdb-cat-module .sdb-cat-panel,
+.sdb-page-hero + .sdb-module.sdb-cat-module .sdb-settings-panel { z-index:2; box-shadow:0 12px 32px rgba(80,0,0,.16),0 3px 8px rgba(80,0,0,.08); }
 @media (max-width:1024px) { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-40px; } }
 @media (max-width:768px)  { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-30px; } }
 @media (max-width:480px)  { .sdb-page-hero + .sdb-module.sdb-cat-module { margin-top:-26px; } }
@@ -1881,6 +1961,108 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
 }
 .lm-notif-clear-btn:hover { color: var(--maroon-mid); }
 
+/* Per-row "…" menu — lets a student delete a single notification without
+   clearing everything. Rendered as the last flex child of .lm-notif-row;
+   JS stopPropagation()s clicks/keydowns here so they don't also
+   open/mark-read the row underneath. */
+.lm-notif-menu-wrap {
+  position: relative;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+.lm-notif-menu-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--notif-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.lm-notif-menu-btn:hover,
+.lm-notif-menu-btn[aria-expanded="true"] {
+  background: rgba(139,0,0,0.08);
+  color: var(--notif-text);
+}
+.lm-notif-menu {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  min-width: 196px;
+  background: var(--notif-cream);
+  border: 1px solid var(--notif-border);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.18);
+  padding: 5px;
+  z-index: 2010;
+  animation: lm-notif-row-in 0.15s ease both;
+}
+.lm-notif-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 11.5px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  color: var(--notif-text);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+.lm-notif-menu-item:hover { background: rgba(139,0,0,0.08); }
+.lm-notif-menu-item--danger { color: #8B3A3A; }
+.lm-notif-menu-item--danger:hover { background: rgba(139,58,58,0.12); color: #7A3030; }
+
+/* "Notification deleted" undo toast — bottom-right of the screen */
+.lm-notif-undo-toast {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #2A1414;
+  color: #F5ECE0;
+  padding: 12px 16px;
+  border-radius: 10px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  z-index: 3000;
+  animation: lm-notif-undo-in 0.2s ease both;
+}
+@keyframes lm-notif-undo-in {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.lm-notif-undo-text { white-space: nowrap; }
+.lm-notif-undo-btn {
+  background: none;
+  border: none;
+  color: #E8C77A;
+  font-weight: 700;
+  font-size: 12.5px;
+  cursor: pointer;
+  padding: 2px 4px;
+  white-space: nowrap;
+}
+.lm-notif-undo-btn:hover { text-decoration: underline; }
+@media (max-width: 560px) {
+  .lm-notif-undo-toast {
+    left: 12px;
+    right: 12px;
+    bottom: 16px;
+  }
+}
+
 
 .lm-notif-row.unlinked { cursor: default; }
 .lm-notif-row.unlinked:hover { background: transparent; }
@@ -2265,8 +2447,12 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
 `;
 
 
-const STUDENT_NOTIF_MAX = 15;
-const STUDENT_RECENT_WINDOW_MS = 24 * 60 * 60 * 1000; // last 24h shown on first load, same as Dashboard.jsx
+const STUDENT_NOTIF_MAX = 100; // how many rows to fetch/keep in the live bell list
+// BUG FIX: this used to gate the initial load to only the last 24h
+// (STUDENT_RECENT_WINDOW_MS), so a decision from yesterday simply stopped
+// qualifying as "recent" on today's load and vanished from the bell/history.
+// Removed — every fetched row (bounded only by STUDENT_NOTIF_MAX above) is
+// now shown/stored regardless of age, same fix as Dashboard.jsx.
 
 
 const STUDENT_NOTIF_TYPES = {
@@ -2739,8 +2925,18 @@ function PageHome({ user, profile, onNavigate }) {
     (async () => {
       try {
         const [a, b, c, d] = await Promise.all([
-          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).in('status',['active','approved']),
-          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).eq('status','returned'),
+          // .is('return_date', null) keeps this in sync with the "returned"
+          // count below — without it, a row whose status column is still
+          // 'approved' but already has a return_date set (already handed
+          // back, just not relabeled in the DB) would double-count as both
+          // currently-borrowed AND returned.
+          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).in('status',['active','approved']).is('return_date', null),
+          // Matches the History page's own `effectiveStatus` rule: a request
+          // counts as "returned" once return_date is set, even on rows
+          // whose `status` column was never literally updated to
+          // 'returned' — that mismatch was why this stat always read 0
+          // despite the History table already showing a "Returned" badge.
+          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).or('status.eq.returned,return_date.not.is.null'),
           // "available_copies" isn't a stored column on books — availability lives on
           // book_copies.status, so count copies currently marked Available instead.
           supabase.from('book_copies').select('copy_id',{count:'exact',head:true}).eq('status','Available'),
@@ -3438,6 +3634,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
               <div className="sdb-bd-by">by {selected.author||selected.authors||'—'}</div>
               <BdFacts items={[
                 ['ISBN','isbn',selected.isbn],
+                ['Call Number','pin',selected.call_number],
                 ['Published','calendar',selected.year||selected.publication_year],
                 ['Category','grid',selected.category||selected.genre],
                 ['Language','globe',selected.language||'English'],
@@ -3651,9 +3848,60 @@ function PageHistory({ user }) {
     (async () => {
       setLoading(true);
       try {
-        const { data, error } = await supabase.from('borrow_requests')
-          .select('*').eq('student_id',user.id).order('created_at',{ascending:false});
-        if (error) throw error;
+        // A borrow can land under this account's student_id, or — if it was
+        // logged by scanning the student's physical ID at the circulation
+        // desk — under a different/blank student_id that only shares the
+        // same student_number. Look up this account's own student_number so
+        // both kinds of records are recognized as the same student's history.
+        let studentNumber = null;
+        try {
+          const { data: prof } = await supabase.from('profiles')
+            .select('student_number').eq('id', user.id).maybeSingle();
+          studentNumber = prof?.student_number ? String(prof.student_number).trim() : null;
+        } catch (profErr) { console.error('[History] profile lookup failed:', profErr); }
+        // Escape LIKE metacharacters so a number containing % or _ can't
+        // turn into an unintended wildcard.
+        const likeSafeNumber = studentNumber ? studentNumber.replace(/[%_]/g, m => `\\${m}`) : null;
+
+        // A record only matching this account's own student_id catches
+        // requests/borrowings made while logged in. Everything else needs a
+        // separate lookup because a desk scan of the physical ID doesn't
+        // reliably land in the same column each time:
+        //   - student_number IS the right column, but BookManagement's own
+        //     QR/ID-scan checkout flow never actually fills it in — it only
+        //     embeds the number in student_name as "Name [Number]".
+        //   - Some older rows (scanned before this account existed, or
+        //     before the scan could be resolved to a UUID) stored the raw
+        //     student number directly in student_id instead of a UUID.
+        // Run all four lookups and merge/dedupe by id, since a plain OR
+        // filter can't do the "search inside student_name" part anyway.
+        const fetchAllForStudent = async (table, selectCols) => {
+          const seen = new Map();
+          const add = (rows) => { (rows||[]).forEach(r => { if (r?.id != null) seen.set(r.id, r); }); };
+
+          const byId = await supabase.from(table).select(selectCols).eq('student_id', user.id);
+          if (byId.error) console.error(`[History] ${table} student_id lookup failed:`, byId.error);
+          add(byId.data);
+
+          if (studentNumber) {
+            const byNumber = await supabase.from(table).select(selectCols).eq('student_number', studentNumber);
+            if (byNumber.error) console.error(`[History] ${table} student_number lookup failed:`, byNumber.error);
+            add(byNumber.data);
+
+            const byLegacyId = await supabase.from(table).select(selectCols).eq('student_id', studentNumber);
+            if (byLegacyId.error) console.error(`[History] ${table} legacy student_id lookup failed:`, byLegacyId.error);
+            add(byLegacyId.data);
+
+            const byEmbeddedName = await supabase.from(table).select(selectCols).ilike('student_name', `%[${likeSafeNumber}]`);
+            if (byEmbeddedName.error) console.error(`[History] ${table} embedded-name lookup failed:`, byEmbeddedName.error);
+            add(byEmbeddedName.data);
+          }
+
+          return [...seen.values()];
+        };
+
+        const data = (await fetchAllForStudent('borrow_requests', '*'))
+          .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 
         // borrow_requests only stores book_id/book_title — it has no cover
         // column, so covers must be looked up from `books` separately.
@@ -3675,10 +3923,14 @@ function PageHistory({ user }) {
         // created once a request is approved. Match by book_id, and if a
         // student borrowed the same book more than once, prefer the
         // borrowing row closest in time to each request.
-        const { data: borrowRows, error: borrowErr } = await supabase
-          .from('borrowings').select('book_id,borrowed_at,returned_at')
-          .eq('student_id', user.id);
-        if (borrowErr) console.error('[History borrowings lookup]', borrowErr);
+        // (Selecting the extra columns below — id/status/book_title/etc —
+        // is so any borrowing left unmatched after pairing can still be
+        // turned into its own history row further down; a walk-in checkout
+        // scanned straight from the student's physical ID never has a
+        // borrow_requests row to begin with, only this borrowings row.)
+        const borrowRows = await fetchAllForStudent(
+          'borrowings', 'id,book_id,book_title,status,borrowed_at,returned_at'
+        );
         const borrowingsByBook = {};
         (borrowRows||[]).forEach(b => {
           if (!borrowingsByBook[b.book_id]) borrowingsByBook[b.book_id] = [];
@@ -3729,7 +3981,41 @@ function PageHistory({ user }) {
           };
         });
 
-        setRows(withCovers);
+        // Whatever's left in `pool` after matching is a borrowing that never
+        // had — or never got matched to — a borrow_requests row (a walk-in
+        // checkout where the desk scanned the student's physical ID). Those
+        // still belong in this student's history, so turn each into its own
+        // row. "Approved" here is what "Borrowed" means on the Book
+        // Management side; a returned_at on the borrowing itself is what
+        // flips the badge to "Returned" (see effectiveStatus below).
+        const unmatchedBorrowings = Object.values(pool).flat();
+        let extraRows = [];
+        if (unmatchedBorrowings.length) {
+          const extraBookIds = [...new Set(unmatchedBorrowings.map(b=>b.book_id).filter(Boolean))]
+            .filter(id => !(id in coverMap));
+          if (extraBookIds.length) {
+            const { data: extraBookRows, error: extraCoverErr } = await supabase.from('books')
+              .select('id,cover_image_url').in('id', extraBookIds);
+            if (extraCoverErr) console.error('[History cover lookup - unmatched]', extraCoverErr);
+            (extraBookRows||[]).forEach(b => { coverMap[b.id] = b.cover_image_url || null; });
+          }
+          extraRows = unmatchedBorrowings.map(b => ({
+            id: `bw-${b.id}`,
+            book_id: b.book_id,
+            book_title: b.book_title || '',
+            status: 'approved',
+            created_at: b.borrowed_at,
+            cover_image_url: coverMap[b.book_id] || null,
+            return_date: b.returned_at || null,
+            due_date: null,
+            _borrowed_at: b.borrowed_at || null,
+          }));
+        }
+
+        const merged = [...withCovers, ...extraRows]
+          .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
+
+        setRows(merged);
       } catch(e){ console.error('[History]',e); show('Could not load history.',true); }
       finally { setLoading(false); }
     })();
@@ -4273,7 +4559,23 @@ function LoginSessionsPanel({ show }) {
 /* ═══════════════════════════════════════════════════════
    PAGE: SETTINGS
 ═══════════════════════════════════════════════════════ */
-function PageSettings({ user, onSignOut }) {
+function SettingsLogoutFab({ onSignOut }) {
+  return (
+    <button type="button" className="sdb-fab" aria-label="Logout" onClick={onSignOut}>
+      <span className="sdb-fab-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 21H6a2.5 2.5 0 0 1-2.5-2.5v-13A2.5 2.5 0 0 1 6 3h3"/>
+          <polyline points="15.5 16 20 12 15.5 8"/>
+          <line x1="20" y1="12" x2="8.5" y2="12"/>
+        </svg>
+      </span>
+      <span className="sdb-fab-label">Logout</span>
+    </button>
+  );
+}
+
+function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
+  const [settingsTab, setSettingsTab] = useState('profile');
   const [pwForm,   setPwForm]   = useState({ oldPw:'', newPw:'', confirm:'' });
   const [showPw,   setShowPw]   = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
@@ -4394,148 +4696,190 @@ function PageSettings({ user, onSignOut }) {
     </div>
   );
 
-  return (
-    <div className="sdb-module">
-      <div className="sdb-module-header">
-        <div><div className="sdb-module-title">Settings</div></div>
-      </div>
+  const SETTINGS_TABS = [
+    { id:'profile',       label:'Profile',       icon: Ic.profile },
+    { id:'security',      label:'Security',      icon: Ic.shield  },
+    { id:'notifications', label:'Notifications', icon: Ic.bell    },
+  ];
 
-      {/* Change Password */}
-      <div className="sdb-panel" style={{ marginBottom:18 }}>
-        <div className="sdb-panel-hdr">
-          {/* Icon + label kept in one flex group so panel-hdr's
-              justify-content:space-between only splits this group from the
-              button below, instead of splitting the icon from its own
-              label across the whole row. Same fix applied to the
-              Notifications and Privacy headers underneath. */}
-          <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.lock} Change Password</span>
-          <button className="sdb-btn sdb-btn-primary" style={{ fontSize:11.5, padding:'6px 14px' }} onClick={changePw} disabled={pwSaving}>
-            {Ic.lock}&nbsp;{pwSaving?'Updating…':'Update Password'}
-          </button>
-        </div>
-        <div className="sdb-form-row-3">
-          {[['Old Password','oldPw'],['New Password','newPw'],['Confirm Password','confirm']].map(([lbl,key])=>(
-            <div key={key} className="sdb-form-group">
-              <label className="sdb-label">{lbl}</label>
-              <div className="sdb-pw-wrap">
-                <input className="sdb-input" type={showPw?'text':'password'}
-                  autoComplete={key==='oldPw' ? 'current-password' : 'new-password'}
-                  value={pwForm[key]} onChange={e=>setPwForm(f=>({...f,[key]:e.target.value}))}
-                  placeholder="••••••••" style={{ paddingRight:36 }} />
-                <button className="sdb-pw-toggle" onClick={()=>setShowPw(v=>!v)} type="button">
-                  {showPw?Ic.eyeOff:Ic.eyeOn}
+  return (
+    <>
+      {/* Same photo-hero banner every other page (Browse Catalog, History,
+          Favorites) uses — Settings was missing it before, just showing a
+          plain text title. */}
+      <PageHero title="Settings" sub="Manage your profile, security, and notification preferences." />
+
+      {/* Tab bar + the active tab's content now live inside ONE single
+          framed border (same look as the Browse Catalog / Borrowing
+          History panel), pulled up over the hero the same way those
+          pages do (sdb-cat-module), instead of the tabs and each tab's
+          content being separate, un-bordered blocks. */}
+      <div className="sdb-module sdb-cat-module">
+        <div className="sdb-settings-panel">
+          {/* Tabs — same Profile / Security / Notifications layout as the
+              Super Admin Settings page */}
+          <div className="sdb-stabs">
+            {SETTINGS_TABS.map(t => (
+              <button
+                key={t.id}
+                className={`sdb-stab${settingsTab===t.id?' on':''}`}
+                onClick={()=>setSettingsTab(t.id)}
+              >
+                {t.icon} {t.label}
+              </button>
+            ))}
+          </div>
+
+          {settingsTab === 'profile' && (
+            <PageProfile user={user} profile={profile} onProfileUpdate={onProfileUpdate} />
+          )}
+
+          {settingsTab === 'security' && (
+            <>
+          {/* Change Password */}
+          <div className="sdb-panel" style={{ marginBottom:18 }}>
+            <div className="sdb-panel-hdr">
+              {/* Icon + label kept in one flex group so panel-hdr's
+                  justify-content:space-between only splits this group from the
+                  button below, instead of splitting the icon from its own
+                  label across the whole row. Same fix applied to the
+                  Notifications and Privacy headers underneath. */}
+              <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.lock} Change Password</span>
+              <button className="sdb-btn sdb-btn-primary" style={{ fontSize:11.5, padding:'6px 14px' }} onClick={changePw} disabled={pwSaving}>
+                {Ic.lock}&nbsp;{pwSaving?'Updating…':'Update Password'}
+              </button>
+            </div>
+            <div className="sdb-form-row-3">
+              {[['Old Password','oldPw'],['New Password','newPw'],['Confirm Password','confirm']].map(([lbl,key])=>(
+                <div key={key} className="sdb-form-group">
+                  <label className="sdb-label">{lbl}</label>
+                  <div className="sdb-pw-wrap">
+                    <input className="sdb-input" type={showPw?'text':'password'}
+                      autoComplete={key==='oldPw' ? 'current-password' : 'new-password'}
+                      value={pwForm[key]} onChange={e=>setPwForm(f=>({...f,[key]:e.target.value}))}
+                      placeholder="••••••••" style={{ paddingRight:36 }} />
+                    <button className="sdb-pw-toggle" onClick={()=>setShowPw(v=>!v)} type="button">
+                      {showPw?Ic.eyeOff:Ic.eyeOn}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Security */}
+          <div className="sdb-panel" style={{ marginBottom:18 }}>
+            <div className="sdb-panel-hdr">
+              <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.shield} Security</span>
+            </div>
+
+            <Toggle
+              label="Two-Factor Authentication"
+              desc={mfaLoading
+                ? 'Checking status…'
+                : "Get a 6-digit code by email each time you sign in on a device we don't recognize"}
+              value={mfaEnabled}
+              onChange={handleMfaToggle}
+            />
+
+            {mfaEnabled && (
+              <div style={{
+                display:'flex', alignItems:'center', justifyContent:'space-between',
+                gap:10, marginTop:14, flexWrap:'wrap',
+              }}>
+                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', lineHeight:1.6 }}>
+                  Chose "remember this device" on a shared or public computer by mistake?
+                </div>
+                <button type="button" className="sdb-btn sdb-btn-ghost" style={{ fontSize:11.5, padding:'6px 14px' }}
+                  onClick={handleForgetDevice}>
+                  Forget This Device
+                </button>
+              </div>
+            )}
+
+            <LoginSessionsPanel show={show} />
+          </div>
+
+          {/* Privacy */}
+          <div className="sdb-panel" style={{ marginBottom:18 }}>
+            <div className="sdb-panel-hdr">
+              <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.shield} Privacy</span>
+            </div>
+            <div style={{ fontFamily:'var(--font-sans)',fontSize:13,color:'var(--text-secondary)',lineHeight:1.75 }}>
+              Your personal information is used exclusively for library management within the PSU Library System and is not shared with third parties.
+            </div>
+          </div>
+            </>
+          )}
+
+          {settingsTab === 'notifications' && (
+            <>
+          <div className="sdb-panel" style={{ marginBottom:18 }}>
+            <div className="sdb-panel-hdr">
+              <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.bell} Notification Preferences</span>
+            </div>
+
+            <Toggle label="Email Notifications"  desc="Receive library updates via email"         value={notif.email}         onChange={v=>setNotif(p=>({...p,email:v}))} />
+            <Toggle label="Due Date Reminders"   desc="Get reminded before your books are due"   value={notif.due_reminders} onChange={v=>setNotif(p=>({...p,due_reminders:v}))} />
+            <Toggle label="New Arrivals"         desc="Notify me when new books are added"        value={notif.new_arrivals}  onChange={v=>setNotif(p=>({...p,new_arrivals:v}))} />
+
+            <div style={{ height:1, background:'rgba(139,0,0,0.10)', margin:'14px 0' }} />
+
+            {/* Notification sound — plays a short chime when a new alert arrives
+                on this dashboard, matching the Librarian's Settings page. */}
+            <Toggle
+              label="Notification Sound"
+              desc="Play a short chime whenever a new notification comes in"
+              value={notifSound}
+              onChange={handleNotifSoundToggle}
+            />
+
+            <div style={{
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              gap:10, margin:'16px 0 8px', flexWrap:'wrap',
+            }}>
+              <span style={{
+                fontFamily:'var(--font-sans)', fontSize:11, fontWeight:800,
+                letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)',
+              }}>
+                Alert Types · {notifOnCount}/{notifPrefTypes.length} on
+              </span>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <button type="button" onClick={enableAllNotifs}
+                  style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
+                    fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
+                  Enable all
+                </button>
+                <span style={{ color:'var(--border)', fontSize:11 }}>·</span>
+                <button type="button" onClick={disableAllNotifs}
+                  style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
+                    fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
+                  Turn all off
                 </button>
               </div>
             </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Notifications */}
-      <div className="sdb-panel" style={{ marginBottom:18 }}>
-        <div className="sdb-panel-hdr">
-          <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.bell} Notification Preferences</span>
-        </div>
-
-        <Toggle label="Email Notifications"  desc="Receive library updates via email"         value={notif.email}         onChange={v=>setNotif(p=>({...p,email:v}))} />
-        <Toggle label="Due Date Reminders"   desc="Get reminded before your books are due"   value={notif.due_reminders} onChange={v=>setNotif(p=>({...p,due_reminders:v}))} />
-        <Toggle label="New Arrivals"         desc="Notify me when new books are added"        value={notif.new_arrivals}  onChange={v=>setNotif(p=>({...p,new_arrivals:v}))} />
-
-        <div style={{ height:1, background:'rgba(139,0,0,0.10)', margin:'14px 0' }} />
-
-        {/* Notification sound — plays a short chime when a new alert arrives
-            on this dashboard, matching the Librarian's Settings page. */}
-        <Toggle
-          label="Notification Sound"
-          desc="Play a short chime whenever a new notification comes in"
-          value={notifSound}
-          onChange={handleNotifSoundToggle}
-        />
-
-        <div style={{
-          display:'flex', alignItems:'center', justifyContent:'space-between',
-          gap:10, margin:'16px 0 8px', flexWrap:'wrap',
-        }}>
-          <span style={{
-            fontFamily:'var(--font-sans)', fontSize:11, fontWeight:800,
-            letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--text-muted)',
-          }}>
-            Alert Types · {notifOnCount}/{notifPrefTypes.length} on
-          </span>
-          <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-            <button type="button" onClick={enableAllNotifs}
-              style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
-                fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
-              Enable all
-            </button>
-            <span style={{ color:'var(--border)', fontSize:11 }}>·</span>
-            <button type="button" onClick={disableAllNotifs}
-              style={{ background:'none', border:'none', cursor:'pointer', padding:'2px 3px',
-                fontFamily:'var(--font-sans)', fontSize:11.5, fontWeight:700, color:'var(--maroon,#8B0000)' }}>
-              Turn all off
-            </button>
+            {/* Real, bell-connected preferences (Approved / Canceled-Rejected) */}
+            {notifPrefTypes.map(t => (
+              <Toggle
+                key={t.key}
+                label={t.label}
+                desc={t.desc}
+                value={notifPrefs[t.key] !== false}
+                onChange={() => handleNotifPrefToggle(t.key, t.label)}
+              />
+            ))}
           </div>
-        </div>
-
-        {/* Real, bell-connected preferences (Approved / Canceled-Rejected) */}
-        {notifPrefTypes.map(t => (
-          <Toggle
-            key={t.key}
-            label={t.label}
-            desc={t.desc}
-            value={notifPrefs[t.key] !== false}
-            onChange={() => handleNotifPrefToggle(t.key, t.label)}
-          />
-        ))}
-      </div>
-
-      {/* Privacy */}
-      <div className="sdb-panel" style={{ marginBottom:18 }}>
-        <div className="sdb-panel-hdr">
-          <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.shield} Privacy</span>
-        </div>
-        <div style={{ fontFamily:'var(--font-sans)',fontSize:13,color:'var(--text-secondary)',lineHeight:1.75 }}>
-          Your personal information is used exclusively for library management within the PSU Library System and is not shared with third parties.
+            </>
+          )}
         </div>
       </div>
 
-      {/* Security */}
-      <div className="sdb-panel" style={{ marginBottom:18 }}>
-        <div className="sdb-panel-hdr">
-          <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.shield} Security</span>
-        </div>
-
-        <Toggle
-          label="Two-Factor Authentication"
-          desc={mfaLoading
-            ? 'Checking status…'
-            : "Get a 6-digit code by email each time you sign in on a device we don't recognize"}
-          value={mfaEnabled}
-          onChange={handleMfaToggle}
-        />
-
-        {mfaEnabled && (
-          <div style={{
-            display:'flex', alignItems:'center', justifyContent:'space-between',
-            gap:10, marginTop:14, flexWrap:'wrap',
-          }}>
-            <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', lineHeight:1.6 }}>
-              Chose "remember this device" on a shared or public computer by mistake?
-            </div>
-            <button type="button" className="sdb-btn sdb-btn-ghost" style={{ fontSize:11.5, padding:'6px 14px' }}
-              onClick={handleForgetDevice}>
-              Forget This Device
-            </button>
-          </div>
-        )}
-
-        <LoginSessionsPanel show={show} />
-      </div>
-
-      {/* Account */}
+      {/* Floating logout — same look/behavior as the Super Admin Settings page */}
+      <SettingsLogoutFab onSignOut={onSignOut} />
 
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
-    </div>
+    </>
   );
 }
 
@@ -4552,12 +4896,10 @@ function getStudentTabFromHash() {
 export default function StudentDashboard({ user, onSignOut }) {
   const [activeTab,   setActiveTab]   = useState(getStudentTabFromHash);
   const [mobileOpen,  setMobileOpen]  = useState(false);
-  const [profileOpen, setProfileOpen] = useState(false);
   const [showLogout,  setShowLogout]  = useState(false);
   const [profile,     setProfile]     = useState(null);
   const [catalogCategory, setCatalogCategory] = useState(''); // category to pre-filter Browse Catalog with, set via navigate('catalog', key)
   const [catalogCampus, setCatalogCampus] = useState(''); // campus_id to pre-filter Browse Catalog with, set via navigate('catalog', category, campusId)
-  const profileMenuRef = useRef(null);
 
   /* ═══════════════ NOTIFICATIONS ═══════════════
      Mirrors Dashboard.jsx's architecture: live bell list (max 15, in
@@ -4576,6 +4918,50 @@ export default function StudentDashboard({ user, onSignOut }) {
   const [historyOpen,  setHistoryOpen]  = useState(false);
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
+
+  // Per-row "…" menu (bell dropdown + "See all" history page) — tracks
+  // which single notification's menu is open, if any.
+  const [notifMenuOpenId, setNotifMenuOpenId] = useState(null);
+  const notifMenuRef = useRef(null);
+  // The Notification History page's row menu is portaled straight to
+  // document.body (see notifRowMenuPos below) because its row list lives
+  // inside a scrolling/overflow:hidden panel (.lm-notif-hist-list /
+  // .lm-notif-hist-panel / .sdb-cat-panel) — a plain position:absolute
+  // dropdown there gets silently clipped and never appears. This holds the
+  // fixed on-screen coordinates for that portaled menu, computed from the
+  // "…" button's own position right when it's opened.
+  const [notifRowMenuPos, setNotifRowMenuPos] = useState(null);
+
+  // "Notification deleted" undo toast. Holds the just-deleted notification
+  // object so Undo can restore it without looking it up again.
+  const [deletedNotifToast, setDeletedNotifToast] = useState(null);
+  const notifUndoTimerRef = useRef(null);
+  const NOTIF_UNDO_MS = 6000;
+
+  useEffect(() => {
+    return () => { if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current); };
+  }, []);
+
+  useEffect(() => {
+    if (!notifMenuOpenId) return;
+    const onClick = (e) => {
+      // Checked by CSS class via closest(), not notifMenuRef.contains() —
+      // the History-page version of this menu is portaled to document.body
+      // (see notifRowMenuPos), which puts it outside the DOM subtree that
+      // ref would see, so a plain .contains() check would close the menu
+      // the instant something inside the portaled dropdown was clicked.
+      if (e.target.closest && (e.target.closest('.lm-notif-menu-wrap') || e.target.closest('.lm-notif-menu'))) return;
+      setNotifMenuOpenId(null);
+      setNotifRowMenuPos(null);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') { setNotifMenuOpenId(null); setNotifRowMenuPos(null); } };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [notifMenuOpenId]);
 
   const notifBtnRef = useRef(null);
   const [notifPanelPos, setNotifPanelPos] = useState(null);
@@ -4724,8 +5110,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     if (isFirstStudentDecisionLoad.current) {
       rows.forEach(r => seenNotifIdsRef.current.add(`borrow_dec_${r.id}_${r.status}`));
       isFirstStudentDecisionLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.reviewed_at || r.created_at).getTime() <= STUDENT_RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildStudentNotification({
+      const recentNotifs = rows.map(r => buildStudentNotification({
         id:        `borrow_dec_${r.id}_${r.status}`,
         type:      r.status === 'approved' ? 'BORROW_APPROVED' : 'BORROW_CANCELLED',
         title:     r.status === 'approved' ? 'Request Approved' : 'Request Rejected',
@@ -4869,6 +5254,44 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(clearNotifHistory(user?.id));
   };
 
+  // Deletes a single notification (from the "…" menu, in either the bell
+  // dropdown or the "See all" page). Removes it from both the live bell
+  // list and the persisted history, then shows a brief "Notification
+  // deleted" toast with Undo.
+  const deleteStudentNotification = (n) => {
+    if (!n) return;
+    setNotifMenuOpenId(null);
+
+    setNotifications(prev => prev.filter(x => x.id !== n.id));
+    seenNotifIdsInStateRef.current.delete(n.id);
+    setNotifHistory(deleteNotifHistoryEntry(user?.id, n.id));
+
+    if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current);
+    setDeletedNotifToast(n);
+    notifUndoTimerRef.current = setTimeout(() => setDeletedNotifToast(null), NOTIF_UNDO_MS);
+  };
+
+  // Puts a deleted notification back — restores it to the persisted history
+  // and, if its type is still enabled and it isn't already back in state
+  // some other way, re-inserts it into the live bell list too.
+  const undoDeleteStudentNotification = () => {
+    const n = deletedNotifToast;
+    if (!n) return;
+    if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current);
+    setDeletedNotifToast(null);
+
+    setNotifHistory(restoreNotifHistoryEntry(user?.id, n));
+
+    if (notifPrefsRef.current[n.type] === true && !seenNotifIdsInStateRef.current.has(n.id)) {
+      seenNotifIdsInStateRef.current.add(n.id);
+      setNotifications(prev =>
+        [n, ...prev]
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, STUDENT_NOTIF_MAX)
+      );
+    }
+  };
+
   const openStudentNotification = (n) => {
     markStudentNotifRead(n.id);
     const target = getStudentNotifTarget(n);
@@ -4879,6 +5302,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   };
 
   const handleBellClick = () => {
+    if (historyOpen) return; // history page already shows everything on screen
     setNotifOpen(o => {
       const next = !o;
       if (next) setNotifPanelPos(computeNotifPanelPos());
@@ -4928,6 +5352,38 @@ export default function StudentDashboard({ user, onSignOut }) {
             style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
           />
         )}
+
+        <div
+          className="lm-notif-menu-wrap"
+          ref={notifMenuOpenId === n.id ? notifMenuRef : null}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="lm-notif-menu-btn"
+            aria-label="Notification options"
+            aria-haspopup="true"
+            aria-expanded={notifMenuOpenId === n.id}
+            onClick={() => setNotifMenuOpenId(open => (open === n.id ? null : n.id))}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
+            </svg>
+          </button>
+          {notifMenuOpenId === n.id && (
+            <div className="lm-notif-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="lm-notif-menu-item lm-notif-menu-item--danger"
+                onClick={() => deleteStudentNotification(n)}
+              >
+                Delete this notification
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -4946,61 +5402,27 @@ export default function StudentDashboard({ user, onSignOut }) {
       const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
       return matchType && matchQ;
     });
-    const unreadTotal = enabledHistory.filter(n => !n.read).length;
-    const todayTotal = enabledHistory.filter(n => {
-      const d = new Date(n.createdAt);
-      const now = new Date();
-      return d.toDateString() === now.toDateString();
-    }).length;
 
     return (
-      <div className="lm-module lm-notif-hist-page">
-        <div className="lm-module-header">
-          <div>
-            <div className="lm-module-title">Notification History</div>
-            <div className="lm-module-subtitle">Every notification the bell has shown, kept locally on this device.</div>
-          </div>
-          <button className="sdb-btn sdb-btn-ghost" onClick={() => setHistoryOpen(false)}>
-            Back to Dashboard
-          </button>
-        </div>
-
-        <div className="lm-stats-grid">
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Total Logged</div>
-            <div className="lm-stat-value">{enabledHistory.length}</div>
-            <div className="lm-stat-sub">Up to 300 kept</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Unread</div>
-            <div className="lm-stat-value">{unreadTotal}</div>
-            <div className="lm-stat-sub">Awaiting review</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Today</div>
-            <div className="lm-stat-value">{todayTotal}</div>
-            <div className="lm-stat-sub">Since midnight</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Showing</div>
-            <div className="lm-stat-value">{rows.length}</div>
-            <div className="lm-stat-sub">Matches current filter</div>
-          </div>
-        </div>
-
-        <div className="lm-filters">
-          <div className="lm-search-wrap">
+      <>
+        <PageHero title="Notification History" sub="Your full notification activity, saved on this device." />
+        <div className="sdb-module sdb-cat-module">
+        <div className="sdb-cat-panel">
+        <div className="sdb-hist-inner">
+        <div className="sdb-filters">
+          <div className="sdb-search-wrap">
+            <span className="sdb-search-icon">{Ic.search}</span>
             <input
               type="text"
-              className="lm-search"
+              className="sdb-input"
               placeholder="Search notifications…"
               value={historySearch}
               onChange={e => setHistorySearch(e.target.value)}
-              style={{ paddingLeft: 14 }}
+              style={{ paddingLeft: 36 }}
             />
           </div>
           <select
-            className="lm-select"
+            className="sdb-select"
             value={historyTypeFilter}
             onChange={e => setHistoryTypeFilter(e.target.value)}
           >
@@ -5011,6 +5433,7 @@ export default function StudentDashboard({ user, onSignOut }) {
                 <option key={key} value={key}>{t.label}</option>
               ))}
           </select>
+          <div className="sdb-count">{rows.length} record{rows.length !== 1 ? 's' : ''}</div>
           {notifHistory.length > 0 && (
             // Gated on the raw store so it stays available even when
             // everything currently in it is hidden above (disabled/retired
@@ -5023,9 +5446,11 @@ export default function StudentDashboard({ user, onSignOut }) {
         <div className="lm-notif-hist-panel">
           <div className="lm-panel-title">
             Activity Log
-            <span className="lm-notif-hist-count">{rows.length}</span>
           </div>
-          <div className="lm-notif-hist-list">
+          <div
+            className="lm-notif-hist-list"
+            onScroll={() => { if (notifMenuOpenId) { setNotifMenuOpenId(null); setNotifRowMenuPos(null); } }}
+          >
             {rows.length === 0 ? (
               <div className="lm-notif-empty">
                 <div className="lm-notif-empty-title">
@@ -5069,13 +5494,69 @@ export default function StudentDashboard({ user, onSignOut }) {
                         style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
                       />
                     )}
+
+                    <div
+                      className="lm-notif-menu-wrap"
+                      onClick={e => e.stopPropagation()}
+                      onKeyDown={e => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="lm-notif-menu-btn"
+                        aria-label="Notification options"
+                        aria-haspopup="true"
+                        aria-expanded={notifMenuOpenId === n.id}
+                        onClick={(e) => {
+                          if (notifMenuOpenId === n.id) {
+                            setNotifMenuOpenId(null);
+                            setNotifRowMenuPos(null);
+                            return;
+                          }
+                          // Position is computed from the button itself, in
+                          // fixed viewport coordinates, because the menu
+                          // below is portaled straight to document.body —
+                          // this row sits inside a scrolling / overflow:
+                          // hidden panel that would otherwise clip it.
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setNotifRowMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
+                          setNotifMenuOpenId(n.id);
+                        }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
+                        </svg>
+                      </button>
+                      {notifMenuOpenId === n.id && notifRowMenuPos && createPortal(
+                        <div
+                          className="lm-notif-menu"
+                          role="menu"
+                          ref={notifMenuRef}
+                          style={{ position: 'fixed', top: notifRowMenuPos.top, right: notifRowMenuPos.right }}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="lm-notif-menu-item lm-notif-menu-item--danger"
+                            onClick={() => { deleteStudentNotification(n); setNotifRowMenuPos(null); }}
+                          >
+                            Delete this notification
+                          </button>
+                        </div>,
+                        document.body
+                      )}
+                    </div>
                   </div>
                 );
               })
             )}
           </div>
         </div>
-      </div>
+        </div>
+        </div>
+        </div>
+      </>
     );
   };
 
@@ -5089,20 +5570,19 @@ export default function StudentDashboard({ user, onSignOut }) {
       .catch(e => console.warn('[Profile fetch]',e?.message));
   }, [user?.id]);
 
-  /* Close the profile dropdown on outside click / Escape */
-  useEffect(() => {
-    if (!profileOpen) return;
-    const onClick = (e) => { if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) setProfileOpen(false); };
-    const onEsc   = (e) => { if (e.key === 'Escape') setProfileOpen(false); };
-    document.addEventListener('mousedown', onClick);
-    document.addEventListener('keydown', onEsc);
-    return () => { document.removeEventListener('mousedown', onClick); document.removeEventListener('keydown', onEsc); };
-  }, [profileOpen]);
-
   const navigate = useCallback((tab, category = '', campus = '') => {
     setActiveTab(tab);
     setMobileOpen(false);
-    setProfileOpen(false);
+    // NOTE: a stray `setProfileOpen(false);` used to sit here, but that state
+    // was never declared anywhere in this file (the profile chip goes
+    // straight to Settings on this dashboard — no dropdown of its own — see
+    // the comment above the chip below). Calling an undefined setter threw a
+    // ReferenceError right here, which silently aborted the rest of this
+    // function — so `setHistoryOpen(false)` below never ran, and clicking
+    // any navbar link or the profile chip while on the Notification History
+    // page looked completely unresponsive (activeTab quietly changed
+    // underneath, but the page stayed stuck showing Activity Log).
+    setHistoryOpen(false); // leaving notification history when a real nav tab is picked — otherwise the page stays stuck on Activity Log and the tabs look unresponsive
     if (tab === 'catalog') { setCatalogCategory(category); setCatalogCampus(campus); }
     if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   }, []);
@@ -5127,7 +5607,7 @@ export default function StudentDashboard({ user, onSignOut }) {
       case 'favorites': return <PageFavorites user={user} onNavigate={navigate} />;
       case 'history':   return <PageHistory   user={user} />;
       case 'profile':   return <PageProfile   user={user} profile={profile} onProfileUpdate={setProfile} />;
-      case 'settings':  return <PageSettings  user={user} onSignOut={()=>setShowLogout(true)} />;
+      case 'settings':  return <PageSettings  user={user} profile={profile} onProfileUpdate={setProfile} onSignOut={()=>setShowLogout(true)} />;
       default:          return <PageHome      user={user} profile={profile} onNavigate={navigate} />;
     }
   };
@@ -5152,7 +5632,7 @@ export default function StudentDashboard({ user, onSignOut }) {
           {/* Primary links (desktop) */}
           <nav className="sdb-navlinks">
             {NAV.map(item => (
-              <button key={item.id} className={`sdb-navlink${activeTab===item.id?' active':''}`} onClick={()=>navigate(item.id)}>
+              <button key={item.id} className={`sdb-navlink${!historyOpen && activeTab===item.id?' active':''}`} onClick={()=>navigate(item.id)}>
                 {item.label}
               </button>
             ))}
@@ -5285,7 +5765,7 @@ export default function StudentDashboard({ user, onSignOut }) {
                       <div className="lm-notif-foot-right">
                         {notifications.length > 0 && (
                           <>
-                            <span className="lm-notif-foot-count">{notifications.length} of {STUDENT_NOTIF_MAX} max</span>
+                            <span className="lm-notif-foot-count">{notifications.length} notification{notifications.length === 1 ? '' : 's'}</span>
                             <button className="lm-notif-clear-btn" onClick={dismissAllStudentNotif} title="Clears this dropdown only — full history stays in See all">Clear all</button>
                           </>
                         )}
@@ -5297,34 +5777,20 @@ export default function StudentDashboard({ user, onSignOut }) {
               )}
             </div>
 
-            {/* Profile chip + dropdown */}
-            <div ref={profileMenuRef} style={{ position:'relative' }}>
-              <div className={`sdb-profile-chip${profileOpen?' open':''}`} onClick={()=>setProfileOpen(v=>!v)} title="Account menu">
-                {avatarUrl
-                  ? <img src={avatarUrl} alt="avatar" className="sdb-avatar" style={{ padding:0 }} onError={e=>{e.target.style.display='none';}} />
-                  : <div className="sdb-avatar">{initials}</div>
-                }
-                <div>
-                  <div className="sdb-profile-name">{displayName}</div>
-                  <div className="sdb-profile-role">Student</div>
-                </div>
-                <span className="sdb-chip-caret">{Ic.chevDown}</span>
+            {/* Profile chip — clicking goes straight to Settings, no dropdown */}
+            <div
+              className="sdb-profile-chip"
+              onClick={()=>navigate('settings')}
+              title="Account settings"
+            >
+              {avatarUrl
+                ? <img src={avatarUrl} alt="avatar" className="sdb-avatar" style={{ padding:0 }} onError={e=>{e.target.style.display='none';}} />
+                : <div className="sdb-avatar">{initials}</div>
+              }
+              <div>
+                <div className="sdb-profile-name">{displayName}</div>
+                <div className="sdb-profile-role">Student</div>
               </div>
-
-              {profileOpen && (
-                <div className="sdb-dropdown">
-                  {PROFILE_MENU.map(item => (
-                    <button key={item.id} className="sdb-dropdown-item" onClick={()=>navigate(item.id)}>
-                      {Ic[item.icon]} {item.label}
-                    </button>
-                  ))}
-
-                  <div className="sdb-dropdown-sep" />
-                  <button className="sdb-dropdown-item danger" onClick={()=>{setProfileOpen(false);setShowLogout(true);}}>
-                    {Ic.logout} Sign Out
-                  </button>
-                </div>
-              )}
             </div>
           </div>
         </header>
@@ -5332,10 +5798,17 @@ export default function StudentDashboard({ user, onSignOut }) {
         {/* ═══ MOBILE NAV PANEL ═══ */}
         <nav className={`sdb-mobnav${mobileOpen?' open':''}`}>
           {NAV.map(item => (
-            <button key={item.id} className={`sdb-mobnav-item${activeTab===item.id?' active':''}`} onClick={()=>navigate(item.id)}>
+            <button key={item.id} className={`sdb-mobnav-item${!historyOpen && activeTab===item.id?' active':''}`} onClick={()=>navigate(item.id)}>
               <span style={{ display:'flex' }}>{Ic[item.icon]}</span>{item.label}
             </button>
           ))}
+          <div className="sdb-mobnav-sep" />
+          <button className={`sdb-mobnav-item${!historyOpen && activeTab==='settings'?' active':''}`} onClick={()=>navigate('settings')}>
+            <span style={{ display:'flex' }}>{Ic.settings}</span>Settings
+          </button>
+          <button className="sdb-mobnav-item danger" onClick={()=>{ setMobileOpen(false); setShowLogout(true); }}>
+            <span style={{ display:'flex' }}>{Ic.logout}</span>Sign Out
+          </button>
         </nav>
 
         {/* ═══ MAIN ═══ */}
@@ -5382,6 +5855,16 @@ export default function StudentDashboard({ user, onSignOut }) {
             </div>
           </div>
         </div>
+      )}
+
+      {deletedNotifToast && createPortal(
+        <div className="lm-notif-undo-toast" role="status">
+          <span className="lm-notif-undo-text">Notification deleted</span>
+          <button type="button" className="lm-notif-undo-btn" onClick={undoDeleteStudentNotification}>
+            Undo
+          </button>
+        </div>,
+        document.body
       )}
     </>
   );

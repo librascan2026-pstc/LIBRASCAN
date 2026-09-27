@@ -35,6 +35,7 @@ const EMPTY_FORM = {
   volume_number: '',
   edition: '',
   isbn: '',
+  call_number: '',
   shelf_location: SHELF_LOCATIONS[0],
   pages: '',
   genre: GENRES[0],
@@ -59,6 +60,9 @@ const Ic = {
   book:     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
   refresh:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.26"/></svg>,
   clock:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>,
+  boxes:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>,
+  wrench:   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19l3 3 7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>,
+  alert:    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
 };
 
 async function uploadImage(file, folder = 'covers') {
@@ -99,6 +103,64 @@ function slugifyTitle(title) {
     .slice(0, 40) || 'Untitled';
 }
 
+
+/**
+ * Recomputes a book's aggregate `copies`/`status` from its actual
+ * book_copies rows and writes them back — same reconciliation the
+ * per-book copy-QR modal already does after a copy is added/removed,
+ * pulled out here so the Inventory tab can reuse it without duplicating
+ * the write logic in two places.
+ */
+async function recomputeBookAggregate(bookId) {
+  const { data: freshCopies } = await supabaseAdmin
+    .from('book_copies').select('status').eq('book_id', bookId);
+  const totalAfter     = (freshCopies || []).length;
+  const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
+  await supabaseAdmin.from('books').update({
+    copies: totalAfter,
+    status: availableAfter > 0 ? 'Available' : 'Borrowed',
+  }).eq('id', bookId);
+}
+
+/**
+ * Ensures a book has one book_copies row (with its own copy_id + QR) for
+ * every unit counted in its `copies` field. Mirrors the lazy generation
+ * that already happens the first time a manager opens a book's QR-codes
+ * view — reused here so the Inventory tab can back-fill tracking for
+ * copies that were added (via the Copies field) but never had their
+ * individual records generated yet.
+ */
+async function ensureBookCopies(book) {
+  const target = parseInt(book.copies) || 0;
+  const { data: existing, error } = await supabaseAdmin
+    .from('book_copies')
+    .select('copy_id, copy_number')
+    .eq('book_id', book.id)
+    .order('copy_number', { ascending: true });
+  if (error) throw error;
+
+  let allCopies = existing || [];
+  if (allCopies.length < target) {
+    const existingNums = allCopies.map(c => c.copy_number);
+    const nextNum = existingNums.length > 0 ? Math.max(...existingNums) + 1 : 1;
+    const toCreate = target - allCopies.length;
+    const newRows = [];
+    for (let i = 0; i < toCreate; i++) {
+      const copyNum = nextNum + i;
+      const copyId  = generateUUID();
+      const { dataUrl } = await generateCopyQR(copyId, copyNum);
+      const qrBlob  = await (await fetch(dataUrl)).blob();
+      const qrFile  = new File([qrBlob], `qr_${copyId}.png`, { type: 'image/png' });
+      const qrUrl   = await uploadImage(qrFile, 'qrcodes');
+      newRows.push({ book_id: book.id, copy_id: copyId, copy_number: copyNum, qr_code_url: qrUrl, status: 'Available' });
+    }
+    const { data: inserted, error: insErr } = await supabaseAdmin
+      .from('book_copies').insert(newRows).select('copy_id, copy_number');
+    if (insErr) throw insErr;
+    allCopies = [...allCopies, ...(inserted || [])];
+  }
+  return allCopies;
+}
 
 function Toast({ message, type = 'success' }) {
   if (!message) return null;
@@ -141,10 +203,10 @@ function StatusBadge({ status }) {
   );
 }
 
-function FieldLabel({ children, required }) {
+function FieldLabel({ children, required, center }) {
   return (
     <label style={{
-      display: 'block', fontFamily: 'var(--font-sans)',
+      display: 'block', textAlign: center ? 'center' : 'left', fontFamily: 'var(--font-sans)',
       fontSize: 10.5, fontWeight: 600, letterSpacing: '0.07em',
       textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 5,
     }}>
@@ -401,10 +463,10 @@ function BookFormModal({ book, onClose, onSaved }) {
     }
   };
 
-  const SectionTitle = ({ children }) => (
+  const SectionTitle = ({ children, center }) => (
     <div style={{
       fontFamily: 'var(--font-display)', fontSize: 11.5, letterSpacing: '0.1em',
-      textTransform: 'uppercase', color: 'var(--maroon-mid)',
+      textTransform: 'uppercase', color: 'var(--maroon-mid)', textAlign: center ? 'center' : 'left',
       borderBottom: '1px solid rgba(139,0,0,0.13)',
       paddingBottom: 8, marginBottom: 14, marginTop: 6,
     }}>{children}</div>
@@ -461,7 +523,7 @@ function BookFormModal({ book, onClose, onSaved }) {
           </button>
         </div>
 
-        <div style={{ padding: '22px 24px', maxHeight: 'calc(90vh - 140px)', overflowY: 'auto' }}>
+        <div style={{ padding: '22px 24px', maxHeight: 'calc(90vh - 140px)', overflowY: 'auto', textAlign: 'left' }}>
           {apiErr && (
             <div style={{
               background: 'rgba(139,0,0,0.08)', border: '1px solid rgba(139,0,0,0.22)',
@@ -470,7 +532,7 @@ function BookFormModal({ book, onClose, onSaved }) {
             }}>{apiErr}</div>
           )}
 
-          <SectionTitle>Book Information</SectionTitle>
+          <SectionTitle center>Book Information</SectionTitle>
           <div style={{ marginBottom: 14 }}>
             <FieldLabel required>Book Title</FieldLabel>
             <input style={inputStyle(errors.title)} value={form.title}
@@ -529,8 +591,15 @@ function BookFormModal({ book, onClose, onSaved }) {
                 value={form.pages} onChange={e => set('pages', e.target.value)} placeholder="e.g. 512" />
             </div>
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12, marginBottom: 14 }}>
+            <div>
+              <FieldLabel>Call Number</FieldLabel>
+              <input style={inputStyle()} value={form.call_number}
+                onChange={e => set('call_number', e.target.value)} placeholder="e.g. QA76.73.J38 2020" />
+            </div>
+          </div>
 
-          <SectionTitle>Classification</SectionTitle>
+          <SectionTitle center>Classification</SectionTitle>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
             <div>
               <FieldLabel>Shelf Location</FieldLabel>
@@ -574,7 +643,7 @@ function BookFormModal({ book, onClose, onSaved }) {
             </span>
           </div>
 
-          <SectionTitle>Images & Media</SectionTitle>
+          <SectionTitle center>Images & Media</SectionTitle>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 8 }}>
             <ImageUploadField
               label="Cover Image"
@@ -741,16 +810,31 @@ function mergeFragmentedParagraphs(paragraphs = [], subheadings = []) {
 
 function ViewModal({ book, onClose, onEdit }) {
   const [qrModalOpen, setQrModalOpen]           = useState(false);
-  const [abstractModalOpen, setAbstractModalOpen] = useState(false);
   const [copyQRs, setCopyQRs]                   = useState([]);
   const [generatingCopyQRs, setGeneratingCopyQRs] = useState(false);
-  const [selectedCopyQR, setSelectedCopyQR]     = useState(null);
-  const [dlFormat, setDlFormat]                 = useState('png');
-  const [deletingCopyId, setDeletingCopyId]     = useState(null);
+  const [qrIndex, setQrIndex]                   = useState(0);
+  const selectedCopyQR = copyQRs[qrIndex] || null;
 
   const copies      = parseInt(book.copies) || 1;
   const abstractData = parseAbstractData(book.abstract_text);
   const hasAbstract  = !!(book.abstract_image_url || abstractData);
+
+  // One distinct glyph per fact field, so the details grid reads at a glance
+  // instead of repeating the same book icon in every chip.
+  const FACT_ICONS = {
+    'Publisher':            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 21V7l8-4 8 4v14"/><path d="M4 21h16"/><path d="M9 21v-6h6v6"/><path d="M9 9h.01M15 9h.01M9 13h.01M15 13h.01"/></svg>,
+    'Place of Publication': <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>,
+    'Year Published':       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>,
+    'Volume Number':        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 3l9 4.5-9 4.5-9-4.5 9-4.5z"/><path d="M3 12l9 4.5 9-4.5M3 16.5l9 4.5 9-4.5"/></svg>,
+    'Edition':              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M6 3h9l5 5v13H6z"/><path d="M15 3v5h5"/></svg>,
+    'ISBN':                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 5v14M8 5v14M11 5v14M13 5v14M17 5v14M20 5v14"/></svg>,
+    'Call Number':          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M20.6 12.7L12.7 20.6a2 2 0 0 1-2.8 0l-7.5-7.5a2 2 0 0 1 0-2.8L10.3 2.4a2 2 0 0 1 1.4-.6H19a2 2 0 0 1 2 2v6.5a2 2 0 0 1-.4 1.4z"/><circle cx="15.5" cy="7.5" r="1.5"/></svg>,
+    'Total Pages':          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h8"/></svg>,
+    'Shelf Location':       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 21s7-6.1 7-11.5A7 7 0 0 0 5 9.5C5 14.9 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.3"/></svg>,
+    'Genre':                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>,
+    'Copies':               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M4 16V5a1.5 1.5 0 0 1 1.5-1.5H15"/></svg>,
+    'Color':                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 21a9 9 0 1 1 0-18c4 0 8 2.5 8 6.5 0 2-1.5 3.5-3.5 3.5H15a1.5 1.5 0 0 0-1 2.6c.4.4.6.9.6 1.4 0 1.1-1 2-2.6 2z"/><circle cx="7.5" cy="10.5" r="1" fill="currentColor" stroke="none"/><circle cx="11" cy="7" r="1" fill="currentColor" stroke="none"/><circle cx="15.5" cy="8" r="1" fill="currentColor" stroke="none"/></svg>,
+  };
 
   const handleOpenQrModal = async () => {
     setQrModalOpen(true);
@@ -815,16 +899,19 @@ function ViewModal({ book, onClose, onEdit }) {
         }));
 
         setCopyQRs(results);
-        if (results.length > 0) setSelectedCopyQR(results[0]);
+        setQrIndex(0);
       } catch (err) {
         console.error('[Book_Catalog] QR modal error:', err);
       } finally {
         setGeneratingCopyQRs(false);
       }
     } else {
-      if (!selectedCopyQR) setSelectedCopyQR(copyQRs[0]);
+      setQrIndex(0);
     }
   };
+
+  const goPrevCopyQR = () => setQrIndex(i => Math.max(0, i - 1));
+  const goNextCopyQR = () => setQrIndex(i => Math.min(copyQRs.length - 1, i + 1));
 
   const downloadCopyQR = (qr, format = 'png') => {
     if (!qr) return;
@@ -892,58 +979,6 @@ function ViewModal({ book, onClose, onEdit }) {
       document.body.removeChild(a);
     };
     img.src = qr.dataUrl;
-  };
-
-  const downloadAllCopyQRs = (format = 'png') => {
-    copyQRs.forEach((qr, i) => setTimeout(() => downloadCopyQR(qr, format), i * 350));
-  };
-
-  const deleteCopy = async (qr) => {
-    if (!qr?.copy_id) return;
-    const confirmed = window.confirm(`Delete Copy #${qr.copyNum}?\n\nThis will permanently remove this copy's QR code and record. Only available copies can be deleted.`);
-    if (!confirmed) return;
-    setDeletingCopyId(qr.copy_id);
-    try {
-      if (qr.status === 'Borrowed') {
-        alert('Cannot delete a borrowed copy. Please return the book first.');
-        setDeletingCopyId(null);
-        return;
-      }
-
-     
-      const { error: brErr } = await supabaseAdmin
-        .from('borrow_requests')
-        .delete()
-        .eq('copy_id', qr.copy_id);
-      if (brErr) throw brErr;
-
-   
-      const { error } = await supabaseAdmin
-        .from('book_copies')
-        .delete()
-        .eq('copy_id', qr.copy_id);
-      if (error) throw error;
-
-   
-      const { data: freshCopies } = await supabaseAdmin
-        .from('book_copies').select('status').eq('book_id', book.id);
-      const totalAfter     = (freshCopies || []).length;
-      const availableAfter = (freshCopies || []).filter(c => c.status === 'Available').length;
-      await supabaseAdmin.from('books').update({
-        copies: totalAfter,
-        status: availableAfter > 0 ? 'Available' : (totalAfter > 0 ? 'Borrowed' : 'Borrowed'),
-      }).eq('id', book.id);
-
-      const updated = copyQRs.filter(c => c.copy_id !== qr.copy_id);
-      setCopyQRs(updated);
-      if (selectedCopyQR?.copy_id === qr.copy_id) {
-        setSelectedCopyQR(updated[0] || null);
-      }
-    } catch (err) {
-      alert('Delete failed: ' + err.message);
-    } finally {
-      setDeletingCopyId(null);
-    }
   };
 
   const detail = (label, value) => value ? (
@@ -1016,147 +1051,189 @@ function ViewModal({ book, onClose, onEdit }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 0, overflowY: 'auto', flex: 1 }}>
+        <div style={{ display: 'flex', gap: 14, overflowY: 'auto', flex: 1, padding: 16, alignItems: 'flex-start' }}>
+          {/* Side card — same bordered, rounded-panel language as the Browse Catalog Book Details popup */}
           <div style={{
-            width: 200, flexShrink: 0, padding: '20px 16px',
-            borderRight: '1px solid rgba(139,0,0,0.10)',
-            display: 'flex', flexDirection: 'column', gap: 14,
+            width: 220, flexShrink: 0, padding: '18px 14px 16px',
+            border: '1px solid rgba(139,0,0,0.18)', borderRadius: 14,
+            background: 'rgba(255,255,255,0.55)',
+            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+            position: 'sticky', top: 0,
           }}>
-            <div>
-              <div style={{
-                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
-                color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
-              }}>Cover</div>
-              <div style={{
-                width: '100%', height: 160, borderRadius: 8, overflow: 'hidden',
-                border: '1px solid rgba(139,0,0,0.15)',
-                background: 'linear-gradient(135deg,rgba(139,0,0,0.10),rgba(201,168,76,0.06))',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>
-                {book.cover_image_url
-                  ? <img src={book.cover_image_url} alt="cover" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  : <span style={{ color: 'var(--text-dim)', opacity: 0.4 }}>{Ic.book}</span>
-                }
-              </div>
-            </div>
-            {hasAbstract && (
-              <div>
-                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)' }}>Abstract</div>
-                <div
-                  onClick={() => setAbstractModalOpen(true)}
-                  title="Click to read the full abstract"
-                  style={{
-                    width: '100%', height: 120, borderRadius: 8, overflow: 'hidden',
-                    border: '2px solid rgba(139,0,0,0.18)', cursor: 'pointer', position: 'relative',
-                    background: book.abstract_image_url ? 'transparent' : 'linear-gradient(135deg,rgba(139,0,0,0.08),rgba(201,168,76,0.06))',
-                    transition: 'border-color 0.18s',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.45)'}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = 'rgba(139,0,0,0.18)'}
-                >
-                  {book.abstract_image_url ? (
-                    <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : (
-                    <div style={{ padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'Georgia,serif', lineHeight: 1.6, overflow: 'hidden' }}>
-                      {abstractData?.heading && <div style={{ fontWeight: 700, fontSize: 10, marginBottom: 4, color: 'var(--maroon-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{abstractData.heading}</div>}
-                      {abstractData?.paragraphs?.[0]?.slice(0, 140)}{abstractData?.paragraphs?.[0]?.length > 140 ? '…' : ''}
-                    </div>
-                  )}
+            <div style={{ width: '100%' }}>
+              <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)', textAlign: 'left' }}>Cover</div>
+              <div style={{ position: 'relative', width: '100%', aspectRatio: '160 / 204', flexShrink: 0 }}>
+                {book.cover_image_url ? (
+                  <img src={book.cover_image_url} alt="cover" style={{
+                    position: 'absolute', inset: 0, width: '100%', height: '100%',
+                    objectFit: 'contain', borderRadius: 3, filter: 'drop-shadow(0 6px 10px rgba(50,0,0,0.30))',
+                  }} />
+                ) : (
                   <div style={{
-                    position: 'absolute', inset: 0, background: 'rgba(80,0,0,0.62)',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 5,
-                    opacity: 0, transition: 'opacity 0.18s',
-                  }}
-                    onMouseEnter={e => e.currentTarget.style.opacity = 1}
-                    onMouseLeave={e => e.currentTarget.style.opacity = 0}
-                  >
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#F5E4A8" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                    <span style={{ fontSize: 11, color: '#F5E4A8', fontFamily: 'var(--font-sans)', fontWeight: 600 }}>Read Abstract</span>
-                  </div>
-                </div>
-              </div>
-            )}
-            <div>
-              <div style={{
-                fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase',
-                color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)',
-              }}>QR Codes ({copies} {copies === 1 ? 'Copy' : 'Copies'})</div>
-              <div
-                onClick={handleOpenQrModal}
-                style={{
-                  width: '100%', height: 100, borderRadius: 8, overflow: 'hidden',
-                  border: '1px solid rgba(139,0,0,0.15)', cursor: 'pointer',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
-                  flexDirection: 'column', gap: 4,
-                }}
-              >
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--maroon-mid)" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
-                <span style={{ fontSize: 10, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', fontWeight: 600 }}>
-                  View & Download QRs
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div style={{ flex: 1, padding: '24px 28px', overflowY: 'auto' }}>
-            <div style={{ marginBottom: 20 }}>
-              <h3 style={{
-                fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--maroon-deep)',
-                lineHeight: 1.3, marginBottom: 4, letterSpacing: '0.03em',
-              }}>{book.title}</h3>
-              {book.volume_title && (
-                <div style={{ fontSize: 13, color: 'var(--text-muted)', fontStyle: 'italic', fontFamily: 'var(--font-serif)' }}>
-                  {book.volume_title}
-                </div>
-              )}
-              <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <StatusBadge status={book.status} />
-                {book.registration_status === 'pending' && (
-                  <span style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5,
-                    padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
-                    fontFamily: 'var(--font-sans)', background: 'rgba(201,168,76,0.16)', color: '#8a6d1f',
-                    border: '1px solid rgba(201,168,76,0.35)',
-                  }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
-                    Awaiting Super Admin Confirmation
-                  </span>
+                    position: 'absolute', inset: 0, borderRadius: 8,
+                    background: 'linear-gradient(135deg,rgba(139,0,0,0.10),rgba(201,168,76,0.06))',
+                    border: '1px solid rgba(139,0,0,0.15)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)', opacity: 0.5,
+                  }}>{Ic.book}</div>
                 )}
               </div>
             </div>
 
+            {/* Copies total — plain label, left-aligned like the rest of the side card */}
+            <div style={{ width: '100%', textAlign: 'left', fontFamily: 'var(--font-sans)', fontSize: 11.5, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+              {copies} cop{copies === 1 ? 'y' : 'ies'} total
+            </div>
+
+            {/* View & Download QRs — same slot/weight as the student card's favorite button, repurposed for the librarian workflow */}
+            <button
+              onClick={handleOpenQrModal}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                width: '100%', minHeight: 40, padding: '0 14px', borderRadius: 8, cursor: 'pointer',
+                background: 'linear-gradient(180deg,#7A1414,#5C0D0D)', color: '#FFF6DF',
+                border: '1px solid #4A0000', boxShadow: '0 3px 8px rgba(80,0,0,0.25)',
+                fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600, transition: 'filter 0.18s ease',
+              }}
+              onMouseEnter={e => e.currentTarget.style.filter = 'brightness(1.14)'}
+              onMouseLeave={e => e.currentTarget.style.filter = 'none'}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 20h3"/></svg>
+              View & Download QRs
+            </button>
+
+            {/* Original Scan — plain preview of the abstract page, same object-fit as the cover; the full text already reads below in the details panel */}
+            {hasAbstract && (
+              <div style={{ width: '100%' }}>
+                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 6, fontFamily: 'var(--font-sans)', textAlign: 'left' }}>Original Scan</div>
+                <div style={{
+                  width: '100%', aspectRatio: '160 / 204', borderRadius: 8, overflow: 'hidden',
+                  border: '1px solid rgba(139,0,0,0.18)', position: 'relative',
+                  background: book.abstract_image_url ? '#fff' : 'linear-gradient(135deg,rgba(139,0,0,0.08),rgba(201,168,76,0.06))',
+                }}>
+                  {book.abstract_image_url ? (
+                    <img src={book.abstract_image_url} alt="abstract" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
+                  ) : (
+                    <div style={{ position: 'absolute', inset: 0, padding: '10px 12px', fontSize: 11, color: 'var(--text-muted)', fontFamily: 'Georgia,serif', lineHeight: 1.6, overflow: 'hidden', textAlign: 'left' }}>
+                      {abstractData?.heading && <div style={{ fontWeight: 700, fontSize: 10, marginBottom: 4, color: 'var(--maroon-mid)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{abstractData.heading}</div>}
+                      {abstractData?.paragraphs?.[0]?.slice(0, 140)}{abstractData?.paragraphs?.[0]?.length > 140 ? '…' : ''}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div style={{
+            flex: 1, minWidth: 0, padding: '20px 22px 22px', overflowY: 'auto',
+            border: '1px solid rgba(139,0,0,0.18)', borderRadius: 14, background: 'rgba(255,255,255,0.55)',
+          }}>
+            <div style={{ marginBottom: 16, textAlign: 'left' }}>
+              <h3 style={{
+                fontFamily: 'var(--font-display)', fontSize: 'clamp(20px,2.4vw,24px)', fontWeight: 700, color: 'var(--text-primary)',
+                lineHeight: 1.2, marginBottom: 6, textAlign: 'left',
+              }}>{book.title}</h3>
+              <div style={{ fontSize: 13.5, color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', textAlign: 'left' }}>
+                by {book.authors || '—'}
+              </div>
+              {book.volume_title && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', fontStyle: 'italic', fontFamily: 'var(--font-serif)', marginTop: 2, textAlign: 'left' }}>
+                  {book.volume_title}
+                </div>
+              )}
+              {book.registration_status === 'pending' && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
+                  padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+                  fontFamily: 'var(--font-sans)', background: 'rgba(201,168,76,0.16)', color: '#8a6d1f',
+                  border: '1px solid rgba(201,168,76,0.35)',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+                  Awaiting Super Admin Confirmation
+                </span>
+              )}
+            </div>
+
+            {/* Facts grid — icon-chip cards, same visual language as the Browse Catalog facts panel */}
             <div style={{
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 28px',
-              borderTop: '1px solid rgba(139,0,0,0.10)', paddingTop: 18,
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px', padding: '14px 16px',
+              border: '1px solid rgba(139,0,0,0.16)', borderRadius: 12, background: 'rgba(255,255,255,0.45)',
             }}>
               {[
-                ['Authors', book.authors],
                 ['Publisher', book.publisher],
                 ['Place of Publication', book.place_of_publication],
                 ['Year Published', book.year],
                 ['Volume Number', book.volume_number],
                 ['Edition', book.edition],
                 ['ISBN', book.isbn],
+                ['Call Number', book.call_number],
                 ['Total Pages', book.pages],
                 ['Shelf Location', book.shelf_location],
                 ['Genre', book.genre],
                 ['Copies', book.copies],
                 ['Color', book.color],
               ].filter(([, v]) => v).map(([label, value]) => (
-                <div key={label} style={{ marginBottom: 14 }}>
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
                   <div style={{
-                    fontSize: 9.5, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
-                    color: 'var(--text-dim)', marginBottom: 3, fontFamily: 'var(--font-sans)',
-                  }}>{label}</div>
-                  <div style={{ fontSize: 13.5, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', fontWeight: 500 }}>{value}</div>
+                    flex: 'none', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'var(--maroon-deep)', background: 'rgba(255,255,255,0.70)', border: '1px solid rgba(139,0,0,0.18)', borderRadius: 9,
+                  }}>{FACT_ICONS[label] || Ic.book}</div>
+                  <div style={{ minWidth: 0, textAlign: 'left' }}>
+                    <div style={{
+                      fontSize: 9.5, fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                      color: 'var(--text-dim)', fontFamily: 'var(--font-sans)',
+                    }}>{label}</div>
+                    <div style={{ marginTop: 1, fontSize: 13, color: 'var(--text-primary)', fontFamily: 'var(--font-sans)', overflowWrap: 'anywhere' }}>{value}</div>
+                  </div>
                 </div>
               ))}
             </div>
+
+            {/* Abstract content — shown inline under the details, same as the Browse Catalog Book Details layout */}
+            {abstractData && (
+              <>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10, margin: '20px 0 10px',
+                  fontFamily: 'var(--font-sans)', fontSize: 10.5, fontWeight: 600, letterSpacing: '0.2em',
+                  textTransform: 'uppercase', color: 'var(--text-dim)', textAlign: 'left',
+                }}>
+                  {Ic.book}
+                  <span>{abstractData.heading || 'Abstract'}</span>
+                  <span style={{ flex: 1, height: 1, background: 'rgba(139,0,0,0.16)' }} />
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  {mergeFragmentedParagraphs(abstractData.paragraphs, abstractData.subheadings).map((para, i) => {
+                    const isSubhead = abstractData.subheadings?.includes(para);
+                    return isSubhead ? (
+                      <div key={i} style={{
+                        fontSize: 12.5, fontWeight: 700, color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)',
+                        letterSpacing: '0.06em', textTransform: 'uppercase', marginTop: 16, marginBottom: 8,
+                      }}>{para}</div>
+                    ) : (
+                      <p key={i} style={{
+                        margin: '0 0 12px', fontSize: 13.5, lineHeight: 1.75,
+                        color: 'var(--text-secondary)', fontFamily: 'var(--font-sans)', textAlign: 'left',
+                      }}>{para}</p>
+                    );
+                  })}
+                </div>
+                {abstractData.keywords?.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 6 }}>
+                    {abstractData.keywords.map((kw, i) => (
+                      <span key={i} style={{
+                        fontSize: 11.5, padding: '4px 13px', borderRadius: 14,
+                        background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.16)',
+                        color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', fontWeight: 500, fontStyle: 'italic',
+                      }}>{kw}</span>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
             {book.created_at && (
               <div style={{
-                marginTop: 14, paddingTop: 12, borderTop: '1px solid rgba(139,0,0,0.08)',
-                fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center',
+                marginTop: 16, paddingTop: 12, borderTop: '1px solid rgba(139,0,0,0.08)',
+                fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'left',
               }}>
                 Added on {new Date(book.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
               </div>
@@ -1164,194 +1241,6 @@ function ViewModal({ book, onClose, onEdit }) {
           </div>
         </div>
       </div>
-
-      {abstractModalOpen && (
-        <div style={{
-          position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.78)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          zIndex: 1200, backdropFilter: 'blur(6px)', padding: 24,
-        }}
-          onClick={() => setAbstractModalOpen(false)}
-        >
-          <div style={{
-            background: 'var(--cream)', borderRadius: 14, padding: 0,
-            border: '1px solid rgba(139,0,0,0.22)',
-            boxShadow: '0 20px 60px rgba(30,0,0,0.55)',
-            maxWidth: 680, width: '100%', maxHeight: '85vh',
-            display: 'flex', flexDirection: 'column',
-            animation: 'lm-fade-in 0.2s ease',
-          }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div style={{
-              padding: '16px 22px', borderRadius: '14px 14px 0 0',
-              background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
-              borderBottom: '1px solid rgba(201,168,76,0.20)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              flexShrink: 0, position: 'relative',
-            }}>
-              <h3 style={{
-                fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8',
-                letterSpacing: '0.10em', textTransform: 'uppercase',
-                textAlign: 'center', margin: 0,
-              }}>
-                {abstractData?.heading ? abstractData.heading.toUpperCase() : 'ABSTRACT'}
-              </h3>
-              <button onClick={() => setAbstractModalOpen(false)} style={{
-                position: 'absolute', right: 16,
-                width: 28, height: 28, borderRadius: '50%',
-                background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
-                color: 'rgba(245,228,168,0.80)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-              }}>{Ic.close}</button>
-            </div>
-            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-
-              {book.abstract_image_url && (
-                <div style={{
-                  width: 210, flexShrink: 0, padding: '16px 14px',
-                  borderRight: '1px solid rgba(139,0,0,0.10)',
-                  display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(253,248,240,0.5)',
-                }}>
-                  <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
-                    Original Scan
-                  </div>
-                  <div style={{ flex: 1, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(139,0,0,0.12)', minHeight: 200, background: '#fff' }}>
-                    <img src={book.abstract_image_url} alt="abstract" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                  </div>
-                </div>
-              )}
-
-              <div style={{ flex: 1, padding: '28px 32px', overflowY: 'auto', background: '#FFFDF8' }}>
-                {abstractData ? (
-                  <>
-                    <div style={{ marginBottom: 22, textAlign: 'center' }}>
-                      {abstractData.heading ? (
-                        <div style={{
-                          fontFamily: '"Georgia", "Times New Roman", serif',
-                          fontSize: 22, fontWeight: 700,
-                          color: '#5A0000',
-                          letterSpacing: '0.12em',
-                          textTransform: 'uppercase',
-                          marginBottom: 10,
-                          lineHeight: 1.2,
-                        }}>
-                          {abstractData.heading}
-                        </div>
-                      ) : (
-                        /* Fallback: use the book section type from header */
-                        <div style={{
-                          fontFamily: '"Georgia", "Times New Roman", serif',
-                          fontSize: 20, fontWeight: 700,
-                          color: '#5A0000', letterSpacing: '0.10em',
-                          textTransform: 'uppercase', marginBottom: 10,
-                        }}>
-                          {book.title}
-                        </div>
-                      )}
-
-                      <div style={{
-                        width: 56, height: 2, margin: '0 auto 12px',
-                        background: 'linear-gradient(90deg, transparent, #C9A84C, transparent)',
-                        borderRadius: 2,
-                      }} />
-
-                      <div style={{
-                        fontSize: 12.5, color: '#7a5c3a',
-                        fontFamily: '"Georgia", serif', fontStyle: 'italic',
-                        letterSpacing: '0.02em',
-                      }}>
-                        {book.title}{book.authors ? ` — ${book.authors}` : ''}
-                      </div>
-                    </div>
-
-                    <div style={{
-                      borderTop: '1px solid rgba(139,0,0,0.12)',
-                      marginBottom: 20,
-                    }} />
-
-                    <div>
-                      {mergeFragmentedParagraphs(abstractData.paragraphs, abstractData.subheadings).map((para, i) => {
-                        const isSubhead = abstractData.subheadings?.includes(para);
-                        if (isSubhead) {
-                          return (
-                            <div key={i} style={{
-                              fontSize: 13.5, fontWeight: 700,
-                              color: '#6B0000',
-                              fontFamily: '"Georgia", serif',
-                              letterSpacing: '0.06em',
-                              marginTop: 22, marginBottom: 10,
-                              textTransform: 'uppercase',
-                              borderBottom: '1px solid rgba(139,0,0,0.10)',
-                              paddingBottom: 6,
-                            }}>
-                              {para}
-                            </div>
-                          );
-                        }
-                        return (
-                          <p key={i} style={{
-                            fontSize: 14.5,
-                            color: '#2c1a0e',
-                            fontFamily: '"Georgia", "Times New Roman", serif',
-                            lineHeight: 2.0,
-                            textAlign: 'justify',
-                            textIndent: '2.2em',
-                            margin: '0 0 14px 0',
-                            wordSpacing: '0.02em',
-                          }}>
-                            {para}
-                          </p>
-                        );
-                      })}
-                    </div>
-
-                    {abstractData.keywords?.length > 0 && (
-                      <div style={{
-                        marginTop: 22, paddingTop: 16,
-                        borderTop: '1px solid rgba(139,0,0,0.10)',
-                      }}>
-                        <div style={{
-                          fontSize: 10, fontWeight: 700, letterSpacing: '0.10em',
-                          textTransform: 'uppercase', color: '#7a5c3a',
-                          fontFamily: 'var(--font-sans)', marginBottom: 10,
-                        }}>
-                          Keywords
-                        </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-                          {abstractData.keywords.map((kw, i) => (
-                            <span key={i} style={{
-                              fontSize: 11.5, padding: '4px 13px', borderRadius: 14,
-                              background: 'rgba(139,0,0,0.06)',
-                              border: '1px solid rgba(139,0,0,0.16)',
-                              color: '#6B0000',
-                              fontFamily: 'var(--font-sans)', fontWeight: 500,
-                              fontStyle: 'italic',
-                            }}>
-                              {kw}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: 200, gap: 12, color: 'var(--text-dim)' }}>
-                    <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', marginBottom: 6 }}>No abstract text extracted yet</div>
-                      <div style={{ fontSize: 12, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', lineHeight: 1.6 }}>
-                        To extract text: click <strong>Edit</strong> on this book, then<br/>
-                        re-upload the abstract image — OCR will read it automatically.
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {qrModalOpen && (
         <div style={{
@@ -1365,153 +1254,105 @@ function ViewModal({ book, onClose, onEdit }) {
             background: 'var(--cream)', borderRadius: 14, padding: 0,
             border: '1px solid rgba(139,0,0,0.20)',
             boxShadow: '0 20px 60px rgba(30,0,0,0.55)',
-            maxWidth: 620, width: '100%', maxHeight: '88vh',
-            display: 'flex', flexDirection: 'column',
+            maxWidth: 360, width: '100%', maxHeight: '88vh',
+            display: 'flex', flexDirection: 'column', overflow: 'hidden',
             animation: 'lm-fade-in 0.2s ease',
           }}
             onClick={e => e.stopPropagation()}
           >
             <div style={{
-              padding: '16px 22px', borderRadius: '14px 14px 0 0',
+              padding: '14px 20px', borderRadius: '14px 14px 0 0',
               background: 'linear-gradient(135deg,var(--maroon-deep),var(--maroon-mid))',
               borderBottom: '1px solid rgba(201,168,76,0.20)',
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
             }}>
-              <div style={{ textAlign: 'left' }}>
-                <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', letterSpacing: '0.04em', marginBottom: 2 }}>
-                  QR Codes — {copies} {copies === 1 ? 'Copy' : 'Copies'}
-                </h3>
-                <p style={{ fontSize: 12, color: '#F5E4A8', fontFamily: 'var(--font-sans)', fontWeight: 600, marginBottom: 2 }}>
-                  {book?.title}
-                </p>
-                <p style={{ fontSize: 11, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)' }}>
-                  Each copy has a unique QR: encodes its Copy ID (UUID)
-                </p>
-              </div>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', letterSpacing: '0.04em' }}>
+                {generatingCopyQRs || !selectedCopyQR ? 'QR Code' : `Copy #${selectedCopyQR.copyNum}`}
+              </h3>
               <button onClick={() => setQrModalOpen(false)} style={{
                 width: 28, height: 28, borderRadius: '50%',
                 background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
                 color: 'rgba(245,228,168,0.80)', cursor: 'pointer',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
               }}>{Ic.close}</button>
             </div>
 
-            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-              <div style={{
-                width: 140, flexShrink: 0, overflowY: 'auto', padding: '12px 8px',
-                borderRight: '1px solid rgba(139,0,0,0.10)',
-              }}>
-                <div style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', padding: '0 6px 8px' }}>
-                  Select Copy
-                </div>
-                {generatingCopyQRs ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, padding: 16 }}>
-                    <span style={{ width: 18, height: 18, border: '2px solid rgba(139,0,0,0.2)', borderTopColor: 'var(--maroon-mid)', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }} />
-                    <span style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', textAlign: 'center' }}>Generating…</span>
+            <div style={{ padding: '26px 24px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16, overflowY: 'auto' }}>
+              {generatingCopyQRs ? (
+                <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', fontSize: 13, padding: '40px 0' }}>Generating unique QR codes…</div>
+              ) : selectedCopyQR ? (
+                <>
+                  <div style={{
+                    fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700,
+                    color: 'var(--maroon-mid)', letterSpacing: '0.03em', textAlign: 'center',
+                    textTransform: 'uppercase',
+                  }}>
+                    {book?.title}
                   </div>
-                ) : copyQRs.map(qr => (
-                  <div key={qr.copy_id || qr.copyNum} style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                    <button onClick={() => setSelectedCopyQR(qr)} style={{
-                      flex: 1, padding: '8px 10px', borderRadius: 8, fontSize: 12,
-                      fontFamily: 'var(--font-sans)', cursor: 'pointer', textAlign: 'left',
-                      border: selectedCopyQR?.copyNum === qr.copyNum ? '1px solid rgba(139,0,0,0.30)' : '1px solid transparent',
-                      background: selectedCopyQR?.copyNum === qr.copyNum ? 'rgba(139,0,0,0.08)' : 'transparent',
-                      color: selectedCopyQR?.copyNum === qr.copyNum ? 'var(--maroon-mid)' : 'var(--text-muted)',
-                      fontWeight: selectedCopyQR?.copyNum === qr.copyNum ? 600 : 400,
-                      transition: 'all 0.15s',
-                    }}>
-                      Copy #{qr.copyNum}
-                      {qr.status && (
-                        <span style={{
-                          display: 'block', fontSize: 9.5, marginTop: 1,
-                          color: qr.status === 'Available' ? '#5a9e5c' : '#c0564e',
-                          fontWeight: 400,
-                        }}>{qr.status}</span>
-                      )}
-                    </button>
-                    <button
-                      onClick={() => deleteCopy(qr)}
-                      disabled={deletingCopyId === qr.copy_id || qr.status === 'Borrowed'}
-                      title={qr.status === 'Borrowed' ? 'Cannot delete a borrowed copy' : `Delete Copy #${qr.copyNum}`}
-                      style={{
-                        width: 24, height: 24, borderRadius: 6, flexShrink: 0,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        border: '1px solid rgba(192,86,78,0.25)',
-                        background: deletingCopyId === qr.copy_id ? 'rgba(192,86,78,0.15)' : 'rgba(192,86,78,0.07)',
-                        color: qr.status === 'Borrowed' ? 'rgba(192,86,78,0.3)' : '#c0564e',
-                        cursor: (deletingCopyId === qr.copy_id || qr.status === 'Borrowed') ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s',
-                        opacity: qr.status === 'Borrowed' ? 0.45 : 1,
-                      }}
-                      onMouseEnter={e => { if (qr.status !== 'Borrowed' && !deletingCopyId) { e.currentTarget.style.background = 'rgba(192,86,78,0.18)'; e.currentTarget.style.borderColor = 'rgba(192,86,78,0.50)'; } }}
-                      onMouseLeave={e => { e.currentTarget.style.background = 'rgba(192,86,78,0.07)'; e.currentTarget.style.borderColor = 'rgba(192,86,78,0.25)'; }}
-                    >
-                      {deletingCopyId === qr.copy_id
-                        ? <span style={{ width: 10, height: 10, border: '1.5px solid rgba(192,86,78,0.3)', borderTopColor: '#c0564e', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }} />
-                        : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
-                      }
-                    </button>
-                  </div>
-                ))}
-              </div>
 
-              <div style={{ flex: 1, padding: 24, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, overflowY: 'auto' }}>
-                {generatingCopyQRs ? (
-                  <div style={{ color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', fontSize: 13 }}>Generating unique QR codes…</div>
-                ) : selectedCopyQR ? (
-                  <>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <button
+                      onClick={goPrevCopyQR}
+                      disabled={qrIndex === 0}
+                      title="Previous copy"
+                      style={{
+                        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '1px solid rgba(139,0,0,0.20)',
+                        background: qrIndex === 0 ? 'rgba(139,0,0,0.04)' : 'rgba(139,0,0,0.08)',
+                        color: qrIndex === 0 ? 'rgba(90,0,0,0.25)' : 'var(--maroon-mid)',
+                        cursor: qrIndex === 0 ? 'not-allowed' : 'pointer',
+                        visibility: copyQRs.length > 1 ? 'visible' : 'hidden',
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+
                     <img src={selectedCopyQR.dataUrl} alt={selectedCopyQR.label}
-                      style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 10, border: '1px solid rgba(139,0,0,0.12)' }} />
-                    <div style={{ textAlign: 'center' }}>
-                      <div style={{
-                        fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
-                        color: 'var(--maroon-mid)', marginBottom: 4,
-                      }}>
-                        Copy #{selectedCopyQR.copyNum}
-                      </div>
-                      <div style={{
-                        fontFamily: 'monospace', fontSize: 10, color: 'var(--text-dim)',
-                        background: 'rgba(139,0,0,0.05)', padding: '4px 12px', borderRadius: 6,
-                        border: '1px solid rgba(139,0,0,0.10)', wordBreak: 'break-all',
-                        maxWidth: 260,
-                      }}>
-                        ID: {selectedCopyQR.copy_id || selectedCopyQR.label}
-                      </div>
+                      style={{ width: 220, height: 220, objectFit: 'contain', borderRadius: 10, border: '1px solid rgba(139,0,0,0.12)', background: '#FDF8F0' }} />
+
+                    <button
+                      onClick={goNextCopyQR}
+                      disabled={qrIndex >= copyQRs.length - 1}
+                      title="Next copy"
+                      style={{
+                        width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: '1px solid rgba(139,0,0,0.20)',
+                        background: qrIndex >= copyQRs.length - 1 ? 'rgba(139,0,0,0.04)' : 'rgba(139,0,0,0.08)',
+                        color: qrIndex >= copyQRs.length - 1 ? 'rgba(90,0,0,0.25)' : 'var(--maroon-mid)',
+                        cursor: qrIndex >= copyQRs.length - 1 ? 'not-allowed' : 'pointer',
+                        visibility: copyQRs.length > 1 ? 'visible' : 'hidden',
+                      }}
+                    >
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                  </div>
+
+                  {copyQRs.length > 1 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+                      Copy {qrIndex + 1} of {copyQRs.length}
                     </div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                      {[['PNG', 'png'], ['JPG', 'jpg']].map(([label, fmt]) => (
-                        <button key={fmt} onClick={() => downloadCopyQR(selectedCopyQR, fmt)} style={{
-                          padding: '8px 18px', borderRadius: 8, fontSize: 12.5, fontWeight: 600,
-                          border: '1px solid rgba(201,168,76,0.40)',
-                          background: 'linear-gradient(135deg,#8B0000,#5A0000)',
-                          color: GP, fontFamily: 'var(--font-sans)', cursor: 'pointer',
-                          display: 'inline-flex', alignItems: 'center', gap: 6,
-                        }}>
-                          {Ic.download} Save as {label}
-                        </button>
-                      ))}
-                    </div>
-                    {copies > 1 && (
-                      <div style={{ display: 'flex', gap: 8 }}>
-                        {[['PNG', 'png'], ['JPG', 'jpg']].map(([label, fmt]) => (
-                          <button key={fmt} onClick={() => downloadAllCopyQRs(fmt)} style={{
-                            padding: '7px 16px', borderRadius: 8, fontSize: 11.5,
-                            border: '1px solid rgba(139,0,0,0.25)', background: 'transparent',
-                            color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
-                            display: 'inline-flex', alignItems: 'center', gap: 5,
-                            transition: 'background 0.15s',
-                          }}
-                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
-                            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                          >
-                            {Ic.download} All Copies ({label})
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                ) : null}
-              </div>
+                  )}
+
+                  <div style={{
+                    fontFamily: 'monospace', fontSize: 10, color: 'var(--text-dim)',
+                    textAlign: 'center', wordBreak: 'break-all', maxWidth: 260,
+                  }}>
+                    {selectedCopyQR.copy_id || selectedCopyQR.label}
+                  </div>
+
+                  <button onClick={() => downloadCopyQR(selectedCopyQR, 'png')} style={{
+                    padding: '10px 28px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                    border: '1px solid rgba(139,0,0,0.20)',
+                    background: 'rgba(139,0,0,0.06)',
+                    color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                  }}>
+                    {Ic.download} Download QR
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
@@ -1599,9 +1440,18 @@ export default function Book_Catalog() {
   const [deleteBook, setDeleteBook] = useState(null);
   const [deleting, setDeleting]     = useState(false);
 
-  // 'book' = officially registered catalog · 'pending' = new titles submitted
-  // for Super Admin confirmation, not yet counted as part of the collection.
+  // 'book' = officially registered catalog · 'inventory' = every individual
+  // physical copy (book_copies) · 'pending' = new titles submitted for
+  // Super Admin confirmation, not yet counted as part of the collection.
   const [activeTab, setActiveTab] = useState('book');
+
+  // Inventory tab — per-copy records, separate from the aggregate `books` list above.
+  const [copies, setCopies]                       = useState([]);
+  const [copiesLoading, setCopiesLoading]         = useState(true);
+  const [copiesToGenerate, setCopiesToGenerate]   = useState([]); // books whose Copies count is ahead of tracked rows
+  const [generatingMissing, setGeneratingMissing] = useState(false);
+  const [copyActionId, setCopyActionId]           = useState(null); // copy_id currently being fixed/deleted
+  const [qrPreviewCopy, setQrPreviewCopy]         = useState(null);
 
   const [toast, setToast]   = useState({ msg: '', type: 'success' });
   const toastRef = useRef();
@@ -1687,6 +1537,148 @@ export default function Book_Catalog() {
     return () => supabase.removeChannel(ch);
   }, [fetchBooks]);
 
+  // Loads every individual copy (book_copies) for the Inventory tab, joined
+  // with its parent book's display info, and cross-checks status against
+  // active borrowings the same way fetchBooks/ViewModal already do so a
+  // stale book_copies.status doesn't show a copy as Borrowed forever.
+  const fetchCopies = useCallback(async (showSpinner = true) => {
+    if (showSpinner) setCopiesLoading(true);
+    try {
+      // Fetched as two plain queries and joined in JS below, rather than
+      // embedding books!inner(...) inside the book_copies select — this
+      // schema has more than one foreign key between book_copies and
+      // books, which makes PostgREST's embed shorthand ambiguous.
+      let qAllBooks = supabaseAdmin
+        .from('books')
+        .select('id, title, edition, isbn, call_number, authors, shelf_location, genre, cover_image_url, copies, campus_id, registration_status')
+        .neq('registration_status', 'pending');
+      if (campusId) qAllBooks = qAllBooks.eq('campus_id', campusId);
+
+      const qCopyRows = supabaseAdmin
+        .from('book_copies')
+        .select('copy_id, copy_number, status, qr_code_url, book_id')
+        .order('copy_number', { ascending: true });
+
+      const qActiveBorrowed = supabaseAdmin.from('borrowings').select('copy_label').ilike('status', 'borrowed');
+
+      const [{ data: allBooks, error: booksErr }, { data: rows, error }, { data: activeBorrowings }] =
+        await Promise.all([qAllBooks, qCopyRows, qActiveBorrowed]);
+      if (booksErr) throw booksErr;
+      if (error) throw error;
+
+      const bookMap = {};
+      (allBooks || []).forEach(b => { bookMap[b.id] = b; });
+
+      const borrowedSet = new Set((activeBorrowings || []).map(r => r.copy_label));
+      // Scoped to this campus's registered books via bookMap, since the
+      // book_copies query above has no campus/registration filter of its own.
+      const registeredRows = (rows || []).filter(r => bookMap[r.book_id]);
+
+      const withStatus = registeredRows.map(r => ({
+        copy_id:     r.copy_id,
+        copy_number: r.copy_number,
+        qr_code_url: r.qr_code_url,
+        book_id:     r.book_id,
+        book:        bookMap[r.book_id],
+        status:      borrowedSet.has(r.copy_id) ? 'Borrowed' : (r.status || 'Available'),
+        // Stored as Borrowed but no active loan actually references it —
+        // almost always the sync issue called out elsewhere in this file.
+        stale:       r.status === 'Borrowed' && !borrowedSet.has(r.copy_id),
+      })).sort((a, b) => (a.book?.title || '').localeCompare(b.book?.title || '') || a.copy_number - b.copy_number);
+
+      setCopies(withStatus);
+
+      const trackedCountByBook = {};
+      registeredRows.forEach(r => { trackedCountByBook[r.book_id] = (trackedCountByBook[r.book_id] || 0) + 1; });
+      const shortfalls = (allBooks || []).filter(b => (parseInt(b.copies) || 0) > (trackedCountByBook[b.id] || 0));
+      setCopiesToGenerate(shortfalls);
+    } catch (err) {
+      showToast('Failed to load inventory: ' + err.message, 'error');
+    } finally {
+      if (showSpinner) setCopiesLoading(false);
+    }
+  }, [campusId]);
+
+  useEffect(() => { fetchCopies(true); }, [fetchCopies]);
+
+  useEffect(() => {
+    const silentRefresh = () => fetchCopies(false);
+    const ch = supabase
+      .channel('inventory-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowings'  }, silentRefresh)
+      .subscribe();
+    return () => supabase.removeChannel(ch);
+  }, [fetchCopies]);
+
+  // Back-fills book_copies rows (with their own QR) for books whose Copies
+  // count is ahead of how many individual records exist — the "Generate"
+  // banner action in the Inventory tab.
+  const handleGenerateMissing = async () => {
+    if (!copiesToGenerate.length || generatingMissing) return;
+    setGeneratingMissing(true);
+    try {
+      for (const b of copiesToGenerate) {
+        await ensureBookCopies(b);
+      }
+      showToast('Inventory records generated for all pending copies.');
+      fetchCopies(false);
+      fetchBooks(false);
+    } catch (err) {
+      showToast('Could not generate copy records: ' + err.message, 'error');
+    } finally {
+      setGeneratingMissing(false);
+    }
+  };
+
+  // Manual correction for a copy stuck showing Borrowed with no matching
+  // active loan (see `stale` above) — puts it back on the shelf in inventory.
+  const handleMarkCopyAvailable = async (copy) => {
+    const confirmed = window.confirm(
+      `Mark Copy #${copy.copy_number} of "${copy.book?.title}" as Available?\n\nOnly do this if the copy is physically back on the shelf but its status didn't update automatically.`
+    );
+    if (!confirmed) return;
+    setCopyActionId(copy.copy_id);
+    try {
+      const { error } = await supabaseAdmin.from('book_copies').update({ status: 'Available' }).eq('copy_id', copy.copy_id);
+      if (error) throw error;
+      await recomputeBookAggregate(copy.book_id);
+      showToast(`Copy #${copy.copy_number} marked Available.`);
+      fetchCopies(false);
+      fetchBooks(false);
+    } catch (err) {
+      showToast('Update failed: ' + err.message, 'error');
+    } finally {
+      setCopyActionId(null);
+    }
+  };
+
+  // Same rule as the per-book copy QR modal: only an Available copy can be
+  // removed from inventory; a Borrowed one must be returned first.
+  const handleDeleteCopy = async (copy) => {
+    if (copy.status === 'Borrowed') {
+      showToast('Cannot delete a borrowed copy. Return it first.', 'error');
+      return;
+    }
+    const confirmed = window.confirm(`Delete Copy #${copy.copy_number} of "${copy.book?.title}"?\n\nThis permanently removes this copy's QR code and record.`);
+    if (!confirmed) return;
+    setCopyActionId(copy.copy_id);
+    try {
+      const { error: brErr } = await supabaseAdmin.from('borrow_requests').delete().eq('copy_id', copy.copy_id);
+      if (brErr) throw brErr;
+      const { error } = await supabaseAdmin.from('book_copies').delete().eq('copy_id', copy.copy_id);
+      if (error) throw error;
+      await recomputeBookAggregate(copy.book_id);
+      showToast(`Copy #${copy.copy_number} removed from inventory.`);
+      fetchCopies(false);
+      fetchBooks(false);
+    } catch (err) {
+      showToast('Delete failed: ' + err.message, 'error');
+    } finally {
+      setCopyActionId(null);
+    }
+  };
+
   const handleSaved = () => {
     fetchBooks();
     showToast(editBook
@@ -1768,7 +1760,7 @@ export default function Book_Catalog() {
 
   const filtered = booksWithStatus.filter(b => {
     const q = search.toLowerCase();
-    const matchSearch = !q || [b.title, b.authors, b.isbn, b.publisher].join(' ').toLowerCase().includes(q);
+    const matchSearch = !q || [b.title, b.authors, b.isbn, b.call_number, b.publisher].join(' ').toLowerCase().includes(q);
     const matchGenre  = genreFilter === 'all' || b.genre === genreFilter;
     const matchStatus = statusFilter === 'all' || b.status === statusFilter;
     const matchShelf  = shelfFilter === 'all' || b.shelf_location === shelfFilter;
@@ -1777,9 +1769,19 @@ export default function Book_Catalog() {
 
   const pendingFiltered = pendingBooks.filter(b => {
     const q = search.toLowerCase();
-    const matchSearch = !q || [b.title, b.authors, b.isbn, b.publisher].join(' ').toLowerCase().includes(q);
+    const matchSearch = !q || [b.title, b.authors, b.isbn, b.call_number, b.publisher].join(' ').toLowerCase().includes(q);
     const matchGenre  = genreFilter === 'all' || b.genre === genreFilter;
     return matchSearch && matchGenre;
+  });
+
+  const invFiltered = copies.filter(c => {
+    const q = search.toLowerCase();
+    const matchSearch = !q || [c.book?.title, c.book?.authors, c.book?.isbn, c.copy_id, String(c.copy_number)]
+      .join(' ').toLowerCase().includes(q);
+    const matchGenre  = genreFilter  === 'all' || c.book?.genre === genreFilter;
+    const matchStatus = statusFilter === 'all' || c.status === statusFilter;
+    const matchShelf  = shelfFilter  === 'all' || c.book?.shelf_location === shelfFilter;
+    return matchSearch && matchGenre && matchStatus && matchShelf;
   });
 
   const actionBtn = (variant) => {
@@ -1788,6 +1790,7 @@ export default function Book_Catalog() {
       edit:   { color: 'var(--maroon-mid)', bg: 'rgba(139,0,0,0.07)', border: 'rgba(139,0,0,0.20)', hover: 'rgba(139,0,0,0.14)' },
       delete: { color: '#c0564e', bg: 'rgba(192,86,78,0.07)', border: 'rgba(192,86,78,0.20)', hover: 'rgba(192,86,78,0.14)' },
       qr:     { color: G, bg: 'rgba(201,168,76,0.08)', border: 'rgba(201,168,76,0.24)', hover: 'rgba(201,168,76,0.16)' },
+      fix:    { color: '#5a9e5c', bg: 'rgba(90,158,92,0.08)', border: 'rgba(90,158,92,0.24)', hover: 'rgba(90,158,92,0.16)' },
     };
     const v = variants[variant];
     return {
@@ -1908,7 +1911,7 @@ export default function Book_Catalog() {
           <option value="all">All Genres</option>
           {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
-        {activeTab === 'book' && (
+        {(activeTab === 'book' || activeTab === 'inventory') && (
           <>
             <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               <option value="all">All Status</option>
@@ -1927,14 +1930,17 @@ export default function Book_Catalog() {
         }}>
           {activeTab === 'book'
             ? `${filtered.length} ${filtered.length === 1 ? 'record' : 'records'}`
+            : activeTab === 'inventory'
+            ? `${invFiltered.length} ${invFiltered.length === 1 ? 'copy' : 'copies'}`
             : `${pendingFiltered.length} awaiting confirmation`}
         </span>
       </div>
 
       <div style={{ display: 'flex', gap: 28, marginBottom: 20, borderBottom: '1.5px solid rgba(139,0,0,0.12)' }}>
         {[
-          { key: 'book',    label: 'Book',           icon: Ic.book,  count: null },
-          { key: 'pending', label: 'Unregister book', icon: Ic.clock, count: pendingBooks.length },
+          { key: 'book',      label: 'Book',            icon: Ic.book,  count: null },
+          { key: 'inventory', label: 'Inventory',       icon: Ic.boxes, count: copies.length || null },
+          { key: 'pending',   label: 'Unregister book', icon: Ic.clock, count: pendingBooks.length },
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
             display: 'flex', alignItems: 'center', gap: 7,
@@ -1960,7 +1966,23 @@ export default function Book_Catalog() {
         ))}
       </div>
 
-      {activeTab === 'pending' ? (
+      {activeTab === 'inventory' ? (
+        <InventoryPanel
+          loading={copiesLoading}
+          rows={invFiltered}
+          hasAny={copies.length > 0}
+          search={search}
+          shortfalls={copiesToGenerate}
+          onGenerateMissing={handleGenerateMissing}
+          generating={generatingMissing}
+          onFix={handleMarkCopyAvailable}
+          onDelete={handleDeleteCopy}
+          onViewQr={setQrPreviewCopy}
+          actionId={copyActionId}
+          ActionBtn={ActionBtn}
+          Ic={Ic}
+        />
+      ) : activeTab === 'pending' ? (
         loading ? (
           <div className="lm-loading">
             <div className="lm-spinner" />
@@ -1985,7 +2007,7 @@ export default function Book_Catalog() {
                   background: 'linear-gradient(135deg, #8B0000, #6B0000)',
                   borderBottom: '2px solid rgba(201,168,76,0.35)',
                 }}>
-                  {['Book Title', 'Authors', 'ISBN', 'Copies', 'Submitted', 'Status', 'Action'].map((h, i) => (
+                  {['Book Title', 'Authors', 'ISBN', 'Call No.', 'Copies', 'Submitted', 'Status', 'Action'].map((h, i) => (
                     <th key={h} style={{
                       padding: '13px 16px', textAlign: 'left',
                       fontFamily: 'var(--font-sans)', fontSize: 11,
@@ -2026,40 +2048,20 @@ export default function Book_Catalog() {
         </div>
       ) : (
         <div style={{
-          borderRadius: 10, border: '1px solid rgba(139,0,0,0.13)',
-          overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
+          gap: 20,
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{
-                background: 'linear-gradient(135deg, #8B0000, #6B0000)',
-                borderBottom: '2px solid rgba(201,168,76,0.35)',
-              }}>
-                {['Book Title', 'Authors', 'ISBN', 'Copies', 'Status', 'Action'].map((h, i) => (
-                  <th key={h} style={{
-                    padding: '13px 16px', textAlign: 'left',
-                    fontFamily: 'var(--font-sans)', fontSize: 11,
-                    fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
-                    color: '#F5E4A8', whiteSpace: 'nowrap',
-                  }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((book, idx) => (
-                <TableRow
-                  key={book.id}
-                  book={book}
-                  idx={idx}
-                  onView={() => setViewBook(book)}
-                  onEdit={() => openEdit(book)}
-                  onDelete={() => setDeleteBook(book)}
-                  ActionBtn={ActionBtn}
-                  Ic={Ic}
-                />
-              ))}
-            </tbody>
-          </table>
+          {filtered.map(book => (
+            <BookCard
+              key={book.id}
+              book={book}
+              onView={() => setViewBook(book)}
+              onEdit={() => openEdit(book)}
+              onDelete={() => setDeleteBook(book)}
+              Ic={Ic}
+            />
+          ))}
         </div>
       )}
 
@@ -2085,87 +2087,154 @@ export default function Book_Catalog() {
           onConfirm={handleDelete}
         />
       )}
+      {qrPreviewCopy && (
+        <CopyQrPreviewModal copy={qrPreviewCopy} onClose={() => setQrPreviewCopy(null)} />
+      )}
     </div>
   );
 }
 
-function TableRow({ book, idx, onView, onEdit, onDelete, ActionBtn, Ic }) {
+function BookCard({ book, onView, onEdit, onDelete, Ic }) {
   const [hov, setHov] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [menuOpen]);
+
+  const total = parseInt(book.copies) ?? 0;
+  const avail = book.available_copies !== null && book.available_copies !== undefined
+    ? parseInt(book.available_copies)
+    : (book.status === 'Available' ? total : 0);
+
+  const menuItemStyle = {
+    display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+    padding: '9px 12px', border: 'none', background: 'transparent', cursor: 'pointer',
+    fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 500,
+    color: 'var(--text-primary)', textAlign: 'left', transition: 'background 0.14s',
+  };
+
   return (
-    <tr
+    <div
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onClick={onView}
       style={{
-        background: hov ? 'rgba(139,0,0,0.04)' : (idx % 2 === 0 ? 'transparent' : 'rgba(139,0,0,0.015)'),
-        borderBottom: '1px solid rgba(139,0,0,0.07)',
-        cursor: 'pointer', transition: 'background 0.14s',
+        position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0,
+        background: "#FDF3E3 url('/BookCover.png') center/cover no-repeat",
+        border: `1px solid ${hov ? 'rgba(107,0,0,0.32)' : 'rgba(107,0,0,0.14)'}`,
+        borderRadius: 8, overflow: 'hidden', cursor: 'pointer',
+        boxShadow: hov ? '0 16px 34px rgba(80,0,0,0.20)' : '0 2px 6px rgba(80,0,0,0.08), 0 10px 28px rgba(80,0,0,0.10)',
+        transform: hov ? 'translateY(-6px)' : 'none',
+        transition: 'transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease',
       }}
     >
-      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {book.cover_image_url ? (
-            <img src={book.cover_image_url} alt=""
-              style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
-          ) : (
-            <div style={{
-              width: 32, height: 40, borderRadius: 4, flexShrink: 0,
-              background: 'linear-gradient(135deg,rgba(139,0,0,0.14),rgba(201,168,76,0.08))',
-              border: '1px solid rgba(139,0,0,0.12)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'var(--text-dim)',
-            }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-              </svg>
-            </div>
-          )}
-          <div>
-            <div style={{
-              fontWeight: 600, fontSize: 13, color: 'var(--text-primary)',
-              fontFamily: 'var(--font-sans)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170,
-            }}>{book.title}</div>
-            {book.edition && <div style={{ fontSize: 10.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{book.edition} Ed.</div>}
+      {/* 3-dot menu — replaces the bookmark/save icon, same corner spot as the student card's save button */}
+      <div ref={menuRef} style={{ position: 'absolute', top: 8, right: 10, zIndex: 3 }} onClick={e => e.stopPropagation()}>
+        <button onClick={() => setMenuOpen(o => !o)} title="More actions" style={{
+          width: 32, height: 32, padding: 0, borderRadius: 7,
+          background: '#6B0000', color: '#FFF6DF', border: 'none', cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 3px 8px rgba(40,0,0,0.30)', transition: 'transform 0.18s ease, background 0.18s ease',
+        }}
+          onMouseEnter={e => { e.currentTarget.style.transform = 'scale(1.08)'; e.currentTarget.style.background = '#7B0000'; }}
+          onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.background = '#6B0000'; }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/>
+          </svg>
+        </button>
+        {menuOpen && (
+          <div style={{
+            position: 'absolute', top: 37, right: 0, minWidth: 130,
+            background: 'var(--cream)', border: '1px solid rgba(139,0,0,0.18)', borderRadius: 8,
+            boxShadow: '0 10px 26px rgba(30,0,0,0.20)', overflow: 'hidden', zIndex: 10,
+          }}>
+            <button
+              onClick={() => { setMenuOpen(false); onEdit(); }}
+              style={menuItemStyle}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              {Ic.edit} Edit
+            </button>
+            <button
+              onClick={() => { setMenuOpen(false); onDelete(); }}
+              style={{ ...menuItemStyle, color: '#c0564e', borderTop: '1px solid rgba(139,0,0,0.08)' }}
+              onMouseEnter={e => e.currentTarget.style.background = 'rgba(192,86,78,0.08)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              {Ic.trash} Delete
+            </button>
           </div>
+        )}
+      </div>
+
+      {/* Cover — fixed book proportion, same margins as the student catalog card so the background art frames it */}
+      <div style={{ position: 'relative', flexShrink: 0, margin: '9.4% 10.3% 0', aspectRatio: '270 / 385' }}>
+        {book.cover_image_url ? (
+          <img src={book.cover_image_url} alt="" style={{
+            position: 'absolute', inset: 0, width: '100%', height: '100%',
+            objectFit: 'contain', borderRadius: 2,
+          }} />
+        ) : (
+          <div style={{
+            position: 'absolute', inset: 0, borderRadius: 4,
+            background: 'linear-gradient(135deg,rgba(139,0,0,0.14),rgba(201,168,76,0.08))',
+            border: '1px solid rgba(139,0,0,0.12)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-dim)',
+          }}>
+            {Ic.book}
+          </div>
+        )}
+      </div>
+
+      {/* Info — left-aligned, same as Browse Catalog */}
+      <div style={{ padding: '14px 10.3% 0', textAlign: 'left' }}>
+        <div style={{
+          fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 700,
+          color: 'var(--maroon-deep)', lineHeight: 1.3, minHeight: '2.6em', textAlign: 'left',
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>
+          {book.title}
         </div>
-      </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
-        <span style={{
-          fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          display: 'block', maxWidth: 160,
-        }}>{book.authors || '—'}</span>
-      </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
-        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
-          {book.isbn || '—'}
-        </span>
-      </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
-        {(() => {
-          const total = parseInt(book.copies) ?? 0;
-          const avail = book.available_copies !== null && book.available_copies !== undefined
-            ? parseInt(book.available_copies)
-            : (book.status === 'Available' ? total : 0);
-          const allOut = avail === 0 && total > 0;
-          return (
-            <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: allOut ? '#c0564e' : 'var(--maroon-mid)' }}>
-              {avail}<span style={{ fontSize: 11, fontWeight: 400, color: 'var(--text-dim)' }}>/{total}</span>
-            </span>
-          );
-        })()}
-      </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
-        <StatusBadge status={book.status} />
-      </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }} onClick={e => e.stopPropagation()}>
-        <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
-          <ActionBtn variant="edit" onClick={onEdit}>{Ic.edit} Edit</ActionBtn>
-          <ActionBtn variant="delete" onClick={onDelete}>{Ic.trash}</ActionBtn>
+        <div style={{
+          fontSize: 12, color: 'var(--text-muted)', marginTop: 3, fontFamily: 'var(--font-sans)', textAlign: 'left',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {book.authors || '—'}
         </div>
-      </td>
-    </tr>
+        <div style={{ marginTop: 9 }}>
+          <span style={{
+            fontSize: 12, fontWeight: 500, fontFamily: 'var(--font-sans)',
+            color: 'var(--text-muted)',
+          }}>
+            {book.status || 'Available'}: {avail}/{total} copies
+          </span>
+        </div>
+      </div>
+
+      {/* View Details — full-width bar pinned to the bottom, same footer as Browse Catalog */}
+      <div style={{ marginTop: 'auto', padding: '12px 4.1% 4.5%' }}>
+        <button
+          type="button"
+          onClick={e => { e.stopPropagation(); onView(); }}
+          style={{
+            display: 'block', width: '100%', height: 32, border: 0, borderRadius: 4, cursor: 'pointer',
+            background: '#6B0000', color: '#fff',
+            fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: 500, transition: 'background 0.18s ease',
+          }}
+          onMouseEnter={e => e.currentTarget.style.background = '#560000'}
+          onMouseLeave={e => e.currentTarget.style.background = '#6B0000'}
+        >
+          View Details
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -2223,6 +2292,11 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
         </span>
       </td>
       <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
+          {book.call_number || '—'}
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
           {parseInt(book.copies) || 0}
         </span>
@@ -2245,5 +2319,242 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
         <ActionBtn variant="delete" onClick={onWithdraw}>{Ic.trash} Withdraw</ActionBtn>
       </td>
     </tr>
+  );
+}
+// ============================================================================
+// Inventory tab — full per-copy management (book_copies), separate from the
+// aggregate "Book" tab above. Lets a manager see and correct the status of
+// every individual physical copy in the collection, view its QR code, or
+// remove a single copy without touching the rest of that book's stock.
+// ============================================================================
+
+function InventoryPanel({
+  loading, rows, hasAny, search, shortfalls, onGenerateMissing, generating,
+  onFix, onDelete, onViewQr, actionId, ActionBtn, Ic,
+}) {
+  if (loading) {
+    return (
+      <div className="lm-loading">
+        <div className="lm-spinner" />
+        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading inventory…</span>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {shortfalls.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+          padding: '12px 16px', borderRadius: 10,
+          background: 'rgba(201,168,76,0.10)', border: '1px solid rgba(201,168,76,0.32)',
+        }}>
+          <span style={{ color: '#8a6d1f', flexShrink: 0 }}>{Ic.alert}</span>
+          <div style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
+            <strong style={{ color: '#8a6d1f' }}>{shortfalls.length}</strong> {shortfalls.length === 1 ? 'title has' : 'titles have'} more copies than tracked inventory records — generate QR codes and per-copy tracking for them.
+          </div>
+          <button onClick={onGenerateMissing} disabled={generating} style={{
+            flexShrink: 0, padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+            border: '1px solid rgba(201,168,76,0.45)', background: generating ? 'rgba(201,168,76,0.25)' : 'rgba(201,168,76,0.18)',
+            color: '#8a6d1f', fontFamily: 'var(--font-sans)', cursor: generating ? 'default' : 'pointer',
+          }}>
+            {generating ? 'Generating…' : 'Generate Missing'}
+          </button>
+        </div>
+      )}
+
+      {rows.length === 0 ? (
+        <div className="lm-empty">
+          <div className="lm-empty-icon">📦</div>
+          <div className="lm-empty-text">No copies found</div>
+          <div className="lm-empty-sub">
+            {!hasAny
+              ? 'Individual copy records are generated the first time a book is added or its QR codes are viewed.'
+              : search ? 'Try a different search term.' : 'Try a different filter.'}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          borderRadius: 10, border: '1px solid rgba(139,0,0,0.14)',
+          overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
+        }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{
+                background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+                borderBottom: '2px solid rgba(201,168,76,0.35)',
+              }}>
+                {['Book Title', 'Copy', 'Copy ID', 'Shelf Location', 'Status', 'Action'].map(h => (
+                  <th key={h} style={{
+                    padding: '13px 16px', textAlign: 'left',
+                    fontFamily: 'var(--font-sans)', fontSize: 11,
+                    fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                    color: '#F5E4A8', whiteSpace: 'nowrap',
+                  }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((copy, idx) => (
+                <InventoryRow
+                  key={copy.copy_id}
+                  copy={copy}
+                  idx={idx}
+                  busy={actionId === copy.copy_id}
+                  onFix={() => onFix(copy)}
+                  onDelete={() => onDelete(copy)}
+                  onViewQr={() => onViewQr(copy)}
+                  ActionBtn={ActionBtn}
+                  Ic={Ic}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, Ic }) {
+  const [hov, setHov] = useState(false);
+  const book = copy.book || {};
+  return (
+    <tr
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? 'rgba(139,0,0,0.04)' : (idx % 2 === 0 ? 'transparent' : 'rgba(139,0,0,0.015)'),
+        borderBottom: '1px solid rgba(139,0,0,0.07)',
+        transition: 'background 0.14s',
+      }}
+    >
+      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {book.cover_image_url ? (
+            <img src={book.cover_image_url} alt=""
+              style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
+          ) : (
+            <div style={{
+              width: 32, height: 40, borderRadius: 4, flexShrink: 0,
+              background: 'linear-gradient(135deg,rgba(139,0,0,0.14),rgba(201,168,76,0.08))',
+              border: '1px solid rgba(139,0,0,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: 'var(--text-dim)',
+            }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+              </svg>
+            </div>
+          )}
+          <div style={{
+            fontWeight: 600, fontSize: 13, color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 170,
+          }}>{book.title || 'Untitled'}</div>
+        </div>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
+          #{copy.copy_number}
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
+          {(copy.copy_id || '').slice(0, 8)}…
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
+          {book.shelf_location || '—'}
+        </span>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
+          <StatusBadge status={copy.status} />
+          {copy.stale && (
+            <span style={{ fontSize: 10, color: '#8a6d1f', fontFamily: 'var(--font-sans)' }}>
+              No active loan found
+            </span>
+          )}
+        </div>
+      </td>
+      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+        <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
+          <ActionBtn variant="qr" onClick={onViewQr}>{Ic.qr} QR</ActionBtn>
+          {copy.stale && (
+            <ActionBtn variant="fix" onClick={busy ? undefined : onFix}>{Ic.wrench} {busy ? '…' : 'Mark Available'}</ActionBtn>
+          )}
+          {copy.status === 'Available' && (
+            <ActionBtn variant="delete" onClick={busy ? undefined : onDelete}>{Ic.trash}</ActionBtn>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function CopyQrPreviewModal({ copy, onClose }) {
+  const book = copy.book || {};
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.60)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1100, padding: 24, backdropFilter: 'blur(4px)',
+    }}
+      onClick={e => e.target === e.currentTarget && onClose()}
+    >
+      <div style={{
+        background: 'var(--cream)', borderRadius: 14,
+        border: '1px solid rgba(139,0,0,0.18)',
+        boxShadow: '0 20px 60px rgba(30,0,0,0.42)',
+        width: '100%', maxWidth: 340,
+        display: 'flex', flexDirection: 'column',
+        animation: 'lm-fade-in 0.22s ease',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 18px',
+          background: 'linear-gradient(135deg, var(--maroon-deep), var(--maroon-mid))',
+        }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, fontWeight: 600, color: '#F5E4A8' }}>
+            Copy #{copy.copy_number}
+          </div>
+          <button onClick={onClose} style={{
+            width: 26, height: 26, borderRadius: '50%',
+            background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
+            color: 'rgba(245,228,168,0.70)', fontSize: 12,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          }}>✕</button>
+        </div>
+        <div style={{ padding: 20, textAlign: 'center' }}>
+          <div style={{
+            fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)',
+            fontFamily: 'var(--font-sans)', marginBottom: 14,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{book.title || 'Untitled'}</div>
+          {copy.qr_code_url ? (
+            <img src={copy.qr_code_url} alt="QR code"
+              style={{ width: 200, height: 200, objectFit: 'contain', margin: '0 auto', display: 'block', borderRadius: 8, border: '1px solid rgba(139,0,0,0.15)' }} />
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+              No QR code generated yet for this copy.
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'monospace', marginTop: 12 }}>
+            {copy.copy_id}
+          </div>
+          {copy.qr_code_url && (
+            <a href={copy.qr_code_url} download target="_blank" rel="noreferrer" style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 14,
+              padding: '8px 16px', borderRadius: 8, fontSize: 12.5, fontWeight: 600,
+              border: '1px solid rgba(139,0,0,0.20)', background: 'rgba(139,0,0,0.06)',
+              color: 'var(--maroon-mid)', fontFamily: 'var(--font-sans)', textDecoration: 'none',
+            }}>Download QR</a>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

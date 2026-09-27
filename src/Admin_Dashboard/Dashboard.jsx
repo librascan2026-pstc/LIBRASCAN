@@ -13,19 +13,22 @@ import {
   markNotifHistoryRead,
   markAllNotifHistoryRead,
   clearNotifHistory,
+  deleteNotifHistoryEntry,
+  restoreNotifHistoryEntry,
 } from './notificationHistory';
 import './Dashboard.css';
 
 
-const NOTIF_MAX = 15; 
-// On first load, "pending requests" always show (they're still actionable
-// regardless of age). Every other type only used to silently mark existing
-// rows as "seen" and show nothing — so anything that happened before the
-// dashboard was last opened/refreshed (a new user registering, a book
-// coming back, a scan at the desk) could never show up in the bell at all.
-// This window makes those recent events (last 24h) show up on load too,
-// the same way Facebook still shows you "earlier today" activity.
-const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const NOTIF_MAX = 100; // how many rows of each type to fetch/keep in the live bell list
+// BUG FIX: this used to be a 24-hour "recent window" — every type other than
+// pending requests only ever showed up on load if it happened in the last
+// 24h; anything older (even if brand new to this browser) was silently
+// dropped and never reached the bell OR the persisted history. That's what
+// made notifications "disappear the next day": an event from yesterday just
+// stopped qualifying as recent on today's load. Removed — every fetched row
+// (bounded only by NOTIF_MAX above) is now shown/stored regardless of age,
+// the way Facebook's notification list actually behaves (it doesn't clear
+// out daily; it keeps showing recent activity until you've paged past it).
 
 
 // Note: BORROW_APPROVED / BORROW_CANCELLED are intentionally absent — those
@@ -258,6 +261,40 @@ export default function Dashboard({ user, onSignOut }) {
   // once its tab mounts. `nonce` forces the target tab to re-run its focus
   // effect even if the same id is clicked again.
   const [notifFocus, setNotifFocus] = useState({ prop: null, value: null, nonce: 0 });
+
+  // Per-row "…" menu (bell dropdown + "See all" history page) — tracks
+  // which single notification's menu is open, if any. Only one can be open
+  // at a time, so a single id (rather than a Set) is enough.
+  const [notifMenuOpenId, setNotifMenuOpenId] = useState(null);
+  const notifMenuRef = useRef(null);
+
+  // "Notification deleted" undo toast. Holds the just-deleted notification
+  // object so Undo can hand it straight back to restoreNotifHistoryEntry /
+  // re-insert it into the live list, without having to look it up again.
+  const [deletedNotifToast, setDeletedNotifToast] = useState(null);
+  const notifUndoTimerRef = useRef(null);
+  const NOTIF_UNDO_MS = 6000;
+
+  useEffect(() => {
+    // Cleanup only — cancels a pending auto-dismiss if the component
+    // unmounts (e.g. sign-out) while a toast is still showing.
+    return () => { if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current); };
+  }, []);
+
+  // Close the open "…" menu on an outside click or Escape.
+  useEffect(() => {
+    if (!notifMenuOpenId) return;
+    const onClick = (e) => {
+      if (notifMenuRef.current && !notifMenuRef.current.contains(e.target)) setNotifMenuOpenId(null);
+    };
+    const onEsc = (e) => { if (e.key === 'Escape') setNotifMenuOpenId(null); };
+    document.addEventListener('mousedown', onClick);
+    document.addEventListener('keydown', onEsc);
+    return () => {
+      document.removeEventListener('mousedown', onClick);
+      document.removeEventListener('keydown', onEsc);
+    };
+  }, [notifMenuOpenId]);
 
   // The panel is rendered through a portal straight into <body> (see
   // handleBellClick / the render below). Root cause of the "notifications
@@ -506,8 +543,7 @@ export default function Dashboard({ user, onSignOut }) {
     if (isFirstUserLoad.current) {
       rows.forEach(r => seenIdsRef.current.add(`new_user_${r.id}`));
       isFirstUserLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.created_at).getTime() <= RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildNotification({
+      const recentNotifs = rows.map(r => buildNotification({
         id:        `new_user_${r.id}`,
         type:      'NEW_USER',
         title:     'New User Registered',
@@ -555,8 +591,7 @@ export default function Dashboard({ user, onSignOut }) {
     if (isFirstReturnLoad.current) {
       rows.forEach(r => seenIdsRef.current.add(`book_ret_${r.id}`));
       isFirstReturnLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.returned_at).getTime() <= RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildNotification({
+      const recentNotifs = rows.map(r => buildNotification({
         id:        `book_ret_${r.id}`,
         type:      'BOOK_RETURNED',
         title:     'Book Returned',
@@ -613,8 +648,7 @@ export default function Dashboard({ user, onSignOut }) {
     if (isFirstRegistrationLoad.current) {
       rows.forEach(r => seenIdsRef.current.add(`reg_${r.id}`));
       isFirstRegistrationLoad.current = false;
-      const recent = rows.filter(r => Date.now() - new Date(r.created_at).getTime() <= RECENT_WINDOW_MS);
-      const recentNotifs = recent.map(r => buildNotification({
+      const recentNotifs = rows.map(r => buildNotification({
         id:        `reg_${r.id}`,
         type:      r.type,
         title:     r.title,
@@ -846,6 +880,65 @@ export default function Dashboard({ user, onSignOut }) {
     setNotifHistory(clearNotifHistory(user?.id));
   };
 
+  // Deletes a single notification (from the "…" menu in the "See all"
+  // history page). Removes it from both the persisted history and the live
+  // bell list — a delete from the permanent log is meant to actually get
+  // rid of the thing everywhere, not just hide it from one of the two
+  // views — then shows a brief "Notification deleted" toast with Undo.
+  const deleteNotification = (n) => {
+    if (!n) return;
+    setNotifMenuOpenId(null);
+
+    setNotifications(prev => prev.filter(x => x.id !== n.id));
+    seenNotifIdsInStateRef.current.delete(n.id);
+    setNotifHistory(deleteNotifHistoryEntry(user?.id, n.id));
+
+    if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current);
+    setDeletedNotifToast(n);
+    notifUndoTimerRef.current = setTimeout(() => setDeletedNotifToast(null), NOTIF_UNDO_MS);
+  };
+
+  // Removes a single notification from the "…" menu in the bell dropdown
+  // only. Unlike deleteNotification above, this never touches the
+  // persisted history — a bell-side delete just declutters the dropdown;
+  // the record should still be there later on the "See all" history page.
+  const dismissBellNotification = (n) => {
+    if (!n) return;
+    setNotifMenuOpenId(null);
+
+    setNotifications(prev => prev.filter(x => x.id !== n.id));
+    seenNotifIdsInStateRef.current.delete(n.id);
+
+    if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current);
+    setDeletedNotifToast({ ...n, _bellOnly: true });
+    notifUndoTimerRef.current = setTimeout(() => setDeletedNotifToast(null), NOTIF_UNDO_MS);
+  };
+
+  // Puts a deleted notification back — restores it to the persisted history
+  // (unless it was only ever dismissed from the bell, in which case it was
+  // never removed from history to begin with) and, if its type is still
+  // enabled in Settings and it isn't already back in state some other way,
+  // re-inserts it into the live bell list too.
+  const undoDeleteNotification = () => {
+    const n = deletedNotifToast;
+    if (!n) return;
+    if (notifUndoTimerRef.current) clearTimeout(notifUndoTimerRef.current);
+    setDeletedNotifToast(null);
+
+    if (!n._bellOnly) {
+      setNotifHistory(restoreNotifHistoryEntry(user?.id, n));
+    }
+
+    if (notifPrefsRef.current[n.type] === true && !seenNotifIdsInStateRef.current.has(n.id)) {
+      seenNotifIdsInStateRef.current.add(n.id);
+      setNotifications(prev =>
+        [n, ...prev]
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, NOTIF_MAX)
+      );
+    }
+  };
+
   // Shared by both the bell dropdown and the "See all" history modal.
   // Marks the notification read, then switches to the relevant tab (and,
   // for 'exact' targets, hands the target component a focus id so it can
@@ -873,6 +966,7 @@ export default function Dashboard({ user, onSignOut }) {
 
  
   const handleBellClick = () => {
+    if (historyOpen) return; // history page already shows everything on screen
     setNotifOpen(o => {
       const next = !o;
       if (next) setNotifPanelPos(computeNotifPanelPos());
@@ -929,6 +1023,38 @@ export default function Dashboard({ user, onSignOut }) {
             style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }}
           />
         )}
+
+        <div
+          className="lm-notif-menu-wrap"
+          ref={notifMenuOpenId === n.id ? notifMenuRef : null}
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="lm-notif-menu-btn"
+            aria-label="Notification options"
+            aria-haspopup="true"
+            aria-expanded={notifMenuOpenId === n.id}
+            onClick={() => setNotifMenuOpenId(open => (open === n.id ? null : n.id))}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+              <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
+            </svg>
+          </button>
+          {notifMenuOpenId === n.id && (
+            <div className="lm-notif-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                className="lm-notif-menu-item lm-notif-menu-item--danger"
+                onClick={() => dismissBellNotification(n)}
+              >
+                Dismiss from bell
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1017,48 +1143,9 @@ export default function Dashboard({ user, onSignOut }) {
       const matchQ = !q || n.message?.toLowerCase().includes(q) || n.title?.toLowerCase().includes(q);
       return matchType && matchQ;
     });
-    const unreadTotal = enabledHistory.filter(n => !n.read).length;
-    const todayTotal = enabledHistory.filter(n => {
-      const d = new Date(n.createdAt);
-      const now = new Date();
-      return d.toDateString() === now.toDateString();
-    }).length;
 
     return (
       <div className="lm-module lm-notif-hist-page">
-        <div className="lm-module-header">
-          <div>
-            <div className="lm-module-title">Notification History</div>
-            <div className="lm-module-subtitle">Every notification the bell has shown, kept locally on this device.</div>
-          </div>
-          <button className="lm-btn lm-btn--ghost" onClick={() => setHistoryOpen(false)}>
-            Back to Dashboard
-          </button>
-        </div>
-
-        <div className="lm-stats-grid">
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Total Logged</div>
-            <div className="lm-stat-value">{enabledHistory.length}</div>
-            <div className="lm-stat-sub">Up to 300 kept</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Unread</div>
-            <div className="lm-stat-value">{unreadTotal}</div>
-            <div className="lm-stat-sub">Awaiting review</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Today</div>
-            <div className="lm-stat-value">{todayTotal}</div>
-            <div className="lm-stat-sub">Since midnight</div>
-          </div>
-          <div className="lm-stat-card">
-            <div className="lm-stat-label">Showing</div>
-            <div className="lm-stat-value">{rows.length}</div>
-            <div className="lm-stat-sub">Matches current filter</div>
-          </div>
-        </div>
-
         <div className="lm-filters">
           <div className="lm-search-wrap">
             <input
@@ -1147,6 +1234,38 @@ export default function Dashboard({ user, onSignOut }) {
                     {isUnread && (
                       <div className="lm-notif-unread-dot" style={{ background: typeInfo.color, boxShadow: `0 0 8px ${typeInfo.color}99` }} />
                     )}
+
+                    <div
+                      className="lm-notif-menu-wrap"
+                      ref={notifMenuOpenId === n.id ? notifMenuRef : null}
+                      onClick={e => e.stopPropagation()}
+                      onKeyDown={e => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="lm-notif-menu-btn"
+                        aria-label="Notification options"
+                        aria-haspopup="true"
+                        aria-expanded={notifMenuOpenId === n.id}
+                        onClick={() => setNotifMenuOpenId(open => (open === n.id ? null : n.id))}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <circle cx="12" cy="5" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="12" cy="19" r="1.8" />
+                        </svg>
+                      </button>
+                      {notifMenuOpenId === n.id && (
+                        <div className="lm-notif-menu" role="menu">
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="lm-notif-menu-item lm-notif-menu-item--danger"
+                            onClick={() => deleteNotification(n)}
+                          >
+                            Delete this notification
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })
@@ -1210,7 +1329,7 @@ export default function Dashboard({ user, onSignOut }) {
               {items.map(item => (
                 <div key={item.id}>
                   <button
-                    className={`lm-nav-item ${activeTab === item.id ? 'active' : ''}`}
+                    className={`lm-nav-item ${!historyOpen && activeTab === item.id ? 'active' : ''}`}
                     onClick={() => navigate(item.id)}
                     data-tooltip={sidebarCollapsed ? item.label : undefined}
                     title={sidebarCollapsed ? item.label : undefined}
@@ -1523,7 +1642,7 @@ export default function Dashboard({ user, onSignOut }) {
                     <div className="lm-notif-foot-right">
                       {notifications.length > 0 && (
                         <>
-                          <span className="lm-notif-foot-count">{notifications.length} of {NOTIF_MAX} max</span>
+                          <span className="lm-notif-foot-count">{notifications.length} notification{notifications.length === 1 ? '' : 's'}</span>
                           <button className="lm-notif-clear-btn" onClick={dismissAll} title="Clears this dropdown only — full history stays in See all">Clear all</button>
                         </>
                       )}
@@ -1555,6 +1674,18 @@ export default function Dashboard({ user, onSignOut }) {
           {historyOpen ? renderNotifHistoryPage() : renderContent()}
         </main>
       </div>
+
+      {deletedNotifToast && createPortal(
+        <div className="lm-notif-undo-toast" role="status">
+          <span className="lm-notif-undo-text">
+            {deletedNotifToast._bellOnly ? 'Notification dismissed' : 'Notification deleted'}
+          </span>
+          <button type="button" className="lm-notif-undo-btn" onClick={undoDeleteNotification}>
+            Undo
+          </button>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

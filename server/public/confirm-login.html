@@ -53,11 +53,21 @@
 
   <script>
     // Filled in by the server when it serves this file — no build step, no
-    // bundler, no dependency on the frontend app's own routing. This page
-    // does exactly one thing: confirm/deny the sign-in with the server the
-    // moment it loads, then tell the person to go back to the original tab.
+    // bundler, no dependency on the frontend app's own routing.
+    //
+    // IMPORTANT — this page must NEVER call /api/mfa/confirm-login-device
+    // automatically on load. This link sits inside an email, and mail
+    // providers / corporate mail-security gateways (Outlook Safe Links,
+    // Gmail's link-scanning, antivirus proxies, chat-app link previews,
+    // etc.) routinely "visit" every link in an email to scan it — before
+    // the person ever opens or clicks anything. If loading this page fired
+    // the confirm/deny request by itself, one of those automated visits
+    // would silently approve (or deny) a sign-in the person never actually
+    // looked at. So the request only ever fires from an explicit button
+    // click below — a scanner loads pages, it doesn't click buttons.
     var FRONTEND_ORIGIN = "__FRONTEND_ORIGIN__";
     var card = document.getElementById('card');
+    var busy = false;
 
     function render(html) {
       card.innerHTML = '<p class="brand">LibraScan</p>' + html;
@@ -71,21 +81,25 @@
 
     var params = new URLSearchParams(window.location.search);
     var token  = params.get('token');
-    var action = params.get('action');
+    var action = params.get('action'); // hint only — never auto-fired
 
-    if (!token || (action !== 'yes' && action !== 'no')) {
+    function renderInvalid() {
       render(
         '<h1>Link not valid</h1>' +
         '<p>We couldn\u2019t match this link to a pending sign-in. It may have already been used, or the link was copied incorrectly.</p>' +
         '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
       );
-    } else {
-      // Same-origin request — this page is served by the same backend that
-      // owns /api/mfa/*, so no CORS setup is needed for this call at all.
+    }
+
+    function respond(chosenAction) {
+      if (busy) return;
+      busy = true;
+      render('<p><span class="spinner"></span>Submitting your response&hellip;</p>');
+
       fetch('/api/mfa/confirm-login-device', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: token, action: action }),
+        body: JSON.stringify({ token: token, action: chosenAction }),
       })
         .then(function (res) {
           return res.json().catch(function () { return {}; }).then(function (json) {
@@ -98,8 +112,6 @@
           var firstName = result.json.firstName ? escapeHtml(result.json.firstName) : '';
           var device = result.json.device ? escapeHtml(result.json.device) : '';
           var location = result.json.location ? escapeHtml(result.json.location) : '';
-          // Same idea as the email: show which device and where this sign-in
-          // came from, so whoever's reading can tell at a glance if it's them.
           var deviceLine = (device || location)
             ? '<div class="device-line"><span>' + (device || 'Unknown device') + '</span>' +
               (location ? '<span style="opacity:.5">&middot;</span><span>&#128205; ' + location + '</span>' : '') +
@@ -130,11 +142,7 @@
               '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
             );
           } else {
-            render(
-              '<h1>Link not valid</h1>' +
-              '<p>We couldn\u2019t match this link to a pending sign-in. It may have already been used, or the link was copied incorrectly.</p>' +
-              '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
-            );
+            renderInvalid();
           }
         })
         .catch(function () {
@@ -144,6 +152,20 @@
             '<a class="btn btn-secondary" href="' + FRONTEND_ORIGIN + '/login">Back to Login</a>'
           );
         });
+    }
+
+    if (!token || (action !== 'yes' && action !== 'no')) {
+      renderInvalid();
+    } else {
+      render(
+        '<h1>Confirm this sign-in</h1>' +
+        '<p>Someone just tried signing in to your LibraScan account. Only continue if this was you.</p>' +
+        '<button type="button" class="btn btn-primary" id="btn-yes">Yes, it\u2019s me</button>' +
+        '<br/>' +
+        '<button type="button" class="btn btn-secondary" id="btn-no">No, secure my account</button>'
+      );
+      document.getElementById('btn-yes').addEventListener('click', function () { respond('yes'); });
+      document.getElementById('btn-no').addEventListener('click', function () { respond('no'); });
     }
   </script>
 </body>

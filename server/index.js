@@ -105,6 +105,44 @@ async function getProfile(userId) {
 }
 
 // ---------------------------------------------------------------------------
+// Live "force logout" — the other half of Settings' "View Logins" -> Logout.
+// Revoking a session (below) kills that device's REFRESH token, but the
+// ACCESS token it's already holding is a self-contained JWT that stays
+// valid on its own until it naturally expires (often up to an hour) — so
+// without this, a revoked device would keep showing the dashboard for a
+// while. This pushes an instant Realtime broadcast on that user's channel;
+// every open tab for the account (see AuthContext.jsx) is listening on it
+// and signs itself out the moment a matching message arrives. Uses
+// Realtime's plain HTTP broadcast endpoint (not a websocket) so it works
+// fine from a stateless serverless function too.
+// ---------------------------------------------------------------------------
+async function broadcastForceLogout(userId, sessionId) {
+  try {
+    await fetch(`${process.env.SUPABASE_URL}/realtime/v1/api/broadcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: process.env.SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify({
+        messages: [{
+          topic: `force-logout-${userId}`,
+          event: 'force-logout',
+          payload: { sessionId },
+          private: false,
+        }],
+      }),
+    });
+  } catch (err) {
+    // Best-effort — the session is already revoked server-side either way;
+    // worst case the device just has to wait out its access token's natural
+    // expiry instead of being kicked immediately.
+    console.warn('[mfa] force-logout broadcast failed (non-fatal):', err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // GET/POST /api/mfa/status — is 2FA on for this account, and what's the role?
 // ---------------------------------------------------------------------------
 app.post('/api/mfa/status', requireUser, async (req, res) => {
@@ -549,6 +587,10 @@ app.post('/api/mfa/sessions/revoke', requireUser, async (req, res) => {
   if (row.device_id) {
     await supabaseAdmin.from('mfa_trusted_devices').delete().eq('id', row.device_id);
   }
+
+  // Don't make the person wait on that device's token to expire naturally —
+  // tell it right now.
+  broadcastForceLogout(req.authUser.id, row.session_id);
 
   res.json({ revoked: true });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { confirmLoginDevice, pingLoginConfirmationWaiters } from '../utils/mfaClient';
 
 // ============================================================================
@@ -9,6 +9,17 @@ import { confirmLoginDevice, pingLoginConfirmationWaiters } from '../utils/mfaCl
 // Mount it at that public route (no auth guard) — the person may well be
 // reading their email on a different device from the one that's actually
 // waiting to sign in, so this page never assumes a Supabase session exists.
+//
+// IMPORTANT — this page must NEVER call confirmLoginDevice() automatically
+// on load. These links are plain GETs sitting inside an email, and mail
+// providers / corporate mail-security gateways (Outlook Safe Links, Gmail's
+// link-scanning, antivirus proxies, chat-app link previews, etc.) routinely
+// "visit" every link in an email to scan it — before the person ever opens
+// or clicks anything. If loading this page fired the confirm/deny request
+// by itself, one of those automated visits would silently approve (or deny)
+// a sign-in the person never actually looked at. So the token/action are
+// only ever used once a real person taps a button below — a scanner loads
+// pages, it doesn't click buttons.
 // ============================================================================
 
 const FONT_DISPLAY = "'Playfair Display', Georgia, serif";
@@ -71,34 +82,44 @@ function Btn({ children, onClick, primary }) {
  * still tells the person what to do).
  */
 export default function ConfirmLoginPage({ onGoForgot, onGoLogin }) {
-  const [state, setState]         = useState('checking'); // checking|confirmed|denied|expired|invalid|error
+  // Read the link's own token/action once. `action` is only used to decide
+  // which button to visually emphasize (a hint for which link they opened)
+  // — it is NEVER used to fire a request by itself.
+  const params    = new URLSearchParams(window.location.search);
+  const token     = params.get('token');
+  const linkAction = params.get('action');
+  const linkValid = !!token && (linkAction === 'yes' || linkAction === 'no');
+
+  // choice = waiting for the person to actually tap a button.
+  const [state, setState]         = useState(linkValid ? 'choice' : 'invalid'); // choice|checking|confirmed|denied|expired|invalid|error
   const [firstName, setFirstName] = useState('');
   const [device, setDevice]       = useState('');
   const [location, setLocation]   = useState('');
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const token  = params.get('token');
-    const action = params.get('action');
-    if (!token || (action !== 'yes' && action !== 'no')) { setState('invalid'); return; }
-
-    confirmLoginDevice(token, action)
-      .then(res => {
-        setFirstName(res.firstName || '');
-        setDevice(res.device || '');
-        setLocation(res.location || '');
-        setState(
-          res.status === 'confirmed' ? 'confirmed' :
-          res.status === 'denied'    ? 'denied'    :
-          res.status === 'expired'   ? 'expired'   : 'invalid'
-        );
-        // Nudge the original tab — it's likely sitting in the background
-        // right now (the person came here from it) and its polling timer
-        // may be throttled, so don't make it wait on that timer.
-        pingLoginConfirmationWaiters();
-      })
-      .catch(() => setState('error'));
-  }, []);
+  // Only ever called from an onClick — this is the one and only place that
+  // hits the server, so an automated page visit (scanner/prefetch) can never
+  // trigger it.
+  const respond = async (action) => {
+    if (state === 'checking') return;
+    setState('checking');
+    try {
+      const res = await confirmLoginDevice(token, action);
+      setFirstName(res.firstName || '');
+      setDevice(res.device || '');
+      setLocation(res.location || '');
+      setState(
+        res.status === 'confirmed' ? 'confirmed' :
+        res.status === 'denied'    ? 'denied'    :
+        res.status === 'expired'   ? 'expired'   : 'invalid'
+      );
+      // Nudge the original tab — it's likely sitting in the background
+      // right now (the person came here from it) and its polling timer
+      // may be throttled, so don't make it wait on that timer.
+      pingLoginConfirmationWaiters();
+    } catch {
+      setState('error');
+    }
+  };
 
   // Shown above the headline on every resolved state (not "checking"/"error",
   // where we either don't have it yet or don't trust what little we do have)
@@ -117,8 +138,23 @@ export default function ConfirmLoginPage({ onGoForgot, onGoLogin }) {
     ) : null
   );
 
+  if (state === 'choice') {
+    return (
+      <Card>
+        <H>Confirm this sign-in</H>
+        <P>
+          Someone just tried signing in to your LibraScan account. Only
+          continue if this was you — the email you opened this link from
+          shows which device and location it came from.
+        </P>
+        <Btn primary onClick={() => respond('yes')}>Yes, it's me</Btn>
+        <Btn onClick={() => respond('no')}>No, secure my account</Btn>
+      </Card>
+    );
+  }
+
   if (state === 'checking') {
-    return <Card><P>Checking that link…</P></Card>;
+    return <Card><P>Submitting your response…</P></Card>;
   }
 
   if (state === 'confirmed') {

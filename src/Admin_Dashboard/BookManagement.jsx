@@ -1629,6 +1629,7 @@ export default function BookManagement({ initialTab }) {
         const txPayload = {
           ...(studentUUID ? { student_id: studentUUID } : {}),
           student_name:    studentNameWithNo,
+          student_number:  readableStudentNo || null,
           student_program: student.program || '',
           book_id:         bookId,
           book_title:      bookTitle,
@@ -1797,6 +1798,51 @@ export default function BookManagement({ initialTab }) {
       const { error } = await supabaseAdmin.from('borrowings').delete().eq('id', tx.id);
       if (error) { showToast(`Delete failed: ${error.message}`, 'error'); return; }
       setTransactions(prev => prev.filter(t => t.id !== tx.id));
+
+      // Keep the student's "Borrowing History" (StudentDashboard's PageHistory,
+      // which reads straight from borrow_requests) in sync with this
+      // Transaction History table (borrowings). There's no FK between the two
+      // tables, so a deleted transaction otherwise leaves its source
+      // borrow_requests row behind — still "Approved" on the student's side —
+      // even though it no longer exists here. "Approved" on a request is what
+      // "Borrowed" on a transaction corresponds to, so match this tx back to
+      // its request (same student + same book, whichever request is closest
+      // in time at/before this transaction's borrowed_at) and remove that
+      // request too. Walk-in checkouts with no prior request simply won't
+      // match anything here, so the transaction still deletes normally.
+      try {
+        const studentNoFromName = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
+        if (tx.book_id && (tx.student_id || tx.student_number || studentNoFromName)) {
+          let reqQuery = supabaseAdmin.from('borrow_requests')
+            .select('id,created_at,status')
+            .eq('book_id', tx.book_id)
+            .in('status', ['approved', 'active', 'returned']);
+          reqQuery = tx.student_id
+            ? reqQuery.eq('student_id', tx.student_id)
+            : reqQuery.eq('student_number', tx.student_number || studentNoFromName);
+
+          const { data: candidateReqs, error: reqErr } = await reqQuery;
+          if (reqErr) {
+            console.error('[BookManagement] borrow_requests lookup for sync-delete failed:', reqErr);
+          } else if (candidateReqs?.length) {
+            const txTime = new Date(tx.borrowed_at).getTime();
+            let best = null, bestDiff = Infinity;
+            candidateReqs.forEach(r => {
+              const rTime = new Date(r.created_at).getTime();
+              if (isNaN(rTime) || isNaN(txTime) || rTime > txTime) return;
+              const diff = txTime - rTime;
+              if (diff < bestDiff) { bestDiff = diff; best = r; }
+            });
+            if (best) {
+              const { error: delReqErr } = await supabaseAdmin.from('borrow_requests').delete().eq('id', best.id);
+              if (delReqErr) console.error('[BookManagement] Failed to delete matching borrow_requests row:', delReqErr);
+            }
+          }
+        }
+      } catch (syncErr) {
+        console.error('[BookManagement] Sync-delete of borrow_requests failed:', syncErr);
+      }
+
       showToast('Transaction deleted.', 'success');
     } catch (err) {
       showToast(`Error: ${err.message}`, 'error');

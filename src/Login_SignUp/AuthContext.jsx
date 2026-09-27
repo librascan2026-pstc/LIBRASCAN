@@ -110,13 +110,25 @@ export function AuthProvider({ children }) {
     };
   }, [fetchProfile]);
 
-  const signOut = async () => {
+  // skipServerCall: true for the force-logout path below, where we already
+  // know (we're the ones who just got told) that the server has already
+  // revoked this exact session. Calling supabase.auth.signOut() in that case
+  // would only ever get a 403 back — it's asking the server to revoke a
+  // session that's already gone — so we skip that network round-trip
+  // entirely and just clear this tab's local copy of the session ourselves.
+  const signOut = async ({ skipServerCall = false } = {}) => {
     const uid = user?.id;
     try {
-
-      const { error } = await supabase.auth.signOut({ scope: 'local' });
-      if (error) {
-        console.warn('[AuthContext] signOut warning (non-fatal):', error.message);
+      if (skipServerCall) {
+        try {
+          const key = supabase.auth.storageKey;
+          if (key) localStorage.removeItem(key);
+        } catch { /* storage unavailable */ }
+      } else {
+        const { error } = await supabase.auth.signOut({ scope: 'local' });
+        if (error) {
+          console.warn('[AuthContext] signOut warning (non-fatal):', error.message);
+        }
       }
     } catch (err) {
       console.warn('[AuthContext] signOut threw (non-fatal):', err);
@@ -147,6 +159,56 @@ export function AuthProvider({ children }) {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user) await fetchProfile(session.user.id);
   }, [fetchProfile]);
+
+  // ----------------------------------------------------------------------
+  // Live "force logout" — the other half of Settings' "View Logins" ->
+  // Logout. Revoking a session there kills that device's REFRESH token
+  // server-side, but the ACCESS token this tab is already holding is a
+  // self-contained JWT that stays valid on its own until it naturally
+  // expires — so without this, a revoked tab would keep showing the
+  // dashboard for a while. The server broadcasts on this user's channel the
+  // instant it revokes a session; this tab listens the whole time it's
+  // signed in and signs itself out immediately on a match (or on ANY
+  // force-logout message with no sessionId, e.g. a future "log out
+  // everywhere" action).
+  // ----------------------------------------------------------------------
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    let channel = null;
+
+    (async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) return;
+
+      let sessionId = null;
+      try {
+        const payload = token.split('.')[1];
+        const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+        sessionId = JSON.parse(json).session_id || null;
+      } catch { /* couldn't read it — fall through, still listen below */ }
+
+      if (cancelled) return;
+
+      channel = supabase
+        .channel(`force-logout-${user.id}`)
+        .on('broadcast', { event: 'force-logout' }, ({ payload }) => {
+          if (!payload?.sessionId || payload.sessionId === sessionId) {
+            // The server just told us it already revoked this session —
+            // no need to ask it to do so again (that's the 403 you'd see
+            // otherwise). Just clear this tab locally.
+            signOut({ skipServerCall: true });
+          }
+        })
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [user?.id]);
 
   return (
     <AuthContext.Provider value={{ user, role, profile, loading, roleResolving, signOut, signIn, commitUser, refreshProfile }}>
