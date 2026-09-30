@@ -512,7 +512,7 @@ function DetailModal({ tx, onClose, campusMap }) {
             <DRow label="Student No."   value={(() => {
               const embedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
               const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim()) ? String(tx.student_id).trim() : null;
-              return embedded || fromId || '—';
+              return String(tx.student_number || '').trim() || embedded || fromId || '—';
             })()} mono />
             <DRow label="Name"     value={(tx.student_name || '').replace(/\s*\[.*?\]\s*$/, '') || '—'} />
             <DRow label="Program"  value={tx.student_program} />
@@ -570,7 +570,7 @@ function TxRow({ tx, onClick, onDelete }) {
           const embedded = nameField.match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
           const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim())
             ? String(tx.student_id).trim() : null;
-          const displayId = embedded || fromId || null;
+          const displayId = String(tx.student_number || '').trim() || embedded || fromId || null;
           return displayId
             ? <span style={{ fontSize:12, fontFamily:'monospace', color:'#7a4040', letterSpacing:'0.04em', fontWeight:600 }}>{displayId}</span>
             : <span style={{ fontSize:11.5, color:'#b08080', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>no ID recorded</span>;
@@ -1083,11 +1083,12 @@ export default function BookManagement({ initialTab }) {
       setPendingError(null);
 
    
+      // student_name now holds the name only; the ID goes in its own
+      // student_number column.
       const txPayload = {
         student_id:      pendingReq.student_id      || null,
-        student_name:    pendingReq.student_number
-          ? `${pendingReq.student_name} [${pendingReq.student_number}]`
-          : (pendingReq.student_name || null),
+        student_name:    pendingReq.student_name    || null,
+        student_number:  pendingReq.student_number  || null,
         student_program: pendingReq.student_program  || null,
         book_id:         pendingReq.book_id          || null,
         book_title:      pendingReq.book_title       || null,
@@ -1101,10 +1102,24 @@ export default function BookManagement({ initialTab }) {
       };
       console.log('[Approve] payload:', txPayload);
 
-      const { data: inserted, error: insertErr } = await supabaseAdmin
+      let { data: inserted, error: insertErr } = await supabaseAdmin
         .from('borrowings')
         .insert([txPayload])
         .select();
+
+      // Safety net: if this database has no `student_number` column on
+      // borrowings yet, retry the old way so the ID isn't lost.
+      if (insertErr && (insertErr.code === '42703' || insertErr.code === 'PGRST204' || /student_number/.test(insertErr.message || ''))) {
+        console.warn('[Approve] borrowings.student_number missing — retrying with embedded format');
+        const { student_number: _sn, ...fallbackPayload } = txPayload;
+        if (pendingReq.student_number) {
+          fallbackPayload.student_name = `${pendingReq.student_name} [${pendingReq.student_number}]`;
+        }
+        ({ data: inserted, error: insertErr } = await supabaseAdmin
+          .from('borrowings')
+          .insert([fallbackPayload])
+          .select());
+      }
 
       if (insertErr) {
         console.error('[Approve] insert error:', insertErr);
@@ -1504,7 +1519,7 @@ export default function BookManagement({ initialTab }) {
     
       const { data: openBorrowRows, error: openBorrowErr } = await supabaseAdmin
         .from('borrowings')
-        .select('id, borrowed_at, book_id, copy_label, student_id, student_name, student_program')
+        .select('*')
         .eq('copy_label', copyLabel)
         .eq('status', 'Borrowed')
         .order('borrowed_at', { ascending: true })
@@ -1527,6 +1542,9 @@ export default function BookManagement({ initialTab }) {
           if (rowId === studentUUID) return true;
         }
 
+        if (readableStudentNo && String(row.student_number || '').trim() === readableStudentNo) return true;
+
+        // Older rows embedded the number in student_name as "Name [Number]"
         if (readableStudentNo && row.student_name) {
           if (row.student_name.includes(`[${readableStudentNo}]`)) return true;
         }
@@ -1628,7 +1646,7 @@ export default function BookManagement({ initialTab }) {
 
         const txPayload = {
           ...(studentUUID ? { student_id: studentUUID } : {}),
-          student_name:    studentNameWithNo,
+          student_name:    student.full_name,
           student_number:  readableStudentNo || null,
           student_program: student.program || '',
           book_id:         bookId,
@@ -1665,7 +1683,7 @@ export default function BookManagement({ initialTab }) {
             txErr.message?.includes('student_program');
 
           if (isColError) {
-            console.warn('[BookScan] Column error — retrying with minimal payload');
+            console.warn('[BookScan] Column error — retrying with minimal payload. Reason:', txErr.code, txErr.message);
       
             const minimalPayload = {
               student_id:      studentUUID || undefined,
@@ -1686,6 +1704,23 @@ export default function BookManagement({ initialTab }) {
             const { data: retryTx, error: retryErr } = await supabaseAdmin
               .from('borrowings').insert([minimalPayload]).select().single();
             if (!retryErr) {
+              // The first insert was rejected (see the "[BookScan] Insert error"
+              // log above for the real reason), so this row was saved without
+              // student_number and with "Name [Number]" in student_name. Try to
+              // repair it right away: if the update works, the row ends up
+              // clean (plain name + student_number); if it doesn't, keep the
+              // embedded format so the ID isn't lost and say why.
+              if (retryTx?.id && readableStudentNo) {
+                const { error: healErr } = await supabaseAdmin.from('borrowings')
+                  .update({ student_number: readableStudentNo, student_name: student.full_name })
+                  .eq('id', retryTx.id);
+                if (healErr) {
+                  console.warn('[BookScan] Could not set student_number on the new borrowing:', healErr.message, healErr);
+                } else {
+                  minimalPayload.student_number = readableStudentNo;
+                  minimalPayload.student_name   = student.full_name;
+                }
+              }
               playSuccessSound();
               const result = { ...minimalPayload, id: retryTx?.id };
               showResult({ type:'success', action:'borrowed', data: result, time: new Date() });
@@ -1737,6 +1772,7 @@ export default function BookManagement({ initialTab }) {
           id:              existingBorrow.id,
           student_id:      existingBorrow.student_id,
           student_name:    existingBorrow.student_name, 
+          student_number:  existingBorrow.student_number || readableStudentNo || null,
           student_program: student.program || existingBorrow.student_program || '',
           book_id:         bookId,
           book_title:      bookTitle,
@@ -1852,7 +1888,7 @@ export default function BookManagement({ initialTab }) {
 
   const filtered = transactions.filter(tx => {
     const q = search.toLowerCase();
-    const studentNoEmbedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
+    const studentNoEmbedded = String(tx.student_number || '').trim() || String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
     const matchQ = !q || [tx.student_name, studentNoEmbedded, tx.book_title, tx.copy_label].some(v => v?.toLowerCase().includes(q));
     const matchS = statusFilter === 'all' || tx.status?.toLowerCase() === statusFilter.toLowerCase();
     return matchQ && matchS;
@@ -1866,7 +1902,7 @@ export default function BookManagement({ initialTab }) {
     const studentNo = (() => {
       const embedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
       const fromId = tx.student_id && !UUID_RE.test(String(tx.student_id).trim()) ? String(tx.student_id).trim() : null;
-      return embedded || fromId || '';
+      return String(tx.student_number || '').trim() || embedded || fromId || '';
     })();
     return {
       'Student No.':  studentNo,

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import { supabaseAdmin } from './lib/supabaseAdmin.js';
-import { sendOtpEmail, sendLoginConfirmationEmail } from './lib/mailer.js';
+import { sendOtpEmail, sendLoginConfirmationEmail, sendVerificationEmail } from './lib/mailer.js';
 import { locateIp, describeDevice, formatLocation } from './lib/geo.js';
 import {
   generateOtp, hashOtp, generateDeviceToken, hashDeviceToken, safeEqual,
@@ -593,6 +593,222 @@ app.post('/api/mfa/sessions/revoke', requireUser, async (req, res) => {
   broadcastForceLogout(req.authUser.id, row.session_id);
 
   res.json({ revoked: true });
+});
+
+// ===========================================================================
+// EMAIL VERIFICATION AT SIGN-UP
+//
+// Flow: the signup form POSTs to /api/auth/signup -> we create the auth user
+// as UNCONFIRMED (Supabase sends nothing itself) -> we email a one-time link
+// through Brevo -> the link hits GET /verify-email, which marks the user's
+// email as confirmed. Until then Supabase refuses password sign-in with
+// "Email not confirmed" (requires Auth -> Providers -> Email -> "Confirm
+// email" to stay ON in the Supabase dashboard).
+// ===========================================================================
+const PSU_DOMAIN        = '@pampangastateu.edu.ph';
+const VERIFY_TTL_MS     = 24 * 60 * 60 * 1000; // link valid for 24 hours
+const VERIFY_RESEND_MS  = 60 * 1000;           // min gap between verification emails
+
+const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+/**
+ * Creates a fresh verification token for the user and emails it.
+ * Returns { sent: true } or { sent: false, throttled: true } when a link was
+ * already sent less than VERIFY_RESEND_MS ago. The throttle lives in the DB
+ * (not an in-memory Map) so it also works on serverless/Vercel.
+ * Throws if the email itself fails to send.
+ */
+async function issueVerificationEmail(req, { userId, email, name }) {
+  const { data: last } = await supabaseAdmin
+    .from('email_verifications')
+    .select('created_at')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (last && Date.now() - new Date(last.created_at).getTime() < VERIFY_RESEND_MS) {
+    return { sent: false, throttled: true };
+  }
+
+  const token = generateConfirmToken();
+
+  // Only the newest link should work.
+  await supabaseAdmin
+    .from('email_verifications')
+    .update({ status: 'expired' })
+    .eq('user_id', userId)
+    .eq('status', 'pending');
+
+  const { error: insErr } = await supabaseAdmin.from('email_verifications').insert({
+    user_id: userId,
+    token_hash: hashConfirmToken(token),
+    expires_at: new Date(Date.now() + VERIFY_TTL_MS).toISOString(),
+  });
+  if (insErr) throw new Error(insErr.message);
+
+  const base = `${req.protocol}://${req.get('host')}`; // THIS server's own origin
+  await sendVerificationEmail({ to: email, name, verifyUrl: `${base}/verify-email?token=${token}` });
+  return { sent: true };
+}
+
+// POST /api/auth/signup — public. Replaces the browser-side supabase.auth.signUp().
+app.post('/api/auth/signup', async (req, res) => {
+  const b = req.body || {};
+  const email         = String(b.email || '').trim().toLowerCase();
+  const password      = String(b.password || '');
+  const firstName     = String(b.firstName || '').trim();
+  const lastName      = String(b.lastName || '').trim();
+  const middleName    = String(b.middleName || '').trim();
+  const username      = String(b.username || '').trim();
+  const studentNumber = String(b.studentNumber || '').trim();
+
+  // Same rules as the form — never trust the browser alone.
+  if (!firstName || !lastName || !username) return res.status(400).json({ error: 'Please fill in all required fields.' });
+  if (!/^\d{10,}$/.test(studentNumber))     return res.status(400).json({ error: 'Invalid student number.' });
+  if (!email.endsWith(PSU_DOMAIN) || email !== `${studentNumber}${PSU_DOMAIN}`) {
+    return res.status(400).json({ error: `Email must be your Student Number followed by ${PSU_DOMAIN}.` });
+  }
+  if (password.length < 8 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
+    return res.status(400).json({ error: 'Password must be 8+ characters with an uppercase letter, a lowercase letter and a number.' });
+  }
+
+  // Already registered but never verified? Just send a fresh link instead of
+  // failing — that person is stuck otherwise.
+  const { data: existing } = await supabaseAdmin
+    .from('profiles').select('id, first_name').eq('email', email).maybeSingle();
+  if (existing) {
+    const { data: au } = await supabaseAdmin.auth.admin.getUserById(existing.id);
+    if (au?.user && !au.user.email_confirmed_at) {
+      try {
+        const r = await issueVerificationEmail(req, { userId: existing.id, email, name: existing.first_name });
+        return res.json({ needsVerification: true, resent: true, throttled: !!r.throttled });
+      } catch (err) {
+        console.error('[auth/signup] resend failed:', err.message);
+        return res.status(502).json({ error: 'Could not send the confirmation email. Please try again shortly.' });
+      }
+    }
+    return res.status(409).json({ error: 'This email is already registered. Please log in instead.' });
+  }
+
+  const { data: taken } = await supabaseAdmin
+    .from('profiles').select('id').eq('student_number', studentNumber).maybeSingle();
+  if (taken) return res.status(409).json({ error: 'This Student Number is already registered to another account.' });
+
+  // email_confirm:false => created UNCONFIRMED, and Supabase sends no email.
+  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: false,
+    user_metadata: {
+      first_name: firstName, last_name: lastName, middle_name: middleName,
+      username, student_number: studentNumber, role: 'student',
+      campus_id: b.campusId || null, college_id: b.collegeId || null,
+      program_id: b.programId || null, major_id: b.majorId || null,
+    },
+  });
+  if (createErr || !created?.user) {
+    const msg = createErr?.message || 'Could not create the account.';
+    const dup = /already|registered|exists/i.test(msg);
+    return res.status(dup ? 409 : 500).json({ error: dup ? 'This email is already registered. Please log in instead.' : msg });
+  }
+
+  const user = created.user;
+  const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
+    id: user.id,
+    first_name: firstName, last_name: lastName, middle_name: middleName,
+    username, email, student_number: studentNumber,
+    campus_id: b.campusId || null, college_id: b.collegeId || null,
+    program_id: b.programId || null, major_id: b.majorId || null,
+    role: 'student',
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (profileErr) console.error('[auth/signup] profiles upsert error:', profileErr.message);
+
+  try {
+    await issueVerificationEmail(req, { userId: user.id, email, name: firstName });
+  } catch (err) {
+    // Account exists; the person can hit "Resend" on the next screen.
+    console.error('[auth/signup] verification email failed:', err.message);
+    return res.status(201).json({ needsVerification: true, emailSent: false });
+  }
+  res.status(201).json({ needsVerification: true, emailSent: true });
+});
+
+// POST /api/auth/resend-verification { email } — public. Always answers the
+// same way whether or not the address exists, so it can't be used to probe
+// which emails are registered.
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Missing email.' });
+
+  const { data: profile } = await supabaseAdmin
+    .from('profiles').select('id, first_name').eq('email', email).maybeSingle();
+  if (profile) {
+    const { data: au } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+    if (au?.user && !au.user.email_confirmed_at) {
+      try {
+        const r = await issueVerificationEmail(req, { userId: profile.id, email, name: profile.first_name });
+        if (r.throttled) return res.status(429).json({ error: 'Please wait a minute before requesting another email.' });
+      } catch (err) {
+        console.error('[auth/resend-verification] failed:', err.message);
+        return res.status(502).json({ error: 'Could not send the email. Please try again shortly.' });
+      }
+    }
+  }
+  res.json({ sent: true });
+});
+
+// Small self-contained result page for the emailed link (no bundler needed).
+function verifyPage({ tone, title, body, href, label }) {
+  const color = tone === 'ok' ? '#2E8B57' : '#9A5B00';
+  const bg    = tone === 'ok' ? '#E1F0E4' : '#FFF0D6';
+  const icon  = tone === 'ok' ? '&#10003;' : '!';
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LibraScan \u2014 Email Verification</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Playfair+Display:wght@600&display=swap" rel="stylesheet">
+<style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(160deg,#FFFCF5,#F7EEDD);font-family:Inter,system-ui,Arial,sans-serif;color:#4A1A1E}
+.c{width:100%;max-width:460px;background:linear-gradient(180deg,#FFFDF8,#FBF5EA);border:1px solid #EADFC8;border-radius:28px;box-shadow:0 18px 50px rgba(90,40,20,.14);overflow:hidden}
+.h{padding:24px 30px;background:linear-gradient(120deg,#7E1C26,#561017);border-bottom:2px solid #C9A84C;font:600 15px 'Playfair Display',Georgia,serif;letter-spacing:.24em;color:#F3E6CF}
+.b{padding:30px;text-align:center}.i{width:84px;height:84px;margin:0 auto 16px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:${bg};color:${color};font-size:40px;font-weight:700}
+h1{font:600 28px/1.2 'Playfair Display',Georgia,serif;margin:0 0 12px}p{font-size:15.5px;line-height:1.6;color:#6B6460;margin:0}
+a.btn{display:block;margin-top:24px;padding:16px;border-radius:14px;background:linear-gradient(180deg,#8A1E28,#651119);color:#fff;font-weight:600;text-decoration:none}
+.f{margin-top:24px;font-size:12px;color:#8C837C}</style></head><body><main class="c"><div class="h">LIBRASCAN</div><div class="b">
+<div class="i">${icon}</div><h1>${escapeHtml(title)}</h1><p>${escapeHtml(body)}</p>
+${href ? `<a class="btn" href="${escapeHtml(href)}">${escapeHtml(label)}</a>` : ''}
+<p class="f">Part of LibraScan\u2019s account security. We will never ask for your password here.</p></div></main></body></html>`;
+}
+
+// GET /verify-email?token=... — the link inside the confirmation email.
+app.get('/verify-email', async (req, res) => {
+  const loginUrl = `${allowedOrigins[0]}/login`;
+  const token = String(req.query.token || '');
+  res.set('Content-Type', 'text/html');
+  res.set('Cache-Control', 'no-store');
+
+  if (!token) return res.status(400).send(verifyPage({ tone: 'warn', title: 'Link not valid', body: 'This confirmation link is missing its token.', href: loginUrl, label: 'Back to login' }));
+
+  const { data: row } = await supabaseAdmin
+    .from('email_verifications').select('*').eq('token_hash', hashConfirmToken(token)).maybeSingle();
+
+  if (!row) return res.status(400).send(verifyPage({ tone: 'warn', title: 'Link not valid', body: 'We couldn\u2019t match this link to an account. It may have been replaced by a newer email.', href: loginUrl, label: 'Back to login' }));
+
+  // Clicking twice (or an email scanner pre-opening the link) is harmless.
+  if (row.status === 'verified') {
+    return res.send(verifyPage({ tone: 'ok', title: 'Email already confirmed', body: 'Your account is active. You can log in now.', href: loginUrl, label: 'Go to login' }));
+  }
+  if (row.status !== 'pending' || new Date(row.expires_at).getTime() < Date.now()) {
+    await supabaseAdmin.from('email_verifications').update({ status: 'expired' }).eq('id', row.id).eq('status', 'pending');
+    return res.status(410).send(verifyPage({ tone: 'warn', title: 'This link has expired', body: 'Register again with the same Student Number and we will send you a fresh confirmation email.', href: loginUrl, label: 'Back to login' }));
+  }
+
+  const { error: confirmErr } = await supabaseAdmin.auth.admin.updateUserById(row.user_id, { email_confirm: true });
+  if (confirmErr) {
+    console.error('[verify-email] confirm failed:', confirmErr.message);
+    return res.status(500).send(verifyPage({ tone: 'warn', title: 'Something went wrong', body: 'We couldn\u2019t confirm your email right now. Please try the link again in a moment.', href: loginUrl, label: 'Back to login' }));
+  }
+  await supabaseAdmin.from('email_verifications')
+    .update({ status: 'verified', verified_at: new Date().toISOString() }).eq('id', row.id);
+
+  res.send(verifyPage({ tone: 'ok', title: 'Email confirmed!', body: 'Thanks \u2014 your LibraScan account is now active. You can log in.', href: loginUrl, label: 'Go to login' }));
 });
 
 app.get('/health', (_req, res) => res.json({ ok: true }));

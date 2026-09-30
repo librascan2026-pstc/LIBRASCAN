@@ -3072,6 +3072,11 @@ export default function ReportsAnalytics() {
       // Merge: borrowings (Borrowed/Returned) + borrow_requests (pending/rejected)
       // borrow_requests that are 'approved' are already in borrowings, skip them
       // ──────────────────────────────────────────────────
+      // Older rows saved the ID inside student_name as "Name [Number]".
+      // Show the name only (the ID has its own column), and fall back to
+      // the embedded number if student_number itself is empty.
+      const stripEmbeddedNo = (n) => String(n||'').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+      const embeddedNoOf    = (n) => String(n||'').match(/\[([^\]]+)\]\s*$/)?.[1]?.trim() || '';
       const txFromBorrowings = (borrowings||[]).map(b=>{
         // Once a book is returned, the return is the most recent thing
         // that happened to this record — sort and display by that date
@@ -3079,8 +3084,8 @@ export default function ReportsAnalytics() {
         // Sep 12 and returned Sep 14 shows (and sorts) as Sep 14.
         const effectiveDate = b.returned_at || b.borrowed_at;
         return {
-          student_name:   b.student_name||'—',
-          student_number: b.student_number||'',
+          student_name:   stripEmbeddedNo(b.student_name)||'—',
+          student_number: b.student_number||embeddedNoOf(b.student_name)||'',
           book_title:     b.book_title||'—',
           genre:          getGenre(b.book_title),
           status:         b.returned_at ? 'Returned' : 'Borrowed',
@@ -3092,8 +3097,8 @@ export default function ReportsAnalytics() {
       const txFromRequests = (reqAll||[])
         .filter(r=>r.status==='pending'||r.status==='rejected')
         .map(r=>({
-          student_name:   r.student_name||'—',
-          student_number: r.student_number||'',
+          student_name:   stripEmbeddedNo(r.student_name)||'—',
+          student_number: r.student_number||embeddedNoOf(r.student_name)||'',
           book_title:     r.book_title||'—',
           genre:          getGenre(r.book_title),
           status:         r.status,

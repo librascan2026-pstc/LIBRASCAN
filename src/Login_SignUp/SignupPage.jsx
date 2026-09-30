@@ -4,6 +4,10 @@ import { supabase } from '../supabaseClient';
 import AuthLayout from './AuthLayout';
 
 const PSU_DOMAIN = '@pampangastateu.edu.ph';
+
+// Base URL of the LibraScan API server (the one running app.js). Use the SAME
+// value your src/utils/mfaClient.js already uses for its requests.
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const FONT_BODY  = "'Crimson Pro', Georgia, serif";
 const FONT_SANS  = "'Josefin Sans', sans-serif";
 
@@ -319,6 +323,9 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
   const [loading,     setLoad]    = useState(false);
   const [error,       setError]   = useState('');
   const [success,     setOk]      = useState(false);
+  const [resendIn,    setResendIn] = useState(0);   // seconds until "Resend" is allowed again
+  const [resendMsg,   setResendMsg] = useState('');
+  const [resending,   setResending] = useState(false);
 
   // ── Cascade state ──
   const [campuses,   setCampuses]   = useState([]);
@@ -478,65 +485,70 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
       return;
     }
 
-    // 1. Create auth user
-    const { data: sd, error: authErr } = await supabase.auth.signUp({
-      email: form.email.trim().toLowerCase(),
-      password: form.password,
-      options: {
-        data: {
-          first_name:     form.firstName.trim(),
-          last_name:      form.lastName.trim(),
-          middle_name:    form.middleName.trim(),
-          username:       form.username.trim(),
-          student_number: form.studentNumber.trim(),
-          role:           'student',
-          // Passed through so the handle_new_user() DB trigger can populate
-          // these FK columns on the profiles row it creates immediately on
-          // signup, instead of relying solely on the app-side upsert below
-          // (step 2) to fill them in a moment later. Keeps the row complete
-          // from the very first insert if any of these columns are NOT NULL.
-          campus_id:      selectedCampus || null,
-          college_id:     selectedCollege || null,
-          program_id:     selectedProgram || null,
-          major_id:       selectedMajor || null,
-        },
-        emailRedirectTo: `${window.location.origin}/`,
-      },
-    });
-
-    if (authErr) {
+    // Create the account on the server. It creates the user as UNCONFIRMED,
+    // saves the profile, and emails a confirmation link (see /api/auth/signup).
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/signup`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          firstName:     form.firstName.trim(),
+          lastName:      form.lastName.trim(),
+          middleName:    form.middleName.trim(),
+          username:      form.username.trim(),
+          studentNumber: form.studentNumber.trim(),
+          email:         form.email.trim().toLowerCase(),
+          password:      form.password,
+          campusId:      selectedCampus,
+          collegeId:     selectedCollege,
+          programId:     selectedProgram,
+          majorId:       selectedMajor || null,
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLoad(false);
+        setError(json.error || 'Could not create your account. Please try again.');
+        return;
+      }
+      if (json.emailSent === false) {
+        setResendMsg('We created your account but could not send the email. Tap "Resend" below.');
+      }
+    } catch {
       setLoad(false);
-      setError(authErr.message.toLowerCase().includes('already registered')
-        ? 'This email is already registered. Please log in instead.'
-        : authErr.message);
+      setError('Could not reach the server. Please check your connection and try again.');
       return;
     }
 
-    // 2. Upsert profile with all FK ids + legacy program text
-    if (sd?.user) {
-      const programName = programs.find(p => p.id === selectedProgram)?.name || '';
-      const { error: profileErr } = await supabase.from('profiles').upsert({
-        id:             sd.user.id,
-        first_name:     form.firstName.trim(),
-        last_name:      form.lastName.trim(),
-        middle_name:    form.middleName.trim(),
-        username:       form.username.trim(),
-        email:          form.email.trim().toLowerCase(),
-        student_number: form.studentNumber.trim(),
-        campus_id:      selectedCampus,
-        college_id:     selectedCollege,
-        program_id:     selectedProgram,
-        major_id:       selectedMajor || null,
-        
-        role:           'student',
-        updated_at:     new Date().toISOString(),
-      }, { onConflict: 'id' });
-
-      if (profileErr) console.error('[SignupPage] profiles upsert error:', profileErr.message);
-    }
-
     setLoad(false);
+    setResendIn(60);
     setOk(true);
+  };
+
+  // Countdown for the "Resend" button on the success screen.
+  useEffect(() => {
+    if (resendIn <= 0) return;
+    const t = setTimeout(() => setResendIn(v => v - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
+
+  const handleResend = async () => {
+    if (resendIn > 0 || resending) return;
+    setResending(true);
+    setResendMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email.trim().toLowerCase() }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) { setResendMsg('A new confirmation email is on its way.'); setResendIn(60); }
+      else setResendMsg(json.error || 'Could not resend the email.');
+    } catch {
+      setResendMsg('Could not reach the server. Please try again.');
+    }
+    setResending(false);
   };
 
   // ── Success screen ──
@@ -556,9 +568,17 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           </p>
           <div style={{ background: 'rgba(201,168,76,0.12)', border: '1px solid rgba(201,168,76,0.38)', borderRadius: 8, padding: '9px 14px', fontSize: 11.5, fontFamily: FONT_BODY, color: '#4a1a00', lineHeight: 1.65, maxWidth: 240, textAlign: 'left' }}>
             <strong>Next steps:</strong><br />
-            1. Open the email from PSU Library<br />
-            2. Click the confirmation link<br />
-            3. Return here and log in
+            1. Open the email from LibraScan<br />
+            2. Tap <strong>Confirm my email</strong><br />
+            3. Return here and log in<br />
+            <span style={{ fontSize: 10.5, opacity: 0.8 }}>Can&apos;t find it? Check your spam folder. The link expires in 24 hours.</span>
+          </div>
+          <div style={{ fontSize: 11.5, fontFamily: FONT_BODY, color: '#4a1a00', textAlign: 'center' }}>
+            Didn&apos;t get it?{' '}
+            {resendIn > 0
+              ? <span style={{ opacity: 0.7 }}>Resend in {resendIn}s</span>
+              : <LinkBtn onClick={handleResend} style={{ fontSize: 11.5 }}>{resending ? 'Sending…' : 'Resend email'}</LinkBtn>}
+            {resendMsg && <div style={{ marginTop: 4, fontStyle: 'italic', color: '#7a3820', maxWidth: 240 }}>{resendMsg}</div>}
           </div>
           <motion.button type="button" onClick={onGoLogin} whileTap={{ scale: 0.97 }}
             style={{ padding: '9px 32px', background: 'linear-gradient(135deg,#8B0000,#6B0000)', color: '#F5E4A8', border: 'none', borderRadius: 22, fontFamily: FONT_SANS, fontSize: 11, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', cursor: 'pointer', boxShadow: '0 4px 14px rgba(139,0,0,0.35)', marginTop: 4 }}>

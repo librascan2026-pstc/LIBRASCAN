@@ -1,12 +1,29 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 
-const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+// Mixed-case pools. Letters that look the same in both cases (c/C, s/S,
+// v/V, w/W, x/X, z/Z, k/K, m/M, o/O, p/P, u/U) only appear in UPPERCASE, and
+// look-alikes (I, l, 1, O, 0) are left out, so people never have to guess.
+const UPPER  = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const LOWER  = 'abdefghnqrty';
 const LENGTH = 6;
+
+// true  = "aBc" and "abc" are different (real CAPTCHA behaviour)
+// false = case is ignored when checking the answer
+const CASE_SENSITIVE = true;
+
+const FONT_SANS = "'Josefin Sans', sans-serif";
+// Font for the typed text, so upper/lower case is easy to tell apart.
+const FONT_CODE = "'Courier New', Courier, monospace";
 
 function generateCode() {
   let code = '';
-  for (let i = 0; i < LENGTH; i++) {
-    code += CHARS[Math.floor(Math.random() * CHARS.length)];
+  // Keep going until the code really has both a capital and a small letter.
+  while (!(/[a-z]/.test(code) && /[A-Z]/.test(code))) {
+    code = '';
+    for (let i = 0; i < LENGTH; i++) {
+      const pool = Math.random() < 0.45 ? LOWER : UPPER;
+      code += pool[Math.floor(Math.random() * pool.length)];
+    }
   }
   return code;
 }
@@ -49,13 +66,18 @@ function drawCaptcha(canvas, code) {
   }
 
   const charW = W / (LENGTH + 1);
-  const fonts = ["'Georgia', serif", "'Times New Roman', serif", "serif"];
+  const fonts = [
+    "'Courier New', monospace",
+    "'Trebuchet MS', sans-serif",
+    "Verdana, sans-serif",
+    "Georgia, serif",
+  ];
 
   for (let i = 0; i < code.length; i++) {
     const x = charW * (i + 0.8) + (Math.random() * 8 - 4);
     const y = H / 2 + (Math.random() * 10 - 5);
     const angle = (Math.random() * 0.5 - 0.25);
-    const size = 22 + Math.random() * 8;
+    const size = H * 0.44 + Math.random() * H * 0.14;
     const font = fonts[Math.floor(Math.random() * fonts.length)];
 
     ctx.save();
@@ -113,10 +135,11 @@ export default function AuthCaptcha({ onVerify, onReset }) {
   }, []);
 
   const handleChange = (e) => {
-    const val = e.target.value.toUpperCase().slice(0, LENGTH);
+    const val = e.target.value.slice(0, LENGTH);
     setInput(val);
     if (val.length === LENGTH) {
-      if (val === code) {
+      const match = CASE_SENSITIVE ? val === code : val.toLowerCase() === code.toLowerCase();
+      if (match) {
         setStatus('ok');
         onVerify?.(true);
       } else {
@@ -134,106 +157,139 @@ export default function AuthCaptcha({ onVerify, onReset }) {
     }
   };
 
-  const borderColor =
-    status === 'ok'    ? 'rgba(46,125,50,0.7)'  :
-    status === 'error' ? 'rgba(192,57,43,0.75)' :
-    'rgba(139,70,20,0.3)';
+  const [focused, setFocused] = useState(false);
 
-  const labelColor =
-    status === 'ok'    ? '#2e7d32' :
-    status === 'error' ? '#c0392b' :
-    '#5a3010';
+  // Verified stays neutral (no green) — only a wrong code turns red.
+  const borderColor =
+    status === 'error' ? 'rgba(192,57,43,0.75)' : 'rgba(139,70,20,0.28)';
+  const fieldBorder = status === 'idle' && focused ? '#8B0000' : borderColor;
+
+  const labelColor = status === 'error' ? '#c0392b' : '#5E1119';
 
   const labelText =
-    status === 'ok'    ? 'CAPTCHA Verified ✓' :
+    status === 'ok'    ? 'CAPTCHA Verified' :
     status === 'error' ? 'Incorrect — Try Again' :
     'Security Verification';
 
+  // Code image and input share the exact same width, border and radius.
+  // They now stretch to fill the whole card instead of a fixed 210px.
+  const FIELD_RADIUS = 9;
+
   return (
-    <div style={{ marginBottom: 12 }}>
+    <div
+      style={{
+        background: 'rgba(248,238,212,0.8)',
+        border: '1px solid rgba(201,168,76,0.4)',
+        borderRadius: 12,
+        padding: 14,
+        boxShadow: '0 2px 8px rgba(139,70,20,0.07)',
+        fontFamily: FONT_SANS,
+      }}
+    >
+      <style>{`
+        .lm-captcha-input::placeholder {
+          font-family: ${FONT_SANS}; font-size: 12px; font-weight: 400;
+          letter-spacing: 0.02em; color: #9a8466;
+        }
+      `}</style>
+
+      {/* Header row: status label on the left, "New code" on the right */}
       <div
         style={{
-          fontSize: 10.5,
-          fontWeight: 700,
-          color: labelColor,
-          marginBottom: 6,
-          letterSpacing: '0.05em',
-          textTransform: 'uppercase',
-          transition: 'color 0.2s',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          gap: 10, marginBottom: 10,
         }}
       >
-        {labelText}
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 }}>
-        <canvas
-          ref={canvasRef}
-          width={210}
-          height={56}
+        <div
           style={{
-            borderRadius: 10,
-            border: `1.5px solid ${borderColor}`,
-            display: 'block',
-            userSelect: 'none',
-            background: '#fdf6e3',
-            transition: 'border-color 0.2s',
-            flexShrink: 0,
+            fontSize: 12.5,
+            fontWeight: 700,
+            color: labelColor,
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            transition: 'color 0.2s',
           }}
-        />
+        >
+          {labelText}
+        </div>
+
         <button
           type="button"
           onClick={refresh}
-          title="Refresh CAPTCHA"
+          title="Get a new code"
           style={{
-            background: 'rgba(139,0,0,0.08)',
-            border: '1.5px solid rgba(139,0,0,0.22)',
-            borderRadius: 10,
-            padding: '8px 10px',
-            cursor: 'pointer',
-            color: '#8B0000',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'background 0.15s',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: 'none', border: 'none', padding: '2px 0',
+            color: '#8B0000', cursor: 'pointer',
+            fontFamily: FONT_SANS, fontSize: 12.5, fontWeight: 700,
+            letterSpacing: '0.04em', whiteSpace: 'nowrap',
           }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(139,0,0,0.15)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(139,0,0,0.08)')}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
           </svg>
+          New code
         </button>
       </div>
 
+      <canvas
+        ref={canvasRef}
+        width={420}
+        height={64}
+        style={{
+          display: 'block',
+          margin: '0 0 10px',
+          width: '100%',
+          height: 'auto',
+          borderRadius: FIELD_RADIUS,
+          border: `1.25px solid ${fieldBorder}`,
+          boxSizing: 'border-box',
+          userSelect: 'none',
+          background: '#fdf6e3',
+          transition: 'border-color 0.2s',
+        }}
+      />
+
       <input
+        className="lm-captcha-input"
         type="text"
         value={input}
         onChange={handleChange}
-        placeholder={`Enter the ${LENGTH} characters above`}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={`Type the ${LENGTH} characters`}
         maxLength={LENGTH}
         disabled={status === 'ok'}
+        autoComplete="off"
+        autoCapitalize="off"
+        autoCorrect="off"
+        spellCheck={false}
         style={{
+          display: 'block',
+          margin: 0,
           width: '100%',
-          padding: '8px 14px',
-          borderRadius: 22,
-          border: `1.5px solid ${borderColor}`,
-          background: status === 'ok' ? 'rgba(46,125,50,0.06)' : 'rgba(255,250,238,0.9)',
-          color: '#3d1f00',
-          fontSize: 13,
-          fontFamily: "'Crimson Text', Georgia, serif",
-          letterSpacing: '0.18em',
+          height: 44,
+          padding: '0 14px',
+          borderRadius: FIELD_RADIUS,
+          border: `1.25px solid ${fieldBorder}`,
+          background: 'rgba(250,242,218,0.9)',
+          boxShadow: status === 'idle' && focused ? '0 0 0 2px rgba(139,0,0,0.10)' : 'none',
+          color: '#5E1119',
+          fontSize: 17,
+          fontWeight: 700,
+          fontFamily: FONT_CODE,
+          letterSpacing: '0.3em',
+          textAlign: 'center',
           outline: 'none',
           boxSizing: 'border-box',
-          textTransform: "'uppercase', lowercase'",
-          transition: 'border-color 0.2s, background 0.2s',
+          transition: 'border-color 0.2s, box-shadow 0.2s',
         }}
       />
 
       {status === 'error' && (
-        <p style={{ margin: '3px 0 0 6px', fontSize: 10, color: '#c0392b', fontStyle: 'italic' }}>
-          Characters didn't match — a new puzzle has been generated.
+        <p style={{ margin: '8px 0 0', fontFamily: FONT_SANS, fontSize: 11, color: '#c0392b', textAlign: 'center' }}>
+          Characters didn&rsquo;t match — a new puzzle has been generated.
         </p>
       )}
     </div>

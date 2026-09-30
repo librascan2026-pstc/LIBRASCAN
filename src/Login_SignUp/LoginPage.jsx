@@ -84,6 +84,8 @@ function PrimaryButton({ loading, children, onClick, disabled, style = {} }) {
   );
 }
 
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
 function LinkBtn({ onClick, children, style = {} }) {
   return (
     <button
@@ -139,26 +141,108 @@ function ErrorBox({ message }) {
   );
 }
 
+// Six separate digit boxes driven by ONE real (invisible) input laid over
+// them, so typing, backspace, paste and the browser's "one-time-code"
+// autofill all still work exactly like a normal single input.
 function OtpInput({ value, onChange, disabled, error }) {
+  const [focused, setFocused] = useState(false);
+  const inputRef = useRef(null);
+  const activeIdx = Math.min(value.length, 5);
+
+  useEffect(() => { inputRef.current?.focus(); }, []);
+
   return (
-    <input
-      type="text"
-      inputMode="numeric"
-      autoComplete="one-time-code"
-      maxLength={6}
-      value={value}
-      disabled={disabled}
-      onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
-      placeholder="······"
+    <motion.div
+      animate={error ? { x: [0, -7, 7, -5, 5, 0] } : { x: 0 }}
+      transition={{ duration: 0.4 }}
+      style={{ position: 'relative' }}
+    >
+      <style>{'@keyframes lm-caret { 0%,100% { opacity: 1; } 50% { opacity: 0; } }'}</style>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 7 }}>
+        {Array.from({ length: 6 }).map((_, i) => {
+          const digit  = value[i] || '';
+          const active = focused && !disabled && i === activeIdx;
+          const border = error
+            ? '#C0392B'
+            : active ? '#8B0000'
+            : digit  ? 'rgba(139,0,0,0.45)'
+            : 'rgba(139,70,20,0.28)';
+          return (
+            <div
+              key={i}
+              style={{
+                height: 46, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                borderRadius: 9, boxSizing: 'border-box',
+                border: `1.25px solid ${border}`,
+                background: disabled
+                  ? 'rgba(230,215,190,0.5)'
+                  : digit ? 'rgba(250,242,218,0.95)' : 'rgba(246,234,204,0.8)',
+                boxShadow: active ? '0 0 0 2px rgba(139,0,0,0.10)' : '0 1px 2px rgba(90,40,0,0.06)',
+                fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 700, color: '#5E1119',
+                transition: 'border-color 0.15s, box-shadow 0.15s, background 0.15s',
+              }}
+            >
+              {digit || (active && (
+                <span style={{
+                  width: 2, height: 18, background: '#8B0000', borderRadius: 1,
+                  animation: 'lm-caret 1s steps(1) infinite',
+                }} />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        aria-label="6-digit verification code"
+        maxLength={6}
+        value={value}
+        disabled={disabled}
+        autoFocus
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={e => onChange(e.target.value.replace(/\D/g, '').slice(0, 6))}
+        style={{
+          position: 'absolute', inset: 0, width: '100%', height: '100%',
+          opacity: 0, cursor: disabled ? 'not-allowed' : 'text',
+          fontSize: 16, // >=16px stops iOS zooming in on focus
+          border: 'none', outline: 'none', background: 'transparent', caretColor: 'transparent',
+        }}
+      />
+    </motion.div>
+  );
+}
+
+// Small borderless "Resend" button with a live countdown. Disabled (and
+// greyed) while the cooldown is running; underlined when it can be clicked.
+function ResendPill({ seconds, onClick, idleLabel, outlined = false }) {
+  const waiting = seconds > 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={waiting}
       style={{
-        width: '100%', boxSizing: 'border-box', textAlign: 'center',
-        padding: '13px 0', fontSize: 26, letterSpacing: '0.5em',
-        fontFamily: FONT_SANS, fontWeight: 700, color: '#5a2800',
-        background: 'rgba(255,252,242,0.9)',
-        border: `1.5px solid ${error ? '#C0392B' : 'rgba(139,70,20,0.30)'}`,
-        borderRadius: 12, outline: 'none',
+        display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+        background: 'none', border: 'none', boxShadow: 'none',
+        padding: '4px 2px',
+        color: waiting ? '#a07a6c' : outlined ? '#5E1119' : '#8B0000',
+        fontFamily: FONT_BODY, fontSize: outlined ? 11.5 : 12, fontWeight: 700,
+        textDecoration: waiting ? 'none' : 'underline',
+        cursor: waiting ? 'not-allowed' : 'pointer',
+        transition: 'color 0.18s',
       }}
-    />
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="23 4 23 10 17 10" />
+        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+      </svg>
+      {waiting ? `Resend in ${seconds}s` : idleLabel}
+    </button>
   );
 }
 
@@ -216,6 +300,8 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
   const [rememberMe,  setRememberMe]  = useState(false);
   const [loading,     setLoading]     = useState(false);
   const [error,       setError]       = useState('');
+  const [unverified,  setUnverified]  = useState(null);   // email awaiting confirmation
+  const [resendNote,  setResendNote]  = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [pendingUser, setPendingUser] = useState(null);
   const [captchaOk,   setCaptchaOk]  = useState(false);
@@ -409,6 +495,7 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     setLoading(false);
 
     if (authErr) {
+      if (/not confirmed/i.test(authErr.message)) setUnverified(emailNorm);
       if (auto) {
         setAutoUser(null);
         setPassword('');
@@ -417,11 +504,24 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
         setError(
           authErr.message === 'Invalid login credentials'
             ? 'Incorrect email or password. Please try again.'
-            : authErr.message
+            : /not confirmed/i.test(authErr.message)
+              ? 'Please confirm your email first. Check your inbox (and spam folder) for the LibraScan confirmation link.'
+              : authErr.message
         );
       }
       return;
     }
+
+    // Hard gate: never let an account past this point until its email is
+    // confirmed — even if Supabase's "Confirm email" setting were switched off.
+    if (!data?.user?.email_confirmed_at) {
+      await signOut();
+      setUnverified(emailNorm);
+      setAutoUser(null);
+      setError('Please confirm your email first. Check your inbox (and spam folder) for the LibraScan confirmation link.');
+      return;
+    }
+    setUnverified(null);
 
     // "Remember me" is the single switch for: saved email, browser-saved
     // password, and skipping the emailed code on this device.
@@ -455,6 +555,22 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     setScreen('captcha');
   };
   autoLoginRef.current = doLogin;
+
+  const resendVerification = async () => {
+    if (!unverified) return;
+    setResendNote('Sending…');
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: unverified }),
+      });
+      const j = await res.json().catch(() => ({}));
+      setResendNote(res.ok ? 'A new confirmation email is on its way.' : (j.error || 'Could not resend the email.'));
+    } catch {
+      setResendNote('Could not reach the server. Please try again.');
+    }
+  };
 
   const handleSubmit = async (ev) => {
     ev?.preventDefault();
@@ -586,8 +702,8 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     return () => window.removeEventListener('keydown', handler);
   }, [screen, otpValue, otpBusy]);
 
-  const title    = screen === 'captcha' ? 'Verification'
-                 : screen === 'otp'     ? 'Check Your Email'
+  const title    = screen === 'captcha' ? '' // rendered left-aligned inside the pane below
+                 : screen === 'otp'     ? '' // rendered left-aligned inside the pane below
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'Sign-In Blocked'
                    : confirmStatus === 'expired' ? 'Link Expired'
@@ -598,8 +714,8 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                    : ''
                    )
                  : 'Welcome Back';
-  const subtitle = screen === 'captcha' ? 'Complete the security check to proceed'
-                 : screen === 'otp'     ? 'Enter the 6-digit code we just sent you'
+  const subtitle = screen === 'captcha' ? '' // same — description lives inside the pane
+                 : screen === 'otp'     ? '' // same — description lives inside the pane
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'We stopped that sign-in'
                    : confirmStatus === 'expired' ? 'Request a new link below'
@@ -682,6 +798,12 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
 
             <AnimatePresence>
               {error && <ErrorBox message={error} />}
+              {unverified && (
+                <div style={{ textAlign: 'center', marginTop: 6, fontSize: 12 }}>
+                  <LinkBtn onClick={resendVerification} style={{ fontSize: 12 }}>Resend confirmation email</LinkBtn>
+                  {resendNote && <div style={{ marginTop: 3, fontStyle: 'italic', color: '#7a3820' }}>{resendNote}</div>}
+                </div>
+              )}
             </AnimatePresence>
 
             <PrimaryButton loading={loading}>Sign In</PrimaryButton>
@@ -705,50 +827,46 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -14 }}
             transition={{ duration: 0.2 }}
-            style={{ display: 'flex', flexDirection: 'column' }}
+            style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}
           >
-            <div style={{
-              background: 'rgba(201,168,76,0.12)',
-              border: '1px solid rgba(201,168,76,0.38)',
-              borderRadius: 10, padding: '10px 13px',
-              fontSize: 12.5, fontFamily: FONT_BODY, color: '#5a3010',
-              marginBottom: 14, lineHeight: 1.6,
-              display: 'flex', gap: 8, alignItems: 'flex-start',
+            <h2 style={{
+              margin: '0 0 6px', fontFamily: FONT_SANS,
+              fontSize: 20, lineHeight: 1.2, letterSpacing: '0.02em',
+              fontWeight: 700, color: '#5E1119', textAlign: 'center',
             }}>
-              <svg
-                width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="#8B4513" strokeWidth="2"
-                style={{ flexShrink: 0, marginTop: 2 }}
-              >
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-              <div>
-                Enter the <strong style={{ color: '#8B0000' }}>6 characters</strong> shown in the image to complete sign in.
-                {captchaOk && (
-                  <span style={{ color: '#2e7d32', fontWeight: 600, marginLeft: 6 }}>
-                    ✓ Press Enter or click Submit.
-                  </span>
-                )}
-              </div>
-            </div>
+              Verification
+            </h2>
+
+            <p style={{
+              margin: '0 0 14px', fontFamily: FONT_SANS, fontSize: 12.5,
+              lineHeight: 1.6, color: '#6b5236', textAlign: 'center',
+            }}>
+              Enter the <strong style={{ color: '#8B0000' }}>6 characters</strong> shown
+              in the image to complete sign in.
+            </p>
 
             <AuthCaptcha
               onVerify={ok => setCaptchaOk(ok)}
               onReset={() => setCaptchaOk(false)}
             />
 
+
+
             <PrimaryButton
               onClick={handleCaptchaSubmit}
               disabled={!captchaOk || mfaChecking}
-              style={{ marginTop: 14 }}
+              style={{ marginTop: 14, color: '#fff', padding: '10px 0' }}
             >
               {mfaChecking ? 'Checking…' : 'Submit'}
             </PrimaryButton>
 
-            <div style={{ textAlign: 'center', marginTop: 14 }}>
-              <BackToLoginBtn onClick={() => { setScreen('login'); setCaptchaOk(false); }} />
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <LinkBtn
+                onClick={() => { setScreen('login'); setCaptchaOk(false); }}
+                style={{ fontFamily: FONT_SANS, fontSize: 11.5, textDecoration: 'none', fontWeight: 700, color: '#5E1119' }}
+              >
+                Back to Login
+              </LinkBtn>
             </div>
           </motion.div>
         )}
@@ -760,23 +878,78 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             animate={{ opacity: 1, x: 0 }}
             exit={{ opacity: 0, x: -14 }}
             transition={{ duration: 0.2 }}
-            style={{ display: 'flex', flexDirection: 'column' }}
+            style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}
           >
-            <div style={{
-              background: 'rgba(201,168,76,0.12)',
-              border: '1px solid rgba(201,168,76,0.38)',
-              borderRadius: 10, padding: '10px 13px',
-              fontSize: 12.5, fontFamily: FONT_BODY, color: '#5a3010',
-              marginBottom: 14, lineHeight: 1.6,
+            <h2 style={{
+              margin: '0 0 8px', fontFamily: FONT_DISPLAY,
+              fontSize: 'clamp(22px, 3vw, 27px)', lineHeight: 1.15,
+              fontWeight: 700, color: '#5E1119', textAlign: 'left',
             }}>
-              This account has two-factor authentication on. We emailed a 6-digit
-              code to <strong>{pendingUser?.email}</strong> — it expires in 5 minutes.
-              {otpResent && (
-                <span style={{ color: '#2e7d32', fontWeight: 600, display: 'block', marginTop: 4 }}>
-                  ✓ A new code was sent.
-                </span>
-              )}
+              Check Your Email
+            </h2>
+
+            <p style={{
+              margin: '0 0 14px', fontFamily: FONT_BODY, fontSize: 12.5,
+              lineHeight: 1.55, color: '#5a4326',
+            }}>
+              We&rsquo;ve sent a 6-digit verification code to your email address.
+              Please enter the code below to continue.
+            </p>
+
+            {/* Where the code went */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              background: 'rgba(248,238,212,0.8)',
+              border: '1px solid rgba(201,168,76,0.4)',
+              borderRadius: 12, padding: '10px 14px', marginBottom: 16,
+              boxShadow: '0 3px 12px rgba(139,70,20,0.10)',
+            }}>
+              <span style={{
+                width: 38, height: 38, borderRadius: '50%', flexShrink: 0,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'rgba(139,0,0,0.11)', color: '#7A1A24',
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="5" width="18" height="14" rx="2" />
+                  <path d="M3 7l9 6 9-6" />
+                </svg>
+              </span>
+
+              <span style={{ width: 1, alignSelf: 'stretch', background: 'rgba(139,70,20,0.22)', flexShrink: 0 }} />
+
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: FONT_SANS, fontSize: 8.5, fontWeight: 700,
+                  letterSpacing: '0.14em', textTransform: 'uppercase', color: '#8a7250',
+                }}>
+                  Email sent
+                </div>
+                <div style={{
+                  fontFamily: FONT_SANS, fontSize: 12.5, fontWeight: 700,
+                  color: '#5E1119', wordBreak: 'break-all', margin: '1px 0 2px',
+                }}>
+                  {pendingUser?.email}
+                </div>
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  fontFamily: FONT_BODY, fontSize: 11, color: '#8a7250',
+                }}>
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+                  </svg>
+                  Expires in 5 minutes
+                </div>
+              </div>
             </div>
+
+            <label style={{
+              display: 'block', marginBottom: 7,
+              fontFamily: FONT_SANS, fontSize: 9.5, fontWeight: 700,
+              letterSpacing: '0.14em', textTransform: 'uppercase',
+              color: otpError ? '#b03020' : '#5E1119',
+            }}>
+              Verification code
+            </label>
 
             <OtpInput value={otpValue} onChange={setOtpValue} disabled={otpBusy} error={!!otpError} />
 
@@ -784,39 +957,73 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
               {otpError && <div style={{ marginTop: 10 }}><ErrorBox message={otpError} /></div>}
             </AnimatePresence>
 
-            <p style={{
-              margin: '14px 0 0', fontSize: 12.5, lineHeight: 1.5,
-              fontFamily: FONT_BODY, color: '#7a4020',
-            }}>
-              {rememberMe
-                ? 'Remember me is on — this device won\u2019t ask for a code again for 30 days.'
-                : 'Want to skip this step on this device? Go back and tick \u201CRemember me\u201D.'}
-            </p>
-
             <PrimaryButton
               onClick={handleOtpSubmit}
               disabled={otpValue.length !== 6}
               loading={otpBusy}
-              style={{ marginTop: 14 }}
+              style={{ marginTop: 14, color: '#fff', padding: '10px 0' }}
             >
               Verify &amp; Sign In
             </PrimaryButton>
 
             <div style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              marginTop: 16,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+              marginTop: 12, fontFamily: FONT_BODY, fontSize: 12, color: '#6b5236',
             }}>
-              <BackToLoginBtn onClick={() => {
-                setScreen('login'); setCaptchaOk(false); setOtpValue(''); setOtpError('');
-              }} />
-              <LinkBtn onClick={handleResendOtp} style={{ fontSize: 12, opacity: resendIn > 0 ? 0.5 : 1 }}>
-                {resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend code'}
-              </LinkBtn>
+              <span>Didn&rsquo;t get the code?</span>
+              <ResendPill seconds={resendIn} onClick={handleResendOtp} idleLabel="Resend code" outlined />
             </div>
 
+            {otpResent && (
+              <div style={{
+                color: '#2e7d32', fontWeight: 600, fontFamily: FONT_BODY, fontSize: 12.5,
+                textAlign: 'center', marginTop: 8,
+              }}>
+                ✓ A new code was sent.
+              </div>
+            )}
+
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0 10px',
+              fontFamily: FONT_SANS, fontSize: 9.5, fontWeight: 700,
+              letterSpacing: '0.16em', textTransform: 'uppercase', color: '#8a7250',
+            }}>
+              <span style={{ flex: 1, height: 1, background: 'rgba(139,70,20,0.22)' }} />
+              or
+              <span style={{ flex: 1, height: 1, background: 'rgba(139,70,20,0.22)' }} />
+            </div>
+
+            <button
+              type="button"
+              onClick={startEmailConfirmation}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+                width: '100%', padding: '9px 0',
+                background: 'rgba(245,232,200,0.8)',
+                border: '1.25px solid rgba(122,26,36,0.4)', borderRadius: 22,
+                color: '#5E1119', cursor: 'pointer',
+                fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 700,
+                boxShadow: '0 1px 4px rgba(90,40,0,0.08)',
+                transition: 'background 0.18s, border-color 0.18s',
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(139,0,0,0.06)'; e.currentTarget.style.borderColor = 'rgba(122,26,36,0.6)'; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(245,232,200,0.8)'; e.currentTarget.style.borderColor = 'rgba(122,26,36,0.4)'; }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M3 7l9 6 9-6" />
+              </svg>
+              Confirm by email instead
+            </button>
+
             <div style={{ textAlign: 'center', marginTop: 12 }}>
-              <LinkBtn onClick={startEmailConfirmation} style={{ fontSize: 12 }}>
-                Or confirm by email instead
+              <LinkBtn
+                onClick={() => {
+                  setScreen('login'); setCaptchaOk(false); setOtpValue(''); setOtpError('');
+                }}
+                style={{ fontSize: 12, textDecoration: 'none', fontWeight: 600, color: '#5E1119' }}
+              >
+                Back to Login
               </LinkBtn>
             </div>
           </motion.div>
@@ -842,21 +1049,24 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                 </p>
 
                 <h2 style={{
-                  margin: '0 0 6px', fontFamily: FONT_DISPLAY, fontSize: 24,
+                  margin: '0 0 8px', fontFamily: FONT_DISPLAY, fontSize: 24,
                   fontWeight: 700, color: '#4a1200', textAlign: 'left',
                 }}>
                   Check your emails
                 </h2>
 
                 <p style={{
-                  margin: '0 0 14px', fontSize: 12.5, fontWeight: 700,
-                  fontFamily: FONT_BODY, color: '#8B0000', textAlign: 'left',
+                  margin: '0 0 10px', fontSize: 12.5, fontFamily: FONT_BODY,
+                  color: '#5a4326', textAlign: 'left', lineHeight: 1.7,
                 }}>
-                  We sent a confirmation to your email {maskEmail(pendingUser?.email)}
+                  We sent a confirmation to your email{' '}
+                  <strong style={{ color: '#8B0000', wordBreak: 'break-all' }}>
+                    {maskEmail(pendingUser?.email)}
+                  </strong>
                 </p>
 
                 <p style={{
-                  margin: '0 0 4px', fontSize: 13, lineHeight: 1.6,
+                  margin: '0 0 10px', fontSize: 13, lineHeight: 1.6,
                   fontFamily: FONT_BODY, color: '#5a4326', textAlign: 'left',
                 }}>
                   Check your emails there and approve the login to continue
@@ -867,52 +1077,66 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                   alt="Illustration of confirming a sign-in from an email"
                   style={{
                     width: '100%', height: 'auto', display: 'block',
-                    borderRadius: 14, marginBottom: 16,
+                    borderRadius: 14, marginBottom: 14,
+                    border: '1.5px solid rgba(201,168,76,0.55)',
+                    boxShadow: '0 4px 14px rgba(90,40,0,0.12)',
                   }}
                 />
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-                  <span style={{
-                    width: 16, height: 16, borderRadius: '50%',
-                    border: '2.5px solid rgba(139,0,0,0.20)', borderTopColor: '#8B0000',
-                    animation: 'lm-spin 0.8s linear infinite', flexShrink: 0,
-                  }} />
-                  <span style={{ fontFamily: FONT_BODY, fontSize: 13.5, fontWeight: 700, color: '#5a2800' }}>
-                    Waiting for approval&hellip;
-                  </span>
-                </div>
-                <style>{'@keyframes lm-spin { to { transform: rotate(360deg); } }'}</style>
-
-                <p style={{
-                  margin: '4px 0 0', fontSize: 12, textAlign: 'left',
-                  fontFamily: FONT_BODY, color: '#8a7250',
+                {/* Status card: spinner + title + note on the left, resend on the right */}
+                <div style={{
+                  border: '1.25px solid rgba(139,0,0,0.2)',
+                  background: 'rgba(248,238,212,0.8)',
+                  borderRadius: 12, padding: '8px 12px',
+                  boxShadow: '0 2px 8px rgba(139,70,20,0.07)',
                 }}>
-                  It may take a few minutes to get the notification.
-                  {confirmResent && (
-                    <span style={{ color: '#2e7d32', fontWeight: 600, display: 'block', marginTop: 4 }}>
-                      ✓ A new confirmation email was sent.
-                    </span>
-                  )}
-                </p>
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-start',
+                    justifyContent: 'space-between', gap: 10,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, minWidth: 0 }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: '50%',
+                        border: '2.5px solid rgba(139,0,0,0.20)', borderTopColor: '#8B0000',
+                        animation: 'lm-spin 0.8s linear infinite', flexShrink: 0, marginTop: 1,
+                      }} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontFamily: FONT_BODY, fontSize: 13.5, fontWeight: 700, color: '#5a2800', lineHeight: 1.3 }}>
+                          Waiting for approval&hellip;
+                        </div>
+                        <div style={{
+                          marginTop: 1, fontSize: 11.5, lineHeight: 1.35, textAlign: 'left',
+                          fontFamily: FONT_BODY, color: '#8a7250',
+                        }}>
+                          It may take a few minutes to get the notification.
+                          {confirmResent && (
+                            <span style={{ color: '#2e7d32', fontWeight: 600, display: 'block', marginTop: 2 }}>
+                              ✓ A new confirmation email was sent.
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ height: 18, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                      <ResendPill
+                        seconds={confirmResendIn}
+                        onClick={handleResendConfirmation}
+                        idleLabel="Resend email"
+                      />
+                    </div>
+                  </div>
+                  <style>{'@keyframes lm-spin { to { transform: rotate(360deg); } }'}</style>
+                </div>
 
                 <AnimatePresence>
                   {confirmError && <div style={{ marginTop: 10 }}><ErrorBox message={confirmError} /></div>}
                 </AnimatePresence>
 
-                <PrimaryButton onClick={switchToOtp} style={{ marginTop: 16 }}>
+                <PrimaryButton onClick={switchToOtp} style={{ marginTop: 14 }}>
                   Try another way
                 </PrimaryButton>
 
-                <div style={{ textAlign: 'center', marginTop: 10 }}>
-                  <LinkBtn
-                    onClick={handleResendConfirmation}
-                    style={{ fontSize: 11.5, opacity: confirmResendIn > 0 ? 0.5 : 1 }}
-                  >
-                    {confirmResendIn > 0 ? `Resend in ${confirmResendIn}s` : 'Resend email'}
-                  </LinkBtn>
-                </div>
-
-                <div style={{ textAlign: 'center', marginTop: 10 }}>
+                <div style={{ textAlign: 'center', marginTop: 12 }}>
                   <LinkBtn
                     onClick={() => {
                       clearInterval(confirmPollRef.current);

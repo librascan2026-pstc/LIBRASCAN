@@ -2874,25 +2874,30 @@ const HOME_CATEGORIES = [
 
 function CountUp({ value, loading, duration = 2000 }) {
   const [shown, setShown] = useState(0);
-  const startedRef = useRef(false);
-  const rafRef  = useRef(null);
+  const shownRef   = useRef(0);      // last value actually painted
+  const startedRef = useRef(false);  // false until the first reveal has played
+  const rafRef     = useRef(null);
 
   useEffect(() => {
-    if (loading || startedRef.current) return undefined;
+    if (loading) return undefined;
     const target = Number(value) || 0;
+    const from   = shownRef.current;
+    const paint  = (v) => { shownRef.current = v; setShown(v); };
 
     const reduce = typeof window !== 'undefined' && window.matchMedia
       && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) { startedRef.current = true; setShown(target); return undefined; }
+    if (reduce || from === target) { startedRef.current = true; paint(target); return undefined; }
 
+    // First reveal gets the long count-up; later live updates (a book was
+    // just borrowed/returned) glide from the old number to the new one.
+    const dur = startedRef.current ? 600 : duration;
     startedRef.current = true;
     let t0 = null;
     const tick = (now) => {
       if (t0 === null) t0 = now;
-      const p = Math.min(1, (now - t0) / duration);
-      setShown(Math.floor(p * target));
+      const p = Math.min(1, (now - t0) / dur);
+      paint(Math.round(from + (target - from) * p));
       if (p < 1) rafRef.current = requestAnimationFrame(tick);
-      else setShown(target);
     };
     rafRef.current = requestAnimationFrame(tick);
     return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
@@ -2900,6 +2905,51 @@ function CountUp({ value, loading, duration = 2000 }) {
 
   if (loading) return <span className="sdb-home-stat-dash">—</span>;
   return <span className="sdb-home-stat-num">{shown}</span>;
+}
+
+/**
+ * Every `borrowings` row that belongs to this student. `borrowings` is the
+ * real source of truth for "borrowed" / "returned" — it is what the
+ * librarian side writes to (approving a request in Borrow Requests, or
+ * scanning a book out/in in Book Management). A row with no `returned_at`
+ * is currently borrowed; a row with `returned_at` has been returned.
+ *
+ * Mirrors the History page's matching rules, since a desk scan of the
+ * student's physical ID doesn't always land under their account UUID:
+ *   1. student_id = this account
+ *   2. student_number = this account's student number
+ *   3. legacy rows with the number in student_id (UUID-shaped only)
+ *   4. "Name [Number]" embedded in student_name (BookManagement scan flow)
+ */
+async function fetchStudentBorrowings(userId) {
+  const cols = 'id,book_id,book_title,status,borrowed_at,returned_at';
+  const seen = new Map();
+  const add  = (rows) => { (rows || []).forEach(r => { if (r?.id != null) seen.set(r.id, r); }); };
+  const warn = (label, res) => { if (res?.error) console.error(`[Home stats] borrowings ${label} lookup failed:`, res.error); return res; };
+
+  let studentNumber = null;
+  try {
+    const { data: prof } = await supabase.from('profiles')
+      .select('student_number').eq('id', userId).maybeSingle();
+    studentNumber = prof?.student_number ? String(prof.student_number).trim() : null;
+  } catch (e) { console.error('[Home stats] profile lookup failed:', e); }
+
+  const lookups = [
+    supabase.from('borrowings').select(cols).eq('student_id', userId),
+  ];
+  if (studentNumber) {
+    const likeSafe = studentNumber.replace(/[%_]/g, m => `\\${m}`);
+    lookups.push(
+      supabase.from('borrowings').select(cols).eq('student_number', studentNumber),
+      supabase.from('borrowings').select(cols).ilike('student_name', `%[${likeSafe}]`),
+    );
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentNumber)) {
+      lookups.push(supabase.from('borrowings').select(cols).eq('student_id', studentNumber));
+    }
+  }
+  const results = await Promise.all(lookups);
+  results.forEach((res, i) => { warn(String(i), res); add(res.data); });
+  return [...seen.values()];
 }
 
 function PageHome({ user, profile, onNavigate }) {
@@ -2920,31 +2970,51 @@ function PageHome({ user, profile, onNavigate }) {
   const year      = profile?.year_level || '';
   const initials  = [firstName[0], lastName[0]].filter(Boolean).join('').toUpperCase() || 'S';
 
+  // Borrowed / Returned come from the `borrowings` table (see
+  // fetchStudentBorrowings). The old query filtered borrow_requests on a
+  // `return_date` column that doesn't exist, so Postgrest rejected it and
+  // both stats silently fell back to 0. Re-fetches live on any borrowings
+  // change, when the tab regains focus, and on a slow poll as a safety net
+  // in case Realtime is off for that table.
   useEffect(() => {
-    if (!user?.id) { setLoadSt(false); return; }
-    (async () => {
+    if (!user?.id) { setLoadSt(false); return undefined; }
+    let cancelled = false;
+
+    const load = async () => {
       try {
-        const [a, b, c, d] = await Promise.all([
-          // .is('return_date', null) keeps this in sync with the "returned"
-          // count below — without it, a row whose status column is still
-          // 'approved' but already has a return_date set (already handed
-          // back, just not relabeled in the DB) would double-count as both
-          // currently-borrowed AND returned.
-          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).in('status',['active','approved']).is('return_date', null),
-          // Matches the History page's own `effectiveStatus` rule: a request
-          // counts as "returned" once return_date is set, even on rows
-          // whose `status` column was never literally updated to
-          // 'returned' — that mismatch was why this stat always read 0
-          // despite the History table already showing a "Returned" badge.
-          supabase.from('borrow_requests').select('id',{count:'exact',head:true}).eq('student_id',user.id).or('status.eq.returned,return_date.not.is.null'),
+        const [borrowRows, c, d] = await Promise.all([
+          fetchStudentBorrowings(user.id),
           // "available_copies" isn't a stored column on books — availability lives on
           // book_copies.status, so count copies currently marked Available instead.
           supabase.from('book_copies').select('copy_id',{count:'exact',head:true}).eq('status','Available'),
           supabase.from('student_favorites').select('id',{count:'exact',head:true}).eq('student_id',user.id),
         ]);
-        setStats({ borrowed:a.count||0, returned:b.count||0, available:c.count||0, favorites:d.count||0 });
-      } catch(e){ console.error('[Home stats]',e); } finally { setLoadSt(false); }
-    })();
+        if (cancelled) return;
+        if (c.error) console.error('[Home stats] available lookup failed:', c.error);
+        if (d.error) console.error('[Home stats] favorites lookup failed:', d.error);
+        const returned = borrowRows.filter(b => !!b.returned_at).length;
+        const borrowed = borrowRows.length - returned; // still out: no returned_at yet
+        setStats({ borrowed, returned, available:c.count||0, favorites:d.count||0 });
+      } catch(e){ console.error('[Home stats]',e); }
+      finally { if (!cancelled) setLoadSt(false); }
+    };
+
+    load();
+
+    const ch = supabase
+      .channel(`student-home-stats-${user.id}-${Math.random().toString(36).slice(2)}`)
+      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => { load(); })
+      .subscribe();
+    const onFocus = () => { load(); };
+    window.addEventListener('focus', onFocus);
+    const poll = setInterval(load, 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(poll);
+      window.removeEventListener('focus', onFocus);
+      supabase.removeChannel(ch);
+    };
   }, [user?.id]);
 
   useEffect(() => {
@@ -3888,9 +3958,19 @@ function PageHistory({ user }) {
             if (byNumber.error) console.error(`[History] ${table} student_number lookup failed:`, byNumber.error);
             add(byNumber.data);
 
-            const byLegacyId = await supabase.from(table).select(selectCols).eq('student_id', studentNumber);
-            if (byLegacyId.error) console.error(`[History] ${table} legacy student_id lookup failed:`, byLegacyId.error);
-            add(byLegacyId.data);
+            // Legacy rows that stored the raw student number in `student_id`:
+            // `student_id` is a uuid column, so comparing it to a plain
+            // student number (e.g. "2023313830") makes Postgres reject the
+            // whole request with a 400 (invalid input syntax for type uuid).
+            // A non-UUID value can never actually be stored in that column,
+            // so only run this lookup when the number is UUID-shaped.
+            // Rows scanned by the student's physical ID are still found by
+            // the student_number and embedded-name lookups around this one.
+            if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentNumber)) {
+              const byLegacyId = await supabase.from(table).select(selectCols).eq('student_id', studentNumber);
+              if (byLegacyId.error) console.error(`[History] ${table} legacy student_id lookup failed:`, byLegacyId.error);
+              add(byLegacyId.data);
+            }
 
             const byEmbeddedName = await supabase.from(table).select(selectCols).ilike('student_name', `%[${likeSafeNumber}]`);
             if (byEmbeddedName.error) console.error(`[History] ${table} embedded-name lookup failed:`, byEmbeddedName.error);

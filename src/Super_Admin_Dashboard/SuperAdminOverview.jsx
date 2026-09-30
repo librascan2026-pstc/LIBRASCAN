@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Building2, GraduationCap, BookOpen, BookMarked, ClipboardList, Users,
+  Building2, GraduationCap, BookOpen, Users,
   LayoutGrid, MapPin, Landmark, Search, ChevronLeft, ChevronRight,
   CalendarDays, ShieldCheck,
 } from 'lucide-react';
@@ -31,19 +31,16 @@ const BORDER      = '#E8DDD4';
 const SUCCESS     = '#22C55E';
 const DANGER      = '#EF4444';
 const BLUE        = '#3B82F6';
-const PURPLE      = '#9333EA';
 const ORANGE      = '#F97316';
 
 const STATS_CONFIG = [
   { key: 'totalCampuses',   label: 'Total Campuses',    sub: 'active campuses',     Icon: Building2,     tint: { bg: GOLD_PALE,                    fg: GOLD_DEEP } },
   { key: 'totalStudents',   label: 'Total Students',    sub: 'registered students', Icon: GraduationCap, tint: { bg: 'rgba(59,130,246,0.12)',      fg: BLUE } },
   { key: 'totalBooks',      label: 'Total Books',       sub: 'across all campuses', Icon: BookOpen,      tint: { bg: 'rgba(34,197,94,0.12)',       fg: '#178A4C' } },
-  { key: 'totalBorrows',    label: 'Active Borrowings', sub: 'currently borrowed',  Icon: BookMarked,    tint: { bg: 'rgba(249,115,22,0.12)',      fg: ORANGE } },
-  { key: 'totalAttend',     label: 'Attendance Logs',   sub: 'total log entries',   Icon: ClipboardList, tint: { bg: 'rgba(147,51,234,0.10)',      fg: PURPLE } },
   { key: 'totalLibrarians', label: 'Librarians',        sub: 'assigned librarians', Icon: Users,         tint: { bg: MAROON_SOFT,                  fg: MAROON } },
 ];
 
-const LEDGER_COLUMNS = ['Campus', 'Code', 'Status', 'Librarians', 'Students', 'Books', 'Active Borrows'];
+const LEDGER_COLUMNS = ['Campus', 'Code', 'Status', 'Librarians', 'Students', 'Books', 'Pending Books'];
 
 const PAGE_SIZE = 9;
 
@@ -522,31 +519,26 @@ export default function SuperAdminOverview() {
     async function load() {
       setLoading(true);
       try {
-        const [campusRes, profilesRes, booksRes, borrowRes, attendRes, libRes] = await Promise.all([
+        const [campusRes, profilesRes, booksRes, libRes] = await Promise.all([
           supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active, logo_url'),
           supabaseAdmin.from('profiles').select('id, campus_id, role'),
-          supabaseAdmin.from('books').select('id, campus_id'),
-          supabaseAdmin.from('borrowings').select('id, campus_id, status'),
-          supabaseAdmin.from('attendance_logs').select('id, campus_id'),
+          supabaseAdmin.from('books').select('id, campus_id, registration_status'),
           supabaseAdmin.from('profiles').select('id, campus_id').eq('role', 'library_manager'),
         ]);
 
         const allCampuses = campusRes.data || [];
         const allProfiles = profilesRes.data || [];
         const allBooks    = booksRes.data || [];
-        const allBorrows  = borrowRes.data || [];
-        const allAttend   = attendRes.data || [];
         const allLibs     = libRes.data || [];
 
         const students      = allProfiles.filter(p => p.role === 'student');
-        const activeBorrows = allBorrows.filter(b => b.status === 'approved' || b.status === 'borrowed');
+        // Books still waiting on Super Admin approval (same rule as the Books page).
+        const pendingBooks = allBooks.filter(b => b.registration_status === 'pending');
 
         setStats({
           totalCampuses:   allCampuses.length,
           totalStudents:   students.length,
           totalBooks:      allBooks.length,
-          totalBorrows:    activeBorrows.length,
-          totalAttend:     allAttend.length,
           totalLibrarians: allLibs.length,
         });
 
@@ -554,7 +546,7 @@ export default function SuperAdminOverview() {
           ...c,
           students:   students.filter(p => p.campus_id === c.id).length,
           books:      allBooks.filter(b => b.campus_id === c.id).length,
-          borrows:    activeBorrows.filter(b => b.campus_id === c.id).length,
+          pending:    pendingBooks.filter(b => b.campus_id === c.id).length,
           librarians: allLibs.filter(l => l.campus_id === c.id).length,
         }));
         setCampuses(breakdown);
@@ -701,7 +693,7 @@ export default function SuperAdminOverview() {
                           <td><span className="sao-fig" style={{ background: MAROON_SOFT, color: MAROON }}>{c.librarians}</span></td>
                           <td><span className="sao-fig" style={{ background: 'rgba(59,130,246,0.12)', color: BLUE }}>{c.students}</span></td>
                           <td><span className="sao-fig" style={{ background: 'rgba(34,197,94,0.12)', color: '#178A4C' }}>{c.books}</span></td>
-                          <td><span className="sao-fig" style={{ background: 'rgba(249,115,22,0.12)', color: ORANGE }}>{c.borrows}</span></td>
+                          <td><span className="sao-fig" style={{ background: 'rgba(249,115,22,0.12)', color: ORANGE }}>{c.pending}</span></td>
                         </tr>
                       ))}
                     </tbody>

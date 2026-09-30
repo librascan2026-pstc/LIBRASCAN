@@ -83,20 +83,41 @@ export async function sendOtpEmail({ to, name, code, purpose }) {
     ? 'Confirm your email to turn on two-factor authentication'
     : 'Your LibraScan sign-in code';
 
+  // Same public logo URL logic as the login-confirmation email.
+  const logoBase = (process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+  const logoUrl  = process.env.EMAIL_LOGO_URL || (logoBase ? `${logoBase}/LibraryLogo.png` : '');
+  const glyph = (c) => `<span style="font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">${c}&#xFE0E;</span>`;
+
   const html = `
-  <div style="font-family:Georgia,serif;max-width:420px;margin:0 auto;padding:28px 26px;background:#FFFCF2;border:1px solid #e7dcc0;border-radius:14px;">
-    <p style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#8B0000;font-weight:700;margin:0 0 14px;">LibraScan</p>
-    <h1 style="font-size:18px;color:#3a2410;margin:0 0 10px;">${heading}</h1>
-    <p style="font-size:13.5px;color:#5a4326;line-height:1.6;margin:0 0 18px;">
-      Hi ${name || 'there'}, use the code below to continue${purpose === 'enable' ? ' turning on 2FA' : ' signing in'}. It expires in 5 minutes.
-    </p>
-    <div style="font-size:32px;font-weight:700;letter-spacing:0.28em;color:#8B0000;background:rgba(139,0,0,0.07);border:1px dashed rgba(139,0,0,0.35);border-radius:10px;padding:14px 0;text-align:center;">
-      ${code}
-    </div>
-    <p style="font-size:11.5px;color:#8a7250;line-height:1.6;margin:18px 0 0;">
-      Didn't request this? You can safely ignore this email — your account is still secure.
-    </p>
-  </div>`;
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your LibraScan code is ${escHtml(code)}. It expires in 5 minutes.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%;max-width:480px;background:#FFFFFF;border:1px solid #EADFC8;border-radius:26px;overflow:hidden;">
+        <tr><td bgcolor="#6E1620" style="background:#6E1620;padding:26px 30px;border-bottom:2px solid #C9A84C;">
+          ${logoUrl ? `<img src="${logoUrl}" height="32" alt="" style="height:32px;width:auto;border:0;vertical-align:middle;" />` : ''}
+          <span style="color:#C9A84C;font-size:24px;vertical-align:middle;padding:0 10px;">|</span>
+          <span style="font:600 15px Georgia,serif;letter-spacing:0.24em;color:#F3E6CF;vertical-align:middle;">LIBRASCAN</span>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 30px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td width="80" height="80" align="center" bgcolor="#F3E1DC" style="width:80px;height:80px;background:#F3E1DC;border-radius:40px;font-size:32px;line-height:80px;font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">&#128274;&#xFE0E;</td></tr></table>
+          <h1 style="margin:16px 0 10px;font:600 ${purpose === 'enable' ? '24' : '28'}px Georgia,serif;color:#4A1A1E;">${heading}</h1>
+          <p style="margin:0;font:400 15px/1.6 Arial,sans-serif;color:#6B6460;">Hi ${escHtml(name) || 'there'}, use the code below to continue${purpose === 'enable' ? ' turning on 2FA' : ' signing in'}.</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #7A1A24;border-radius:16px;">
+            <tr><td align="center" style="padding:20px 0 20px 10px;font:700 36px Georgia,serif;letter-spacing:0.3em;color:#7A1A24;">${escHtml(code)}</td></tr>
+          </table>
+          <p style="margin:12px 0 0;text-align:center;font:400 13px Arial,sans-serif;color:#7A726C;">${glyph('&#128339;')}&nbsp; Expires in 5 minutes</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td valign="top" width="30">${glyph('&#128737;')}</td>
+            <td style="font:400 12.5px/1.6 Arial,sans-serif;color:#8C837C;">Didn&rsquo;t request this? You can safely ignore this email, your account is still secure. Never share this code with anyone.</td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
 
   await sendViaBrevo({
     to,
@@ -112,62 +133,127 @@ export async function sendOtpEmail({ to, name, code, purpose }) {
 // fallback). Two big buttons, "Yes, it's me" / "No, secure my account",
 // link straight to the public /confirm-login page with the one-time token.
 // ---------------------------------------------------------------------------
-export async function sendLoginConfirmationEmail({ to, name, confirmUrl, denyUrl, device, location, ip }) {
+
+const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+export async function sendLoginConfirmationEmail({ to, name, confirmUrl, denyUrl, device, location, ip, time }) {
   const deviceLabel   = device || 'Unknown device';
   const locationLabel = location || 'Unknown location';
-  const isMobile      = /iphone|ipad|android|mobile/i.test(deviceLabel);
+  // Logo must be a PUBLIC https URL (email apps can't load localhost/file paths).
+  // Set EMAIL_LOGO_URL, or FRONTEND_ORIGIN to your deployed site (serves /LibraryLogo.png).
+  const logoBase = (process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '').replace(/\/$/, '');
+  const logoUrl  = process.env.EMAIL_LOGO_URL || (logoBase ? `${logoBase}/LibraryLogo.png` : '');
+  const when = time || new Date().toLocaleString('en-US', {
+    timeZone: process.env.MAIL_TIMEZONE || 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short',
+  });
 
-  const deviceIconSvg = isMobile
-    ? `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#cbd3da" stroke-width="1.8"><rect x="6" y="2" width="12" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`
-    : `<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#cbd3da" stroke-width="1.8"><rect x="2" y="4" width="20" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>`;
+  // Email-safe: tables + inline styles only (Gmail/Outlook strip SVG, flex
+  // and most modern CSS). Icons are monochrome text glyphs (\uFE0E forces
+  // text style instead of colour emoji).
+  const G = (code) => `<span style="font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;font-size:16px;">${code}&#xFE0E;</span>`;
+  const row = (icon, label, value, last) =>
+    `<tr><td width="34" style="padding:13px 0;${last ? '' : 'border-bottom:1px solid #7A1A24;'}">${G(icon)}</td>` +
+    `<td width="96" style="padding:13px 0;${last ? '' : 'border-bottom:1px solid #7A1A24;'}font:400 14.5px Arial,sans-serif;color:#7A726C;">${label}</td>` +
+    `<td style="padding:13px 0;${last ? '' : 'border-bottom:1px solid #7A1A24;'}font:700 14.5px Arial,sans-serif;color:#2E2321;">${value}</td></tr>`;
 
   const html = `
-  <div style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;max-width:440px;margin:0 auto;padding:24px;background:#f0f2f5;">
-    <div style="background:#ffffff;border-radius:14px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.08);">
-
-      <div style="padding:22px 26px 18px;border-bottom:1px solid #eef0f2;">
-        <p style="font-size:12px;letter-spacing:0.14em;text-transform:uppercase;color:#8B0000;font-weight:700;margin:0 0 12px;">LibraScan</p>
-        <h1 style="font-size:19px;color:#050505;margin:0 0 8px;">New sign-in to your account</h1>
-        <p style="font-size:13.5px;color:#65676b;line-height:1.55;margin:0;">
-          Hi ${name || 'there'}, we noticed a sign-in on a device we don't recognize. Please confirm it was you.
-        </p>
-      </div>
-
-      <!-- Device card — dark, like Facebook/Google's "was this you?" card -->
-      <div style="margin:20px 26px 4px;background:#1c1e21;border-radius:12px;padding:18px 20px;display:table;width:calc(100% - 40px);">
-        <div style="display:table-cell;vertical-align:middle;width:44px;">
-          <div style="width:40px;height:40px;border-radius:8px;background:#3a3b3c;display:table;">
-            <div style="display:table-cell;vertical-align:middle;text-align:center;">${deviceIconSvg}</div>
-          </div>
-        </div>
-        <div style="display:table-cell;vertical-align:middle;padding-left:14px;">
-          <div style="color:#ffffff;font-size:14.5px;font-weight:600;">${deviceLabel}</div>
-          <div style="color:#b0b3b8;font-size:12.5px;margin-top:2px;">📍 ${locationLabel}</div>
-          ${ip ? `<div style="color:#8a8d91;font-size:11px;margin-top:2px;">IP address ${ip}</div>` : ''}
-        </div>
-      </div>
-
-      <p style="font-size:11.5px;color:#8a8d91;line-height:1.6;margin:10px 26px 4px;">
-        If other people have access to this device, don't trust it unless you're sure it's yours.
-      </p>
-
-      <div style="padding:8px 26px 24px;">
-        <a href="${confirmUrl}" style="display:block;text-align:center;background:#2e7d32;color:#ffffff;text-decoration:none;font-weight:700;font-size:14px;padding:13px 0;border-radius:8px;margin-top:14px;">Yes, it's me</a>
-        <a href="${denyUrl}" style="display:block;text-align:center;background:#f0f2f5;color:#050505;text-decoration:none;font-weight:700;font-size:14px;padding:13px 0;border-radius:8px;margin-top:10px;">No, secure my account</a>
-      </div>
-
-      <div style="padding:16px 26px 22px;border-top:1px solid #eef0f2;">
-        <p style="font-size:11.5px;color:#8a8d91;line-height:1.6;margin:0;">
-          This link expires in 10 minutes. If you choose "No", we'll block that sign-in immediately and remove every device we'd previously trusted on this account.
-        </p>
-      </div>
-    </div>
-  </div>`;
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Was this you? Confirm your LibraScan sign-in. This link expires in 10 minutes.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%;max-width:480px;background:#FFFFFF;border:1px solid #EADFC8;border-radius:26px;overflow:hidden;">
+        <tr><td bgcolor="#6E1620" style="background:#6E1620;padding:26px 30px;border-bottom:2px solid #C9A84C;">
+          ${logoUrl ? `<img src="${logoUrl}" height="32" alt="" style="height:32px;width:auto;border:0;vertical-align:middle;" />` : ''}
+          <span style="color:#C9A84C;font-size:24px;vertical-align:middle;padding:0 10px;">|</span>
+          <span style="font:600 15px Georgia,serif;letter-spacing:0.24em;color:#F3E6CF;vertical-align:middle;">LIBRASCAN</span>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 30px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td width="80" height="80" align="center" bgcolor="#F3E1DC" style="width:80px;height:80px;background:#F3E1DC;border-radius:40px;font-size:32px;line-height:80px;font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">&#128187;&#xFE0E;</td></tr></table>
+          <h1 style="margin:16px 0 10px;font:600 28px Georgia,serif;color:#4A1A1E;">Was this you signing in?</h1>
+          <p style="margin:0;font:400 15px/1.6 Arial,sans-serif;color:#6B6460;">Hi ${escHtml(name) || 'there'}, we noticed a sign-in from a device we don&rsquo;t recognize. Please confirm it&rsquo;s you.</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #7A1A24;border-radius:16px;">
+            <tr><td style="padding:2px 20px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+              ${row('&#128187;', 'Device', escHtml(deviceLabel))}
+              ${row('&#128205;', 'Location', escHtml(locationLabel))}
+              ${row('&#128339;', 'Time', escHtml(when), !ip)}
+              ${ip ? row('&#127760;', 'IP address', escHtml(ip), true) : ''}
+            </table></td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:22px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td align="center" bgcolor="#7A1A24" style="background:#7A1A24;border-radius:14px;">
+              <a href="${confirmUrl}" style="display:block;padding:17px 0;font:600 16px Arial,sans-serif;color:#ffffff;text-decoration:none;">Yes, it&rsquo;s me &nbsp;&rarr;</a>
+            </td></tr></table>
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;"><tr>
+            <td align="center" style="border:1.5px solid #7A1A24;border-radius:14px;">
+              <a href="${denyUrl}" style="display:block;padding:15px 0;font:600 15px Arial,sans-serif;color:#7A1A24;text-decoration:none;">No, secure my account</a>
+            </td></tr></table>
+        </td></tr>
+        <tr><td style="padding:22px 30px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td valign="top" width="30">${G('&#128737;')}</td>
+            <td style="font:400 12.5px/1.6 Arial,sans-serif;color:#8C837C;">This link expires in 10 minutes. If you choose &ldquo;No,&rdquo; we&rsquo;ll block that sign-in and remove every device we previously trusted on this account. Never share this email with anyone.</td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
 
   await sendViaBrevo({
     to,
-    subject: 'Confirm it\u2019s you — new LibraScan sign-in',
+    subject: 'Confirm it\u2019s you \u2014 new LibraScan sign-in',
     html,
-    text: `Someone just signed in to your LibraScan account from ${deviceLabel} near ${locationLabel}${ip ? ` (IP ${ip})` : ''}.\n\nIf this was you, confirm here: ${confirmUrl}\n\nIf it wasn't you, block it and secure your account here: ${denyUrl}\n\nThis link expires in 10 minutes.`,
+    text: `Someone just signed in to your LibraScan account.\n\nDevice: ${deviceLabel}\nLocation: ${locationLabel}\nTime: ${when}${ip ? `\nIP: ${ip}` : ''}\n\nIf this was you, confirm here: ${confirmUrl}\n\nIf it wasn't you, block it and secure your account: ${denyUrl}\n\nThis link expires in 10 minutes.`,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// "Confirm your email" — sent right after registering. One big button that
+// links to this server's public GET /verify-email?token=... route.
+// ---------------------------------------------------------------------------
+export async function sendVerificationEmail({ to, name, verifyUrl }) {
+  const logoBase = (process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/$/, '');
+  const logoUrl  = process.env.EMAIL_LOGO_URL || (logoBase ? `${logoBase}/LibraryLogo.png` : '');
+  const G = (c) => `<span style="font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">${c}&#xFE0E;</span>`;
+
+  const html = `
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Confirm your email to activate your LibraScan account. This link expires in 24 hours.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%;max-width:480px;background:#FFFFFF;border:1px solid #EADFC8;border-radius:26px;overflow:hidden;">
+        <tr><td bgcolor="#6E1620" style="background:#6E1620;padding:26px 30px;border-bottom:2px solid #C9A84C;">
+          ${logoUrl ? `<img src="${logoUrl}" height="32" alt="" style="height:32px;width:auto;border:0;vertical-align:middle;" />` : ''}
+          <span style="color:#C9A84C;font-size:24px;vertical-align:middle;padding:0 10px;">|</span>
+          <span style="font:600 15px Georgia,serif;letter-spacing:0.24em;color:#F3E6CF;vertical-align:middle;">LIBRASCAN</span>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 30px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td width="80" height="80" align="center" bgcolor="#F3E1DC" style="width:80px;height:80px;background:#F3E1DC;border-radius:40px;font-size:32px;line-height:80px;font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">&#9993;&#xFE0E;</td></tr></table>
+          <h1 style="margin:16px 0 10px;font:600 28px Georgia,serif;color:#4A1A1E;">Confirm your email</h1>
+          <p style="margin:0;font:400 15px/1.6 Arial,sans-serif;color:#6B6460;">Hi ${escHtml(name) || 'there'}, welcome to LibraScan! Tap the button below to verify this email address and activate your account.</p>
+        </td></tr>
+        <tr><td style="padding:24px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
+            <td align="center" bgcolor="#7A1A24" style="background:#7A1A24;border-radius:14px;">
+              <a href="${verifyUrl}" style="display:block;padding:17px 0;font:600 16px Arial,sans-serif;color:#ffffff;text-decoration:none;">Confirm my email &nbsp;&rarr;</a>
+            </td></tr></table>
+          <p style="margin:14px 0 0;text-align:center;font:400 13px Arial,sans-serif;color:#7A726C;">${G('&#128339;')}&nbsp; This link expires in 24 hours</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td valign="top" width="30">${G('&#128737;')}</td>
+            <td style="font:400 12.5px/1.6 Arial,sans-serif;color:#8C837C;">Didn&rsquo;t create a LibraScan account? You can safely ignore this email &mdash; nothing will happen unless the button is pressed.</td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+
+  await sendViaBrevo({
+    to,
+    subject: 'Confirm your email \u2014 LibraScan',
+    html,
+    text: `Welcome to LibraScan!\n\nConfirm your email to activate your account: ${verifyUrl}\n\nThis link expires in 24 hours. If you didn't create an account, ignore this email.`,
   });
 }
