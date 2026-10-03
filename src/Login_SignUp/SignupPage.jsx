@@ -1,9 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../supabaseClient';
 import AuthLayout from './AuthLayout';
 
 const PSU_DOMAIN = '@pampangastateu.edu.ph';
+// Exact-match check: one local part, then exactly @pampangastateu.edu.ph
+// (rejects look-alikes such as name@pampangastateu.edu.ph.evil.com or a@b@...).
+const PSU_EMAIL_REGEX = /^[A-Za-z0-9._%+\-]+@pampangastateu\.edu\.ph$/i;
 
 // Base URL of the LibraScan API server (the one running app.js). Use the SAME
 // value your src/utils/mfaClient.js already uses for its requests.
@@ -23,7 +26,8 @@ const studentNumberToEmail = (studentId) => {
 const NAME_REGEX        = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'\-]+$/;
 const MIDDLE_NAME_REGEX = /^[A-Za-zÀ-ÖØ-öø-ÿ\s'.\-]*$/;
 const USERNAME_REGEX    = /^[A-Za-z0-9_\-]+$/;
-const STUDENT_NO_REGEX  = /^\d{10,}$/;
+const STUDENT_NO_REGEX  = /^\d{5,}$/;
+const EMPLOYEE_NO_REGEX = /^\d{5,}$/;
 
 const validators = {
   firstName: (v) => {
@@ -55,16 +59,22 @@ const validators = {
   },
   studentNumber: (v) => {
     if (!v.trim())                        return 'Student number is required.';
-    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Must be at least 10 digits (e.g. 2023929321).';
+    if (!STUDENT_NO_REGEX.test(v.trim())) return 'Must be at least 5 digits (numbers only).';
     return '';
   },
+  employeeNumber: (v) => {
+    if (!v.trim())                         return 'Employee number is required.';
+    if (!EMPLOYEE_NO_REGEX.test(v.trim())) return 'Must be at least 5 digits (numbers only).';
+    return '';
+  },
+  department: (v) => (!v ? 'Please select your department.' : ''),
   campus:  (v) => (!v ? 'Please select your campus.'  : ''),
   college: (v) => (!v ? 'Please select your college.' : ''),
   program: (v) => (!v ? 'Please select your program.' : ''),
   email: (v) => {
     if (!v.trim()) return 'Email is required.';
-    if (!v.trim().toLowerCase().endsWith(PSU_DOMAIN)) return `Must be a ${PSU_DOMAIN} address.`;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) return 'Enter a valid email.';
+    if (!PSU_EMAIL_REGEX.test(v.trim())) return `Employees must use a ${PSU_DOMAIN} email address.`;
     return '';
   },
   password: (v) => {
@@ -218,8 +228,52 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
 }
 
 // ─── Dropdown field ───────────────────────────────────────────────────────────
-function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder, isLoading }) {
+function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder, isLoading, custom = false }) {
   const [focused, setFocused] = useState(false);
+  // Custom dropdown state (only used when `custom` is true). The native
+  // <select> popup is drawn by the browser, so it ignores the card's theme
+  // and can spill outside it; the custom list opens right under the field.
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const wrapRef = useRef(null);
+  const menuRef = useRef(null);
+  const isDisabled = disabled || isLoading;
+  const selected = options.find(o => String(o.id) === String(value));
+
+  const closeMenu = () => { setOpen(false); setFocused(false); onBlur?.(); };
+  const pick = (o) => { onChange({ target: { value: String(o.id) } }); setOpen(false); };
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) closeMenu(); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }); // re-bound each render so closeMenu always sees the latest onBlur
+
+  useEffect(() => {
+    if (!open) return;
+    setActive(options.findIndex(o => String(o.id) === String(value)));
+    requestAnimationFrame(() => {
+      menuRef.current?.scrollIntoView({ block: 'nearest' });
+      menuRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+    });
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (open && active >= 0) menuRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  const onKeyDown = (e) => {
+    if (isDisabled) return;
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(true); return; }
+    if (!open) return;
+    if (e.key === 'Escape')         { e.preventDefault(); e.stopPropagation(); closeMenu(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(options.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(i => Math.max(0, i - 1)); }
+    else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(options[active]); }
+    else if (e.key === 'Tab')       { closeMenu(); }
+  };
+
   const hasError    = Boolean(error);
   const borderColor = hasError ? 'rgba(176,48,32,0.8)' : focused ? '#8B0000' : 'rgba(139,70,20,0.28)';
 
@@ -238,6 +292,58 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
           )}
         </AnimatePresence>
       </div>
+      {custom ? (
+        <div ref={wrapRef} style={{ position: 'relative' }}>
+          <button
+            type="button" disabled={isDisabled}
+            aria-haspopup="listbox" aria-expanded={open}
+            onClick={() => { if (isDisabled) return; if (open) closeMenu(); else { setFocused(true); setOpen(true); } }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => { if (!open) { setFocused(false); onBlur?.(); } }}
+            onKeyDown={onKeyDown}
+            style={{
+              width: '100%', padding: '7px 32px 7px 12px', borderRadius: 18, textAlign: 'left',
+              border: `1.5px solid ${open ? '#8B0000' : borderColor}`,
+              background: isDisabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+              color: selected ? '#2d1000' : '#9a7040', fontSize: 12, fontFamily: FONT_BODY,
+              outline: 'none', boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              cursor: isDisabled ? 'not-allowed' : 'pointer', transition: 'border-color 0.16s',
+            }}
+          >
+            {selected ? selected.name : (isLoading ? 'Loading…' : (placeholder || 'Select…'))}
+          </button>
+          <div style={{ position: 'absolute', right: 11, top: '50%', transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`, transition: 'transform 0.15s', pointerEvents: 'none', color: '#8B4513', opacity: 0.65 }}>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </div>
+          {open && (
+            <div ref={menuRef} role="listbox" style={{
+              position: 'absolute', top: 'calc(100% + 5px)', left: 0, right: 0, zIndex: 30,
+              maxHeight: 190, overflowY: 'auto', padding: 4,
+              background: '#FFFBF0', border: '1.5px solid rgba(139,0,0,0.25)', borderRadius: 14,
+              boxShadow: '0 10px 24px rgba(60,20,0,0.25)',
+            }}>
+              {options.map((o, i) => {
+                const isSel = String(o.id) === String(value);
+                return (
+                  <div key={o.id} role="option" aria-selected={isSel} data-selected={isSel ? 'true' : undefined}
+                    onMouseEnter={() => setActive(i)} onMouseDown={e => e.preventDefault()} onClick={() => pick(o)}
+                    style={{
+                      padding: '7px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontFamily: FONT_BODY,
+                      color: isSel ? '#8B0000' : '#2d1000', fontWeight: isSel ? 700 : 500,
+                      background: isSel ? 'rgba(139,0,0,0.10)' : (i === active ? 'rgba(139,0,0,0.06)' : 'transparent'),
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                    }}>
+                    <span>{o.name}</span>
+                    {isSel && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      ) : (
       <div style={{ position: 'relative' }}>
         <select
           value={value} onChange={onChange} onBlur={onBlur}
@@ -266,6 +372,7 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
           </svg>
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -292,7 +399,7 @@ function CascadeHint({ label }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 const EMPTY = {
   firstName: '', lastName: '', middleName: '', username: '',
-  studentNumber: '', email: '', password: '', confirm: '',
+  studentNumber: '', employeeNumber: '', email: '', password: '', confirm: '',
 };
 
 // Student Number is the true unique identifier for an account — unlike
@@ -316,7 +423,54 @@ async function checkStudentNumberTaken(studentNumber) {
   return Boolean(data);
 }
 
+// Same idea as the Student Number check above, but for employees.
+async function checkEmployeeNumberTaken(employeeNumber) {
+  const val = (employeeNumber || '').trim();
+  if (!val) return false;
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('employee_number', val)
+    .maybeSingle();
+  if (error) {
+    console.error('[SignupPage] employee number uniqueness check failed:', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
+
+// Small segmented control: Student | Employee
+function RoleToggle({ role, onChange, disabled }) {
+  const opts = [{ id: 'student', label: 'Student' }, { id: 'employee', label: 'Employee' }];
+  return (
+    <div style={{ marginBottom: 9 }}>
+      <div style={{ fontSize: 8.5, fontWeight: 700, fontFamily: FONT_SANS, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5a2800', marginBottom: 3 }}>
+        I am registering as
+      </div>
+      <div style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 20, border: '1.5px solid rgba(139,70,20,0.28)', background: 'rgba(255,252,242,0.92)' }}>
+        {opts.map(o => {
+          const active = role === o.id;
+          return (
+            <button key={o.id} type="button" disabled={disabled} onClick={() => onChange(o.id)}
+              style={{
+                flex: 1, padding: '6px 0', borderRadius: 16, border: 'none',
+                background: active ? 'linear-gradient(135deg, #8B0000 0%, #6B0000 100%)' : 'transparent',
+                color: active ? '#F5E4A8' : '#5a2800',
+                fontFamily: FONT_SANS, fontSize: 10.5, fontWeight: 700,
+                letterSpacing: '0.1em', textTransform: 'uppercase',
+                cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all 0.18s',
+              }}>
+              {o.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function SignupPage({ onGoLogin, onGoLanding }) {
+  const [role,        setRole]    = useState('student'); // 'student' | 'employee'
   const [form,        setForm]    = useState(EMPTY);
   const [touched,     setTouched] = useState({});
   const [fieldErrors, setFE]      = useState({});
@@ -332,19 +486,23 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
   const [colleges,   setColleges]   = useState([]);
   const [programs,   setPrograms]   = useState([]);
   const [majors,     setMajors]     = useState([]);
+  const [departments, setDepartments] = useState([]);
 
   const [selectedCampus,  setSelectedCampus]  = useState('');
   const [selectedCollege, setSelectedCollege] = useState('');
   const [selectedProgram, setSelectedProgram] = useState('');
   const [selectedMajor,   setSelectedMajor]   = useState('');
+  const [selectedDepartment, setSelectedDepartment] = useState('');
 
   const [loadingColleges, setLoadingColleges] = useState(false);
   const [loadingPrograms, setLoadingPrograms] = useState(false);
   const [loadingMajors,   setLoadingMajors]   = useState(false);
+  const [loadingDepartments, setLoadingDepartments] = useState(false);
   const [hasMajors,       setHasMajors]       = useState(false);
 
-  const [cascadeErrors, setCascadeErrors] = useState({ campus: '', college: '', program: '' });
+  const [cascadeErrors, setCascadeErrors] = useState({ campus: '', college: '', program: '', department: '' });
   const [checkingStudentNumber, setCheckingStudentNumber] = useState(false);
+  const [checkingEmployeeNumber, setCheckingEmployeeNumber] = useState(false);
 
   const handleExit = onGoLanding || (() => { window.location.href = '/'; });
 
@@ -369,6 +527,19 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
       .then(({ data }) => { setColleges((data || []).map(c => ({ id: c.id, name: c.college_name }))); setLoadingColleges(false); });
   }, [selectedCampus]);
 
+  // Campus → departments (employees only). Departments are a separate,
+  // per-campus list (college departments + other offices like Clinic/Security).
+  useEffect(() => {
+    setSelectedDepartment('');
+    setDepartments([]);
+    setCascadeErrors(e => ({ ...e, department: '' }));
+    if (role !== 'employee' || !selectedCampus) return;
+    setLoadingDepartments(true);
+    supabase.from('departments').select('id, department_name').eq('campus_id', selectedCampus)
+      .order('category').order('department_name')
+      .then(({ data }) => { setDepartments((data || []).map(d => ({ id: d.id, name: d.department_name }))); setLoadingDepartments(false); });
+  }, [selectedCampus, role]);
+
   // College → programs
   useEffect(() => {
     setSelectedProgram(''); setSelectedMajor('');
@@ -391,6 +562,18 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         setMajors(list); setHasMajors(list.length > 0); setLoadingMajors(false);
       });
   }, [selectedProgram]);
+
+  // Switching role clears the ID number + email (they work differently per
+  // role) so a Student ID never leaks into the Employee form or vice versa.
+  const handleRoleChange = (next) => {
+    if (next === role || loading) return;
+    setRole(next);
+    setForm(f => ({ ...f, studentNumber: '', employeeNumber: '', email: '' }));
+    setFE(fe => ({ ...fe, studentNumber: '', employeeNumber: '', email: '' }));
+    setTouched(t => ({ ...t, studentNumber: false, employeeNumber: false, email: false }));
+    setCascadeErrors(er => ({ ...er, college: '', program: '', department: '' }));
+    setError('');
+  };
 
   // ── Field handlers ──
   const handleChange = (field) => (e) => {
@@ -445,6 +628,17 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         setFE(fe => ({ ...fe, studentNumber: 'This Student Number is already registered.' }));
       }
     }
+
+    // Same live uniqueness check for the Employee Number.
+    if (field === 'employeeNumber' && !err) {
+      const value = form.employeeNumber;
+      setCheckingEmployeeNumber(true);
+      const taken = await checkEmployeeNumberTaken(value);
+      setCheckingEmployeeNumber(false);
+      if (taken && form.employeeNumber === value) {
+        setFE(fe => ({ ...fe, employeeNumber: 'This Employee Number is already registered.' }));
+      }
+    }
   };
 
   // ── Submit ──
@@ -456,7 +650,10 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     const allTouched = Object.fromEntries(Object.keys(EMPTY).map(k => [k, true]));
     setTouched(allTouched);
     const errs = {};
+    // Only validate the ID field that belongs to the selected role.
+    const skipField = role === 'student' ? 'employeeNumber' : 'studentNumber';
     Object.keys(EMPTY).forEach(field => {
+      if (field === skipField) return;
       const err = field === 'confirm' ? validators.confirm(form.confirm, form) : validators[field]?.(form[field]) ?? '';
       if (err) errs[field] = err;
     });
@@ -464,25 +661,36 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
 
     // Validate cascade fields
     const cErrs = {
-      campus:  validators.campus(selectedCampus),
-      college: validators.college(selectedCollege),
-      program: validators.program(selectedProgram),
+      campus:     validators.campus(selectedCampus),
+      college:    role === 'student'  ? validators.college(selectedCollege)       : '',
+      program:    role === 'student'  ? validators.program(selectedProgram)       : '',
+      department: role === 'employee' ? validators.department(selectedDepartment) : '',
     };
     setCascadeErrors(cErrs);
 
-    if (Object.keys(errs).length || cErrs.campus || cErrs.college || cErrs.program) return;
+    if (Object.keys(errs).length || cErrs.campus || cErrs.college || cErrs.program || cErrs.department) return;
 
     setLoad(true);
 
     // Final guard: re-check Student Number uniqueness right before creating
     // the account. Closes the race condition where two people submit around
     // the same time, or the earlier on-blur check was skipped.
-    const idTaken = await checkStudentNumberTaken(form.studentNumber);
-    if (idTaken) {
-      setLoad(false);
-      setFE(fe => ({ ...fe, studentNumber: 'This Student Number is already registered.' }));
-      setError('This Student Number is already registered to another account.');
-      return;
+    if (role === 'student') {
+      const idTaken = await checkStudentNumberTaken(form.studentNumber);
+      if (idTaken) {
+        setLoad(false);
+        setFE(fe => ({ ...fe, studentNumber: 'This Student Number is already registered.' }));
+        setError('This Student Number is already registered to another account.');
+        return;
+      }
+    } else {
+      const idTaken = await checkEmployeeNumberTaken(form.employeeNumber);
+      if (idTaken) {
+        setLoad(false);
+        setFE(fe => ({ ...fe, employeeNumber: 'This Employee Number is already registered.' }));
+        setError('This Employee Number is already registered to another account.');
+        return;
+      }
     }
 
     // Create the account on the server. It creates the user as UNCONFIRMED,
@@ -496,13 +704,16 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           lastName:      form.lastName.trim(),
           middleName:    form.middleName.trim(),
           username:      form.username.trim(),
-          studentNumber: form.studentNumber.trim(),
+          role,
+          studentNumber:  role === 'student'  ? form.studentNumber.trim()  : null,
+          employeeNumber: role === 'employee' ? form.employeeNumber.trim() : null,
           email:         form.email.trim().toLowerCase(),
           password:      form.password,
           campusId:      selectedCampus,
-          collegeId:     selectedCollege,
-          programId:     selectedProgram,
-          majorId:       selectedMajor || null,
+          collegeId:     role === 'student'  ? selectedCollege : null,
+          programId:     role === 'student'  ? selectedProgram : null,
+          majorId:       role === 'student'  ? (selectedMajor || null) : null,
+          departmentId:  role === 'employee' ? selectedDepartment : null,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -594,21 +805,36 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
     <AuthLayout title="Create Account" subtitle={`${PSU_DOMAIN} addresses only`} onExit={handleExit}>
       <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
 
+        <RoleToggle role={role} onChange={handleRoleChange} disabled={loading} />
+
         <Field label="First Name" value={form.firstName} onChange={handleChange('firstName')} onBlur={handleBlur('firstName')} placeholder="Enter your first name" error={fieldErrors.firstName} disabled={loading} />
         <Field label="Last Name" value={form.lastName} onChange={handleChange('lastName')} onBlur={handleBlur('lastName')} placeholder="Enter your last name" error={fieldErrors.lastName} disabled={loading} />
         <Field label="Middle Name (Optional)" value={form.middleName} onChange={handleChange('middleName')} onBlur={handleBlur('middleName')} placeholder="Enter your middle name" error={fieldErrors.middleName} disabled={loading} />
         <Field label="Username" value={form.username} onChange={handleChange('username')} onBlur={handleBlur('username')} placeholder="Enter your username" error={fieldErrors.username} autoComplete="username" disabled={loading} />
-        <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 2023929321" error={fieldErrors.studentNumber} disabled={loading} />
-        {checkingStudentNumber && (
-          <div style={{ marginTop: -4, marginBottom: 7, fontSize: 9.5, fontFamily: FONT_BODY, color: '#8B4513', fontStyle: 'italic' }}>
-            Checking availability…
-          </div>
+        {role === 'student' ? (
+          <>
+            <Field label="Student Number" value={form.studentNumber} onChange={handleChange('studentNumber')} onBlur={handleBlur('studentNumber')} placeholder="e.g. 2023929321" error={fieldErrors.studentNumber} disabled={loading} />
+            {checkingStudentNumber && (
+              <div style={{ marginTop: -4, marginBottom: 7, fontSize: 9.5, fontFamily: FONT_BODY, color: '#8B4513', fontStyle: 'italic' }}>
+                Checking availability…
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <Field label="Employee Number" value={form.employeeNumber} onChange={handleChange('employeeNumber')} onBlur={handleBlur('employeeNumber')} placeholder="Enter your employee number (5+ digits)" error={fieldErrors.employeeNumber} disabled={loading} />
+            {checkingEmployeeNumber && (
+              <div style={{ marginTop: -4, marginBottom: 7, fontSize: 9.5, fontFamily: FONT_BODY, color: '#8B4513', fontStyle: 'italic' }}>
+                Checking availability…
+              </div>
+            )}
+          </>
         )}
 
         {/* ── Cascading academic info ── */}
         <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.18)', borderRadius: 10, padding: '10px 12px 6px', marginBottom: 8 }}>
           <div style={{ fontSize: 8, fontFamily: FONT_SANS, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(139,70,20,0.55)', marginBottom: 8 }}>
-            Academic Information
+            {role === 'student' ? 'Academic Information' : 'Employment Information'}
           </div>
 
           {/* Campus */}
@@ -623,6 +849,8 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
             placeholder="Select your campus"
           />
 
+          {role === 'student' ? (
+          <>
           {/* College */}
           {selectedCampus ? (
             <SelectField
@@ -673,9 +901,33 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
               </motion.div>
             )}
           </AnimatePresence>
+          </>
+          ) : (
+            /* Department (employees) */
+            selectedCampus ? (
+              <SelectField
+                label="Department"
+                value={selectedDepartment}
+                onChange={e => { setSelectedDepartment(e.target.value); setCascadeErrors(er => ({ ...er, department: '' })); }}
+                onBlur={() => setCascadeErrors(er => ({ ...er, department: validators.department(selectedDepartment) }))}
+                error={cascadeErrors.department}
+                disabled={loading}
+                isLoading={loadingDepartments}
+                options={departments}
+                custom
+                placeholder={departments.length === 0 && !loadingDepartments ? 'No departments available' : 'Select your department'}
+              />
+            ) : (
+              <CascadeHint label="Department" />
+            )
+          )}
         </div>
 
-        <Field label="Email Address (Auto-generated)" type="email" value={form.email} onChange={() => {}} placeholder="Enter your Student Number above" error={fieldErrors.email} autoComplete="email" disabled />
+        {role === 'student' ? (
+          <Field label="Email Address (Auto-generated)" type="email" value={form.email} onChange={() => {}} placeholder="Enter your Student Number above" error={fieldErrors.email} autoComplete="email" disabled />
+        ) : (
+          <Field label="PSU Email Address" type="email" value={form.email} onChange={handleChange('email')} onBlur={handleBlur('email')} placeholder={`yourname${PSU_DOMAIN}`} error={fieldErrors.email} autoComplete="email" disabled={loading} />
+        )}
         <Field label="Password" type="password" value={form.password} onChange={handleChange('password')} onBlur={handleBlur('password')} placeholder="Enter your password" error={fieldErrors.password} autoComplete="new-password" disabled={loading} />
         <StrengthBar password={form.password} />
         <Field label="Confirm Password" type="password" value={form.confirm} onChange={handleChange('confirm')} onBlur={handleBlur('confirm')} placeholder="Re-enter your password" error={fieldErrors.confirm} autoComplete="new-password" disabled={loading} />

@@ -2553,3 +2553,10 @@ a { text-decoration: none; }
   background: rgba(139,0,0,0.12);
   border-color: rgba(139,0,0,0.36);
 }
+
+/* User Management table — slim horizontal scrollbar (stays thin at any window size) */
+.um-table-scroll { scrollbar-width: thin; scrollbar-color: rgba(201,168,76,0.75) transparent; }
+.um-table-scroll::-webkit-scrollbar { height: 6px; width: 6px; }
+.um-table-scroll::-webkit-scrollbar-track { background: rgba(139,0,0,0.05); border-radius: 10px; }
+.um-table-scroll::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.75); border-radius: 10px; }
+.um-table-scroll::-webkit-scrollbar-thumb:hover { background: rgba(201,168,76,1); }

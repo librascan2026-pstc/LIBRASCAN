@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { LayoutGrid, Building2, BookOpen, Users, Settings as SettingsIcon } from 'lucide-react';
 import SuperAdminOverview    from './SuperAdminOverview';
 import CampusManagementHub   from './CampusManagementHub';
 import LibrarianManagement   from './LibrarianManagement';
 import SuperAdminBooks       from './SuperAdminBooks';
 import SuperAdminSettings    from './SuperAdminSettings';
+import { supabaseAdmin }     from '../supabaseClient';
 
 /* ============================================================================
    LIBRASCAN — Super Admin Layout (Top Bar Navigation)
@@ -32,7 +33,7 @@ const PAGES = [
     icon: <BookOpen size={18} strokeWidth={1.8} />,
   },
   {
-    key: 'librarians', label: 'Librarian',
+    key: 'librarians', label: 'Users',
     icon: <Users size={18} strokeWidth={1.8} />,
   },
   {
@@ -156,6 +157,7 @@ const CSS = `
     color: rgba(255,255,255,0.82);
     transition: color 0.18s, transform 0.15s;
   }
+  .sa-topnav-icon { position: relative; }
   .sa-topnav-item:hover .sa-topnav-icon { color: #fff; transform: scale(1.08); }
   .sa-topnav-item.active:hover .sa-topnav-icon { transform: none; }
 
@@ -167,6 +169,55 @@ const CSS = `
     margin-top: -18px;
   }
   .sa-topnav-item.active .sa-topnav-icon svg { width: 22px; height: 22px; }
+
+  /* ---------- Pending-registration badge (Books tab) ---------- */
+  .sa-topnav-badge {
+    position: absolute;
+    top: -8px; right: -10px;
+    min-width: 18px; height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(180deg, #FF5A4F 0%, #E11D2E 100%);
+    color: #fff;
+    font-size: 10.5px; font-weight: 800; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    box-shadow: 0 0 0 2px ${MAROON_DEEP}, 0 3px 8px rgba(0,0,0,0.35);
+    pointer-events: none;
+    z-index: 2;
+    animation: sa-badge-pop 0.38s cubic-bezier(.22,1.4,.36,1);
+  }
+  .sa-topnav-item.active .sa-topnav-badge { top: -2px; right: -4px; }
+  .sa-topnav-badge.fresh::after {
+    content: '';
+    position: absolute; inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 0 rgba(255,90,79,0.65);
+    animation: sa-badge-ping 1.1s ease-out 2;
+  }
+  .sa-topnav-item.ring .sa-topnav-icon svg {
+    transform-origin: 50% 12%;
+    animation: sa-bell-ring 0.9s ease-in-out 2;
+  }
+  @keyframes sa-badge-pop {
+    0%   { transform: scale(0.4); opacity: 0; }
+    100% { transform: scale(1);   opacity: 1; }
+  }
+  @keyframes sa-badge-ping {
+    0%   { box-shadow: 0 0 0 0 rgba(255,90,79,0.65); }
+    100% { box-shadow: 0 0 0 11px rgba(255,90,79,0); }
+  }
+  @keyframes sa-bell-ring {
+    0%, 100% { transform: rotate(0); }
+    20% { transform: rotate(-14deg); }
+    40% { transform: rotate(12deg); }
+    60% { transform: rotate(-8deg); }
+    80% { transform: rotate(5deg); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .sa-topnav-badge, .sa-topnav-badge.fresh::after, .sa-topnav-item.ring .sa-topnav-icon svg { animation: none; }
+  }
 
   .sa-topnav-label {
     font-size: 9.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
@@ -238,6 +289,8 @@ const CSS = `
       box-shadow: 0 4px 10px rgba(20,0,0,0.32);
     }
     .sa-topnav-item.active .sa-topnav-icon svg { width: 18px; height: 18px; }
+    .sa-topnav-badge { top: -6px; right: -8px; min-width: 17px; height: 17px; font-size: 10px; }
+    .sa-topnav-item.active .sa-topnav-badge { top: -4px; right: -6px; }
     /* Facebook-style active indicator: a small underline instead of a
        floating pill, since the icon row no longer overlaps the bar edge */
     .sa-topnav-item::after {
@@ -272,7 +325,45 @@ const CSS = `
     .sa-topbar { padding-left: 10px; padding-right: 10px; }
     .sa-topnav-item { padding-left: 0; padding-right: 0; }
   }
+
+  /* ============================================================
+     TABLES — every Super Admin table shows in full when the screen is
+     wide enough; on phones / tablets / narrow windows it scrolls
+     sideways (swipe on touch, click-and-drag with a mouse).
+  ============================================================ */
+  .sao-table-scroll, .cmh-table-scroll, .lbm-table-scroll, .sab-table-scroll {
+    overflow-x: auto;
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(110,0,0,0.30) transparent;
+  }
+  .sao-table-scroll::-webkit-scrollbar,
+  .cmh-table-scroll::-webkit-scrollbar,
+  .lbm-table-scroll::-webkit-scrollbar,
+  .sab-table-scroll::-webkit-scrollbar { height: 8px; }
+  .sao-table-scroll::-webkit-scrollbar-thumb,
+  .cmh-table-scroll::-webkit-scrollbar-thumb,
+  .lbm-table-scroll::-webkit-scrollbar-thumb,
+  .sab-table-scroll::-webkit-scrollbar-thumb { background: rgba(110,0,0,0.28); border-radius: 8px; }
+  .sao-table-scroll::-webkit-scrollbar-thumb:hover,
+  .cmh-table-scroll::-webkit-scrollbar-thumb:hover,
+  .lbm-table-scroll::-webkit-scrollbar-thumb:hover,
+  .sab-table-scroll::-webkit-scrollbar-thumb:hover { background: rgba(110,0,0,0.45); }
+
+  /* Set by the drag-to-scroll handler below, only when a table overflows */
+  .sa-can-drag { cursor: grab; }
+  .sa-dragging, .sa-dragging * {
+    cursor: grabbing !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
 `;
+
+// Any table scroller used by a Super Admin page (Dashboard, Campuses, Books, Users).
+const TABLE_SCROLL_SELECTOR =
+  '.sao-table-scroll, .cmh-table-scroll, .lbm-table-scroll, .sab-table-scroll';
 
 // ---------------------------------------------------------------------------
 // URL <-> tab mapping. Gives each Super Admin tab a real browser URL
@@ -283,7 +374,7 @@ const PATH_BY_PAGE = {
   overview:   '/superadmin/overview',
   campuses:   '/superadmin/campuses',
   books:      '/superadmin/books',
-  librarians: '/superadmin/librarians',
+  librarians: '/superadmin/users',
   settings:   '/superadmin/settings',
 };
 const PAGE_BY_PATH = Object.fromEntries(
@@ -296,6 +387,140 @@ function pageFromCurrentPath() {
 
 export default function SuperAdminLayout({ user, onSignOut }) {
   const [page, setPage] = useState(pageFromCurrentPath);
+
+  // ── New book-registration alert (Books tab badge + chime) ───────────────
+  // The badge always mirrors how many books are still waiting for the Super
+  // Admin's decision (registration_status = 'pending'), read straight from
+  // the database. It only goes down when a book is confirmed or rejected —
+  // opening the Books page, switching tabs or refreshing never clears it.
+  const [pendingCount, setPendingCount] = useState(0);
+  const [pendingFresh, setPendingFresh] = useState(false);
+  const knownPendingRef = useRef(null);   // Set of pending ids; null until the first load
+  const audioCtxRef     = useRef(null);
+  const freshTimerRef   = useRef(null);
+
+  // Browsers keep audio locked until the page has had a user gesture, so
+  // prepare the audio context on the first click/tap/key press.
+  useEffect(() => {
+    const unlock = () => {
+      try {
+        if (!audioCtxRef.current) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (Ctx) audioCtxRef.current = new Ctx();
+        }
+        if (audioCtxRef.current && audioCtxRef.current.state === 'suspended') {
+          audioCtxRef.current.resume();
+        }
+      } catch { /* audio unavailable — the badge still works */ }
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let seq = 0;
+    let debounceTimer = null;
+    let ch = null;
+
+    // Fixed, always-on alarm: three urgent two-tone bursts (~1.4s) so a new
+    // registration can't be missed. No preference toggle by design.
+    const playChime = () => {
+      try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!audioCtxRef.current) audioCtxRef.current = new Ctx();
+        const ctx = audioCtxRef.current;
+        const ring = () => {
+          const note = (freq, start, dur) => {
+            const osc  = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.value = freq;
+            osc.connect(gain);
+            gain.connect(ctx.destination);
+            const t0 = ctx.currentTime + start;
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(0.22, t0 + 0.01);
+            gain.gain.setValueAtTime(0.22, t0 + dur - 0.03);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+            osc.start(t0);
+            osc.stop(t0 + dur + 0.02);
+          };
+          for (let i = 0; i < 3; i += 1) {
+            note(988,  i * 0.5,        0.17);
+            note(1319, i * 0.5 + 0.2,  0.17);
+          }
+        };
+        if (ctx.state === 'suspended') ctx.resume().then(ring).catch(() => {});
+        else ring();
+      } catch { /* audio unavailable — the badge still works */ }
+    };
+
+    const fetchPending = async () => {
+      const mySeq = ++seq;
+      const { data, error } = await supabaseAdmin
+        .from('books')
+        .select('id')
+        .eq('registration_status', 'pending');
+      // Ignore failed, stale (out-of-order) or post-unmount responses.
+      if (cancelled || mySeq !== seq || error || !data) return;
+
+      const ids  = new Set(data.map(b => b.id));
+      const prev = knownPendingRef.current;
+      knownPendingRef.current = ids;
+      setPendingCount(ids.size);
+
+      // First load only sets the baseline. After that, any id we have not
+      // seen before is a genuinely new submission from a librarian.
+      if (prev) {
+        let hasNew = false;
+        ids.forEach(id => { if (!prev.has(id)) hasNew = true; });
+        if (hasNew) {
+          playChime();
+          setPendingFresh(true);
+          if (freshTimerRef.current) clearTimeout(freshTimerRef.current);
+          freshTimerRef.current = setTimeout(() => setPendingFresh(false), 2400);
+        }
+      }
+    };
+
+    const schedule = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(fetchPending, 250);
+    };
+
+    fetchPending();
+
+    // Instant path: any change on `books` re-checks the pending list.
+    try {
+      ch = supabaseAdmin
+        .channel(`sa-pending-books-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, schedule)
+        .subscribe();
+    } catch { /* realtime unavailable — polling below still keeps it accurate */ }
+
+    // Safety net for projects with Realtime disabled on `books`, and for
+    // approve/reject actions that only update the Books page's local state.
+    const pollId = setInterval(fetchPending, 6000);
+    const onVisible = () => { if (!document.hidden) fetchPending(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      clearInterval(pollId);
+      if (debounceTimer) clearTimeout(debounceTimer);
+      if (freshTimerRef.current) clearTimeout(freshTimerRef.current);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (ch) { try { supabaseAdmin.removeChannel(ch); } catch { /* already closed */ } }
+    };
+  }, []);
 
   // If we land here on an unmapped path (e.g. "/" or "/superadmin"),
   // normalize the address bar to match whichever tab is showing.
@@ -312,6 +537,78 @@ export default function SuperAdminLayout({ user, onSignOut }) {
     const onPopState = () => setPage(pageFromCurrentPath());
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  // Click-and-drag horizontal scrolling for every table scroller (mouse only —
+  // touch screens already swipe natively). It does nothing while a table fits
+  // entirely on screen, so wide screens behave exactly as before.
+  useEffect(() => {
+    let el = null;
+    let startX = 0;
+    let startScroll = 0;
+    let moved = false;
+
+    const overflows = (node) => node.scrollWidth > node.clientWidth + 1;
+
+    const onOver = (e) => {
+      const t = e.target.closest && e.target.closest(TABLE_SCROLL_SELECTOR);
+      if (t) t.classList.toggle('sa-can-drag', overflows(t));
+    };
+
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      const t = e.target.closest && e.target.closest(TABLE_SCROLL_SELECTOR);
+      if (!t || !overflows(t)) return;
+      // Leave form controls fully usable.
+      if (e.target.closest('input, textarea, select, option, label')) return;
+      el = t;
+      startX = e.pageX;
+      startScroll = t.scrollLeft;
+      moved = false;
+    };
+
+    const onMove = (e) => {
+      if (!el) return;
+      const dx = e.pageX - startX;
+      if (!moved) {
+        if (Math.abs(dx) < 5) return;
+        moved = true;
+        el.classList.add('sa-dragging');
+      }
+      el.scrollLeft = startScroll - dx;
+      e.preventDefault();
+    };
+
+    const onEnd = () => {
+      if (!el) return;
+      el.classList.remove('sa-dragging');
+      if (moved) {
+        // A drag must not also count as a click on the row/button underneath.
+        const swallow = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+        window.addEventListener('click', swallow, true);
+        window.setTimeout(() => window.removeEventListener('click', swallow, true), 0);
+      }
+      el = null;
+      moved = false;
+    };
+
+    // Stop the browser's native image/text drag from hijacking the gesture.
+    const onDragStart = (e) => {
+      if (e.target.closest && e.target.closest(TABLE_SCROLL_SELECTOR)) e.preventDefault();
+    };
+
+    document.addEventListener('mouseover', onOver);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onEnd);
+    document.addEventListener('dragstart', onDragStart);
+    return () => {
+      document.removeEventListener('mouseover', onOver);
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onEnd);
+      document.removeEventListener('dragstart', onDragStart);
+    };
   }, []);
 
   // Use this instead of setPage() wherever the tab changes, so the URL
@@ -361,16 +658,27 @@ export default function SuperAdminLayout({ user, onSignOut }) {
           <div className="sa-topbar-title">Super Admin</div>
 
           <nav className="sa-topnav">
-            {PAGES.map(({ key, label, icon }) => (
-              <button
-                key={key}
-                className={`sa-topnav-item${page === key ? ' active' : ''}`}
-                onClick={() => navigateTo(key)}
-              >
-                <span className="sa-topnav-icon">{icon}</span>
-                <span className="sa-topnav-label">{label}</span>
-              </button>
-            ))}
+            {PAGES.map(({ key, label, icon }) => {
+              const badge = key === 'books' ? pendingCount : 0;
+              return (
+                <button
+                  key={key}
+                  className={`sa-topnav-item${page === key ? ' active' : ''}${badge > 0 && pendingFresh ? ' ring' : ''}`}
+                  onClick={() => navigateTo(key)}
+                  aria-label={badge > 0 ? `${label}, ${badge} pending book registration${badge === 1 ? '' : 's'}` : undefined}
+                >
+                  <span className="sa-topnav-icon">
+                    {icon}
+                    {badge > 0 && (
+                      <span key={badge} className={`sa-topnav-badge${pendingFresh ? ' fresh' : ''}`} aria-hidden="true">
+                        {badge > 99 ? '99+' : badge}
+                      </span>
+                    )}
+                  </span>
+                  <span className="sa-topnav-label">{label}</span>
+                </button>
+              );
+            })}
           </nav>
         </header>
 

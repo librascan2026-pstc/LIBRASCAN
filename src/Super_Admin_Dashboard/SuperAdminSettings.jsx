@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice } from '../utils/mfaClient';
 
 
 
@@ -414,6 +415,22 @@ const CSS = `
   .sas-mfa-label { font-size: 13px; font-weight: 700; color: ${TEXT_PRIMARY}; margin-bottom: 2px; }
   .sas-mfa-desc  { font-size: 11.5px; color: ${TEXT_MUTED}; line-height: 1.45; }
   .sas-mfa-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+
+  /* ---------- Security tab: left-aligned, easier-to-scan layout ---------- */
+  .sas-sec, .sas-sec .sas-card { text-align: left; }
+  .sas-sec .sas-card-h {
+    text-align: left; font-size: 16px; margin: 0 0 4px 0;
+  }
+  .sas-sec .sas-card-sub {
+    text-align: left; margin: 0 0 18px 0; padding-bottom: 16px;
+    border-bottom: 1px solid rgba(139,0,0,0.10);
+  }
+  .sas-sec .sas-label { text-align: left; }
+  .sas-sec .sas-tip,
+  .sas-sec .sas-alert,
+  .sas-sec .sas-mfa-label,
+  .sas-sec .sas-mfa-desc { text-align: left; }
+  .sas-sec .sas-mfa-bar { align-items: center; }
 
   .sas-pill {
     display: inline-flex; align-items: center; gap: 5px;
@@ -995,7 +1012,55 @@ function ProfileTab({ profile, user, uid, onToast, onRefresh }) {
   );
 }
 
-function SecurityTab({ onToast }) {
+function SecurityTab({ onToast, uid }) {
+  // --- Email OTP 2FA state (same service + flow as the Librarian / Student portals) ---
+  // Plain on/off toggle — the email OTP challenge itself happens at sign-in time.
+  const [mfaLoading, setMfaLoading] = useState(true);
+  const [mfaEnabled, setMfaEnabled] = useState(false);
+  const [mfaBusy,    setMfaBusy]    = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    getMfaStatus()
+      .then(s => { if (!cancelled) setMfaEnabled(!!s.mfaEnabled); })
+      .catch(() => { if (!cancelled) onToast('Could not reach the 2FA service.', false); })
+      .finally(() => { if (!cancelled) setMfaLoading(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleEnableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      await enableMfa();
+      setMfaEnabled(true);
+      onToast('Two-factor authentication is now on for this account.', true);
+    } catch (err) {
+      onToast(err.message || 'Could not turn on two-factor authentication.', false);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleDisableMfa = async () => {
+    setMfaBusy(true);
+    try {
+      await disableMfa();
+      setMfaEnabled(false);
+      forgetThisDevice(uid);
+      onToast('Two-factor authentication turned off.', true);
+    } catch (err) {
+      onToast(err.message || 'Could not turn off two-factor authentication.', false);
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleForgetDevice = () => {
+    forgetThisDevice(uid);
+    onToast('This device will ask for a code at your next sign-in.', true);
+  };
+
   const [pw,     setPw]     = useState({ old: '', newPw: '', confirm: '' });
   const [pwErr,  setPwErr]  = useState({});
   const [pwBusy, setPwBusy] = useState(false);
@@ -1034,7 +1099,7 @@ function SecurityTab({ onToast }) {
   };
 
   return (
-    <div className="sas-grid">
+    <div className="sas-grid sas-sec">
       <div className="sas-card">
         <p className="sas-card-h">Change Password</p>
         <p className="sas-card-sub">Confirm your current password before setting a new one.</p>
@@ -1075,37 +1140,32 @@ function SecurityTab({ onToast }) {
       <div>
         <div className="sas-card" style={{ marginBottom: 20 }}>
           <p className="sas-card-h">Two-Factor Authentication</p>
-          <p className="sas-card-sub">Require a one-time code from your phone in addition to your password at every sign-in.</p>
+          <p className="sas-card-sub">Require a one-time code sent to your email in addition to your password at sign-in.</p>
 
           <div className="sas-mfa-bar">
             <div>
-              <div className="sas-mfa-label">Authenticator App (TOTP)</div>
-              <div className="sas-mfa-desc">Disabled — toggle to begin setup.</div>
+              <div className="sas-mfa-label">Email One-Time Code</div>
+              <div className="sas-mfa-desc">
+                {mfaLoading ? 'Checking status…'
+                  : mfaEnabled ? "We'll email you a 6-digit code on any new sign-in."
+                  : 'Disabled — toggle to turn it on.'}
+              </div>
             </div>
             <div className="sas-mfa-right">
-              <span className="sas-pill off">
+              <span className={`sas-pill ${mfaEnabled ? 'on' : 'off'}`}>
                 <span className="sas-dot" />
-                Disabled
+                {mfaEnabled ? 'Enabled' : 'Disabled'}
               </span>
               <Toggle
                 id="sas-mfa-toggle"
-                checked={false}
-                onChange={() => {}}
-                disabled={true}
+                checked={mfaEnabled}
+                disabled={mfaLoading || mfaBusy}
+                onChange={() => (mfaEnabled ? handleDisableMfa() : handleEnableMfa())}
               />
             </div>
           </div>
 
-          <div className="sas-alert info">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10"/>
-              <line x1="12" y1="8" x2="12" y2="12"/>
-              <line x1="12" y1="16" x2="12.01" y2="16"/>
-            </svg>
-            <span>
-              Two-factor authentication is coming soon. This feature is currently unavailable.
-            </span>
-          </div>
+
         </div>
       </div>
     </div>
@@ -1144,7 +1204,7 @@ export default function SuperAdminSettings({ user, onSignOut }) {
       </div>
 
       {tab === 'profile'  && <ProfileTab  profile={profile} user={user} uid={user?.id} onToast={toast} onRefresh={refreshProfile} />}
-      {tab === 'security' && <SecurityTab onToast={toast} />}
+      {tab === 'security' && <SecurityTab onToast={toast} uid={user?.id} />}
 
       <FloatingLogout onSignOut={onSignOut} />
     </div>

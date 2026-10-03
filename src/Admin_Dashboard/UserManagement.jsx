@@ -1,9 +1,50 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
+
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+// Student / Employee numbers: digits only, at least 5 (same rule as signup).
+const ID_NUMBER_REGEX = /^\d{5,}$/;
+// Employees must use an official PSU email (exact domain match).
+const PSU_DOMAIN = '@pampangastateu.edu.ph';
+const PSU_EMAIL_REGEX = /^[A-Za-z0-9._%+\-]+@pampangastateu\.edu\.ph$/i;
+
+// Which profiles column holds the ID number depends on the role.
+const idColumnFor = (role) => (role === 'employee' ? 'employee_number' : 'student_number');
+
+// Academic info is role-based: students get college/program/major, employees
+// get a department. The fields that don't apply to the role are cleared.
+function academicFields(f) {
+  const isEmployee = f.role === 'employee';
+  return {
+    college_id:    isEmployee ? null : (f.college_id || null),
+    program_id:    isEmployee ? null : (f.program_id || null),
+    major_id:      isEmployee ? null : (f.major_id   || null),
+    department_id: isEmployee ? (f.department_id || null) : null,
+  };
+}
+
+function idFields(f) {
+  const val = (f.id_number || '').trim();
+  return val ? { [idColumnFor(f.role)]: val } : {};
+}
+
+// True when another profile already uses this Student/Employee Number.
+async function checkIdNumberTaken(role, value) {
+  const val = (value || '').trim();
+  if (!val) return false;
+  const { data, error } = await supabaseAdmin
+    .from('profiles').select('id').eq(idColumnFor(role), val).maybeSingle();
+  if (error) {
+    console.error('[UserManagement] ID number uniqueness check failed:', error.message);
+    return false;
+  }
+  return Boolean(data);
+}
 
 const Icon = {
   eye:    (s=16) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>,
@@ -19,6 +60,7 @@ const Icon = {
 
 const ROLE_CONFIG = {
   student:         { label: 'Student',         bg: 'rgba(33,150,243,0.12)',  color: '#64b5f6',  border: 'rgba(100,181,246,0.28)' },
+  employee:        { label: 'Employee',        bg: 'rgba(38,166,154,0.12)',  color: '#26a69a',  border: 'rgba(38,166,154,0.28)' },
   library_manager: { label: 'Library Manager', bg: 'rgba(139,0,0,0.10)',     color: '#c0392b',  border: 'rgba(139,0,0,0.28)' },
   super_admin:     { label: 'Super Admin',     bg: 'rgba(90,0,90,0.10)',     color: '#9c27b0',  border: 'rgba(156,39,176,0.28)' },
 };
@@ -63,7 +105,95 @@ function Toast({ message, isError }) {
   );
 }
 
-function UserModal({ user, existingUsers = [], onClose, onSave }) {
+// Custom dropdown used for the Department field. The native <select> popup is
+// drawn by the browser/OS, so it ignores the modal's styling and can cover the
+// fields above it. This one opens right under the field, matches the theme,
+// scrolls inside a fixed max-height, and supports keyboard navigation.
+function DepartmentDropdown({ options, value, onChange, placeholder, disabled, hasError, triggerStyle }) {
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const wrapRef = useRef(null);
+  const menuRef = useRef(null);
+  const selected = options.find(o => String(o.id) === String(value));
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const idx = options.findIndex(o => String(o.id) === String(value));
+    setActive(idx);
+    requestAnimationFrame(() => {
+      menuRef.current?.scrollIntoView({ block: 'nearest' });
+      menuRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+    });
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pick = o => { onChange(String(o.id)); setOpen(false); };
+
+  const onKeyDown = e => {
+    if (disabled) return;
+    if (!open && (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen(true); return; }
+    if (!open) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(false); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(i => Math.min(options.length - 1, i + 1)); }
+    else if (e.key === 'ArrowUp')   { e.preventDefault(); setActive(i => Math.max(0, i - 1)); }
+    else if (e.key === 'Enter' && active >= 0) { e.preventDefault(); pick(options[active]); }
+  };
+
+  useEffect(() => {
+    if (open && active >= 0) menuRef.current?.children[active]?.scrollIntoView({ block: 'nearest' });
+  }, [active, open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <button type="button" className="um-input" disabled={disabled}
+        data-invalid={hasError ? 'true' : undefined}
+        aria-haspopup="listbox" aria-expanded={open}
+        onClick={() => !disabled && setOpen(o => !o)} onKeyDown={onKeyDown}
+        style={{ ...triggerStyle, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden' }}>
+        {selected ? selected.name : placeholder}
+      </button>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        style={{ position: 'absolute', right: 14, top: '50%', transform: `translateY(-50%) rotate(${open ? 180 : 0}deg)`,
+          transition: 'transform 0.15s', pointerEvents: 'none', color: 'var(--text-dim)' }}>
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+      {open && (
+        <div ref={menuRef} role="listbox" style={{
+          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 20,
+          maxHeight: 220, overflowY: 'auto', padding: 4,
+          background: '#FFFBF5', border: '1.5px solid rgba(139,0,0,0.25)', borderRadius: 10,
+          boxShadow: '0 12px 28px rgba(60,0,0,0.22)',
+        }}>
+          {options.map((o, i) => {
+            const isSel = String(o.id) === String(value);
+            return (
+              <div key={o.id} role="option" aria-selected={isSel} data-selected={isSel ? 'true' : undefined}
+                onMouseEnter={() => setActive(i)} onMouseDown={e => e.preventDefault()} onClick={() => pick(o)}
+                style={{
+                  padding: '9px 12px', borderRadius: 7, cursor: 'pointer', fontSize: 13.5,
+                  fontFamily: 'var(--font-sans)',
+                  color: isSel ? '#8B0000' : 'var(--text-primary)', fontWeight: isSel ? 700 : 500,
+                  background: isSel ? 'rgba(139,0,0,0.10)' : (i === active ? 'rgba(139,0,0,0.06)' : 'transparent'),
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                }}>
+                <span>{o.name}</span>
+                {isSel && <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UserModal({ user, existingUsers = [], campusId = null, onClose, onSave }) {
   const isEdit = Boolean(user?.id);
   const [form, setForm] = useState({
     first_name: user?.first_name || '',
@@ -71,6 +201,11 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
     email:      user?.email      || '',
     role:       user?.role       || 'student',
     password:   '',
+    id_number:  user?.student_number || user?.employee_number || '',
+    college_id: user?.college_id || '',
+    program_id: user?.program_id || '',
+    major_id:   user?.major_id   || '',
+    department_id: user?.department_id || '',
   });
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -78,6 +213,66 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
   const [showPw, setShowPw] = useState(false);
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  // ── Academic info lookups ──
+  // Campus is automatic: it's always the signed-in librarian's own campus.
+  const [campusName,  setCampusName]  = useState('');
+  const [colleges,    setColleges]    = useState([]);
+  const [programs,    setPrograms]    = useState([]);
+  const [majors,      setMajors]      = useState([]);
+  const [departments, setDepartments] = useState([]);
+  const [lookupsLoaded,  setLookupsLoaded]  = useState(false);
+  const [loadingPrograms, setLoadingPrograms] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    if (!campusId) { setCampusName(''); setColleges([]); setDepartments([]); setLookupsLoaded(true); return undefined; }
+    setLookupsLoaded(false);
+    Promise.all([
+      supabaseAdmin.from('campuses').select('campus_name').eq('id', campusId).maybeSingle(),
+      supabaseAdmin.from('colleges').select('id, college_name').eq('campus_id', campusId).order('college_name'),
+      supabaseAdmin.from('departments').select('id, department_name').eq('campus_id', campusId).order('category').order('department_name'),
+    ]).then(([camp, col, dep]) => {
+      if (!alive) return;
+      setCampusName(camp?.data?.campus_name || '');
+      setColleges((col?.data || []).map(c => ({ id: c.id, name: c.college_name })));
+      setDepartments((dep?.data || []).map(d => ({ id: d.id, name: d.department_name })));
+      setLookupsLoaded(true);
+    }).catch(() => { if (alive) setLookupsLoaded(true); });
+    return () => { alive = false; };
+  }, [campusId]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!form.college_id) { setPrograms([]); setLoadingPrograms(false); return undefined; }
+    setLoadingPrograms(true);
+    supabaseAdmin.from('programs').select('id, program_name').eq('college_id', form.college_id).order('program_name')
+      .then(({ data }) => { if (alive) { setPrograms((data || []).map(p => ({ id: p.id, name: p.program_name }))); setLoadingPrograms(false); } });
+    return () => { alive = false; };
+  }, [form.college_id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!form.program_id) { setMajors([]); return undefined; }
+    supabaseAdmin.from('majors').select('id, major_name').eq('program_id', form.program_id).order('major_name')
+      .then(({ data }) => { if (alive) setMajors((data || []).map(m => ({ id: m.id, name: m.major_name }))); });
+    return () => { alive = false; };
+  }, [form.program_id]);
+
+  // Esc closes the dialog (unless a save is in flight).
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !saving) onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [saving, onClose]);
+
+  // Student and Employee need different academic fields, so changing the
+  // role clears the ones that no longer apply.
+  const handleRoleChange = (e) => {
+    const role = e.target.value;
+    setForm(f => ({ ...f, role, college_id: '', program_id: '', major_id: '', department_id: '' }));
+    setErrors(er => ({ ...er, id_number: '', email: '', college_id: '', program_id: '', department_id: '' }));
+  };
 
   // Uniqueness is decided by the ID number embedded in the email
   // (e.g. 2023313839@pampangastateu.edu.ph), never by name — two different
@@ -99,6 +294,8 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
     if (!isEdit) {
       if (!form.email.trim())                                    errs.email    = 'Email is required.';
       else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email))  errs.email    = 'Invalid email format.';
+      else if (form.role === 'employee' && !PSU_EMAIL_REGEX.test(form.email.trim()))
+                                                                 errs.email    = `Employees must use a ${PSU_DOMAIN} email address.`;
       // Unique email / student ID check — email is only editable on create,
       // since it doubles as the account's login and ID number.
       else if (isDuplicateEmail(form.email))                     errs.email    = 'This ID number / email is already registered.';
@@ -107,14 +304,38 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
     } else {
       if (form.password && form.password.length < 8)             errs.password = 'Minimum 8 characters.';
     }
+    if (!isEdit) {
+      const idLabel = form.role === 'employee' ? 'Employee number' : 'Student number';
+      const idCol   = idColumnFor(form.role);
+      if (!form.id_number.trim())                       errs.id_number = `${idLabel} is required.`;
+      else if (!ID_NUMBER_REGEX.test(form.id_number.trim())) errs.id_number = 'Must be at least 5 digits (numbers only).';
+      else if (existingUsers.some(u => (u[idCol] || '') === form.id_number.trim()))
+                                                        errs.id_number = `This ${idLabel} is already registered.`;
+
+      if (form.role === 'employee') {
+        if (!form.department_id) errs.department_id = 'Please select a department.';
+      } else {
+        if (!form.college_id) errs.college_id = 'Please select a college.';
+        if (!form.program_id) errs.program_id = 'Please select a program.';
+      }
+    }
     return errs;
   };
 
   const handleSave = async () => {
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      setTimeout(() => document.querySelector('.um-modal-body [data-invalid="true"]')?.scrollIntoView({ block: 'center', behavior: 'smooth' }), 30);
+      return;
+    }
     setSaving(true); setApiErr('');
     try {
+      if (!isEdit && await checkIdNumberTaken(form.role, form.id_number)) {
+        const idLabel = form.role === 'employee' ? 'Employee number' : 'Student number';
+        setErrors(er => ({ ...er, id_number: `This ${idLabel} is already registered.` }));
+        return;
+      }
       await onSave({ ...form, id: user?.id });
       onClose();
     } catch (err) {
@@ -125,28 +346,99 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
   };
 
   const SectionTitle = ({ children }) => (
-    <div style={{
-      fontFamily: 'var(--font-display)', fontSize: 10.5, letterSpacing: '0.12em',
-      textTransform: 'uppercase', color: 'var(--maroon-mid)',
-      borderBottom: '1px solid rgba(139,0,0,0.13)',
-      paddingBottom: 8, marginBottom: 14, marginTop: 4,
-    }}>{children}</div>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+      <span style={{ width: 3, height: 15, borderRadius: 2, flexShrink: 0, background: `linear-gradient(180deg, ${G}, var(--maroon-mid))` }} />
+      <span style={{
+        fontFamily: 'var(--font-display)', fontSize: 11.5, fontWeight: 600,
+        letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--maroon-mid)', whiteSpace: 'nowrap',
+      }}>{children}</span>
+      <span style={{ flex: 1, height: 1, background: 'rgba(139,0,0,0.14)' }} />
+    </div>
   );
 
   const inputStyle = (hasErr) => ({
-    width: '100%', padding: '9px 12px',
+    width: '100%', padding: '10px 13px',
     background: 'var(--cream-light)', color: 'var(--text-primary)',
-    border: `1px solid ${hasErr ? 'rgba(239,154,154,0.6)' : 'rgba(139,0,0,0.22)'}`,
-    borderRadius: 8, fontSize: 13, fontFamily: 'var(--font-sans)',
-    outline: 'none', transition: 'border-color 0.18s',
-    boxSizing: 'border-box',
+    border: `1px solid ${hasErr ? 'rgba(192,86,78,0.75)' : 'rgba(139,0,0,0.22)'}`,
+    borderRadius: 9, fontSize: 13.5, fontFamily: 'var(--font-sans)',
+    outline: 'none', transition: 'border-color 0.18s, box-shadow 0.18s',
+    boxSizing: 'border-box', textAlign: 'left',
   });
 
   const labelStyle = {
-    display: 'block', fontFamily: 'var(--font-sans)',
-    fontSize: 10.5, fontWeight: 600, letterSpacing: '0.07em',
-    textTransform: 'uppercase', color: 'var(--text-dim)', marginBottom: 5,
+    display: 'block', fontFamily: 'var(--font-sans)', textAlign: 'left',
+    fontSize: 10.5, fontWeight: 700, letterSpacing: '0.07em',
+    textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 6,
   };
+
+  const noteStyle = {
+    fontWeight: 400, textTransform: 'none', letterSpacing: 0,
+    marginLeft: 6, color: 'var(--text-dim)', fontSize: 10.5,
+  };
+
+  // Label + control + error/hint. Called as a plain function (not a
+  // component) so inputs keep focus while typing.
+  const field = (label, { required = false, error = '', hint = '', note = '', span2 = false } = {}, control) => (
+    <div className={span2 ? 'um-span2' : undefined} style={{ textAlign: 'left', minWidth: 0 }}>
+      <label style={labelStyle}>
+        {label}{required && <span style={{ color: '#c0564e', marginLeft: 3 }}>*</span>}
+        {note && <span style={noteStyle}>{note}</span>}
+      </label>
+      {control}
+      {error
+        ? <span role="alert" style={{ fontSize: 11.5, color: '#c0564e', fontFamily: 'var(--font-sans)', marginTop: 5, display: 'block', textAlign: 'left' }}>{error}</span>
+        : hint
+          ? <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)', marginTop: 5, display: 'block', textAlign: 'left' }}>{hint}</span>
+          : null}
+    </div>
+  );
+
+  const chevron = (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+      style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-dim)' }}>
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+
+  const selectStyle = (hasErr, value, disabled) => ({
+    ...inputStyle(hasErr), appearance: 'none', WebkitAppearance: 'none',
+    paddingRight: 36, textOverflow: 'ellipsis',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    color: value ? 'var(--text-primary)' : 'var(--text-dim)',
+    ...(disabled ? { opacity: 0.65, background: 'rgba(139,0,0,0.04)' } : {}),
+  });
+
+  const handleSelectChange = (key, v) => {
+    if (key === 'college_id')      setForm(f => ({ ...f, college_id: v, program_id: '', major_id: '' }));
+    else if (key === 'program_id') setForm(f => ({ ...f, program_id: v, major_id: '' }));
+    else                           setForm(f => ({ ...f, [key]: v }));
+    setErrors(er => ({ ...er, [key]: '' }));
+  };
+
+  const renderSelect = (label, key, options, placeholder, { optional = false, disabled = false, hint = '', custom = false } = {}) =>
+    field(label, { required: !optional, error: errors[key], hint, note: optional ? '(optional)' : '', span2: true },
+      custom ? (
+        <DepartmentDropdown options={options} value={form[key]} placeholder={placeholder} disabled={disabled}
+          hasError={!!errors[key]} onChange={v => handleSelectChange(key, v)}
+          triggerStyle={selectStyle(errors[key], form[key], disabled)} />
+      ) : (
+      <div style={{ position: 'relative' }}>
+        <select className="um-input" data-invalid={errors[key] ? 'true' : undefined}
+          value={form[key]} disabled={disabled}
+          onChange={e => handleSelectChange(key, e.target.value)}
+          style={selectStyle(errors[key], form[key], disabled)}>
+          <option value="">{placeholder}</option>
+          {options.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+        </select>
+        {chevron}
+      </div>)
+    );
+
+  const collegePlaceholder = !lookupsLoaded ? 'Loading colleges…' : (colleges.length === 0 ? 'No colleges available' : 'Select college');
+  const programPlaceholder = !form.college_id ? 'Select a college first'
+    : loadingPrograms ? 'Loading programs…'
+    : (programs.length === 0 ? 'No programs available' : 'Select program / course');
+  const deptPlaceholder = !lookupsLoaded ? 'Loading departments…' : (departments.length === 0 ? 'No departments available' : 'Select department');
 
   return (
     <div style={{
@@ -158,32 +450,49 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
     }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
+      <style>{`
+        .um-input::placeholder { color: var(--text-dim); opacity: 0.85; }
+        .um-input:focus { border-color: #8B0000 !important; box-shadow: 0 0 0 3px rgba(139,0,0,0.10); }
+        .um-input[data-invalid="true"]:focus { border-color: #c0564e !important; box-shadow: 0 0 0 3px rgba(192,86,78,0.16); }
+        .um-input:disabled { cursor: not-allowed; }
+        .um-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 14px; }
+        .um-span2 { grid-column: 1 / -1; }
+        .um-modal-body::-webkit-scrollbar { width: 6px; }
+        .um-modal-body::-webkit-scrollbar-thumb { background: rgba(139,0,0,0.25); border-radius: 10px; }
+        @media (max-width: 560px) { .um-grid { grid-template-columns: 1fr; } }
+      `}</style>
+      <div role="dialog" aria-modal="true" aria-label={isEdit ? 'Edit user account' : 'Add new user'} style={{
         background: 'var(--cream)', borderRadius: 16,
         border: '1px solid rgba(139,0,0,0.20)',
         boxShadow: '0 24px 64px rgba(40,0,0,0.50), 0 0 0 1px rgba(201,168,76,0.10)',
-        width: '100%', maxWidth: 520,
+        width: '100%', maxWidth: 640,
+        maxHeight: 'calc(100vh - 48px)',
         display: 'flex', flexDirection: 'column',
         animation: 'lm-modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1)',
         overflow: 'hidden',
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '18px 24px',
+          padding: '18px 26px',
           background: 'linear-gradient(135deg, var(--maroon-deep), var(--maroon-mid))',
           borderBottom: '1px solid rgba(201,168,76,0.20)',
           flexShrink: 0, position: 'relative',
         }}>
           <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 1,
             background: 'linear-gradient(90deg,transparent,rgba(201,168,76,0.40),transparent)' }} />
-          <h2 style={{
-            fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 600,
-            color: GP, letterSpacing: '0.05em',
-          }}>
-            {isEdit ? 'Edit User Account' : 'Add New User'}
-          </h2>
-          <button onClick={onClose} style={{
-            width: 30, height: 30, borderRadius: '50%',
+          <div style={{ textAlign: 'left' }}>
+            <h2 style={{
+              fontFamily: 'var(--font-display)', fontSize: 17, fontWeight: 600,
+              color: GP, letterSpacing: '0.05em', margin: 0,
+            }}>
+              {isEdit ? 'Edit User Account' : 'Add New User'}
+            </h2>
+            <div style={{ fontFamily: 'var(--font-sans)', fontSize: 11.5, color: 'rgba(245,228,168,0.65)', marginTop: 3 }}>
+              {isEdit ? 'Update this account’s details.' : 'Create a student or employee account for your campus.'}
+            </div>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close" style={{
+            width: 30, height: 30, borderRadius: '50%', flexShrink: 0,
             background: 'rgba(245,228,168,0.10)', border: '1px solid rgba(245,228,168,0.18)',
             color: 'rgba(245,228,168,0.70)', fontSize: 14,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -194,118 +503,149 @@ function UserModal({ user, existingUsers = [], onClose, onSave }) {
           >✕</button>
         </div>
 
-        <div style={{ padding: '22px 24px', overflowY: 'auto', background: 'var(--cream-light)' }}>
+        <form noValidate onSubmit={e => { e.preventDefault(); handleSave(); }}
+          style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+
+          <div className="um-modal-body" style={{ padding: '22px 26px', overflowY: 'auto', background: 'var(--cream-light)', flex: 1, minHeight: 0 }}>
+
+            <SectionTitle>User Information</SectionTitle>
+            <div className="um-grid">
+              {field('First Name', { required: true, error: errors.first_name },
+                <input className="um-input" data-invalid={errors.first_name ? 'true' : undefined} style={inputStyle(errors.first_name)}
+                  value={form.first_name} onChange={e => set('first_name', e.target.value)} placeholder="First name" autoComplete="off" />)}
+
+              {field('Last Name', { required: true, error: errors.last_name },
+                <input className="um-input" data-invalid={errors.last_name ? 'true' : undefined} style={inputStyle(errors.last_name)}
+                  value={form.last_name} onChange={e => set('last_name', e.target.value)} placeholder="Last name" autoComplete="off" />)}
+
+              {!isEdit && field('Email Address', { required: true, error: errors.email, span2: true },
+                <input className="um-input" data-invalid={errors.email ? 'true' : undefined} style={inputStyle(errors.email)}
+                  type="email" value={form.email} onChange={e => set('email', e.target.value)}
+                  placeholder={form.role === 'employee' ? `yourname${PSU_DOMAIN}` : 'e.g. 2023929321@pampangastateu.edu.ph'} autoComplete="off" />)}
+
+              {field('Role', { required: true, note: isEdit ? '(locked)' : '' },
+                <div style={{ position: 'relative' }}>
+                  <select className="um-input" value={form.role} disabled={isEdit} onChange={handleRoleChange}
+                    style={selectStyle(false, form.role, isEdit)}>
+                    <option value="student">Student</option>
+                    <option value="employee">Employee</option>
+                  </select>
+                  {chevron}
+                </div>)}
+
+              {field(form.role === 'employee' ? 'Employee Number' : 'Student Number',
+                { required: !isEdit, error: errors.id_number, note: isEdit ? '(locked)' : '', hint: isEdit ? '' : '' },
+                <input className="um-input" data-invalid={errors.id_number ? 'true' : undefined}
+                  style={{ ...inputStyle(errors.id_number), ...(isEdit ? { opacity: 0.7, background: 'rgba(139,0,0,0.04)' } : {}) }}
+                  inputMode="numeric" value={form.id_number} disabled={isEdit}
+                  onChange={e => set('id_number', e.target.value.replace(/\D/g, ''))}
+                  placeholder={isEdit ? '—' : 'e.g. 2023929321'} autoComplete="off" />)}
+
+              {(form.role === 'library_manager' || form.role === 'admin') && (
+                <div className="um-span2" style={{
+                  padding: '8px 12px', borderRadius: 7,
+                  background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.22)',
+                  fontSize: 11.5, color: G, fontFamily: 'var(--font-sans)',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                }}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                    <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                  </svg>
+                  {form.role === 'admin' ? 'Administrator' : 'Library Manager'} accounts have full system access.
+                </div>
+              )}
+
+              {field(isEdit ? 'New Password' : 'Password',
+                { required: !isEdit, error: errors.password, span2: true, note: isEdit ? '(leave blank to keep current)' : '', hint: isEdit ? '' : 'Minimum 8 characters.' },
+                <div style={{ position: 'relative' }}>
+                  <input className="um-input" data-invalid={errors.password ? 'true' : undefined}
+                    style={{ ...inputStyle(errors.password), paddingRight: 42 }}
+                    type={showPw ? 'text' : 'password'} value={form.password}
+                    onChange={e => set('password', e.target.value)}
+                    placeholder={isEdit ? 'Leave blank to keep current' : 'Create a password'} autoComplete="new-password" />
+                  <button type="button" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} style={{
+                    position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-dim)', display: 'flex', padding: 4,
+                  }}>
+                    {showPw ? Icon.eyeOff(15) : Icon.eye(15)}
+                  </button>
+                </div>)}
+            </div>
+
+            <div style={{ height: 24 }} />
+
+            <SectionTitle>Academic Information</SectionTitle>
+            <div className="um-grid">
+              {field('Campus', { span2: true, note: '(automatic)', hint: 'Users are added to your campus automatically.' },
+                <div style={{ position: 'relative' }}>
+                  <input className="um-input" readOnly disabled
+                    style={{ ...inputStyle(false), paddingRight: 38, background: 'rgba(139,0,0,0.05)', borderStyle: 'dashed', color: 'var(--text-muted)' }}
+                    value={campusName || (campusId ? 'Loading…' : 'No campus assigned')} />
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                    style={{ position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }}>
+                    <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                  </svg>
+                </div>)}
+
+              {form.role === 'employee' ? (
+                renderSelect('Department', 'department_id', departments, deptPlaceholder,
+                  { disabled: !lookupsLoaded || departments.length === 0, custom: true })
+              ) : (
+                <>
+                  {renderSelect('College', 'college_id', colleges, collegePlaceholder,
+                    { disabled: !lookupsLoaded || colleges.length === 0 })}
+                  {renderSelect('Program / Course', 'program_id', programs, programPlaceholder,
+                    { disabled: !form.college_id || loadingPrograms || programs.length === 0 })}
+                  {form.program_id && majors.length > 0 &&
+                    renderSelect('Major', 'major_id', majors, 'Select major', { optional: true })}
+                </>
+              )}
+            </div>
+          </div>
+
           {apiErr && (
-            <div style={{
-              background: 'rgba(139,0,0,0.08)', border: '1px solid rgba(139,0,0,0.24)',
-              borderRadius: 8, padding: '10px 14px', marginBottom: 16,
-              fontSize: 12.5, color: 'var(--maroon-light)', fontFamily: 'var(--font-sans)',
+            <div role="alert" style={{
+              flexShrink: 0, background: 'rgba(139,0,0,0.08)', borderTop: '1px solid rgba(139,0,0,0.24)',
+              padding: '10px 26px', fontSize: 12.5, color: 'var(--maroon-light)', fontFamily: 'var(--font-sans)', textAlign: 'left',
             }}>{apiErr}</div>
           )}
 
-          <SectionTitle>Personal Information</SectionTitle>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 14 }}>
-            <div>
-              <label style={labelStyle}>First Name <span style={{ color: '#c0564e' }}>*</span></label>
-              <input style={inputStyle(errors.first_name)} value={form.first_name}
-                onChange={e => set('first_name', e.target.value)} placeholder="First name" />
-              {errors.first_name && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)', marginTop: 3, display: 'block' }}>{errors.first_name}</span>}
-            </div>
-            <div>
-              <label style={labelStyle}>Last Name <span style={{ color: '#c0564e' }}>*</span></label>
-              <input style={inputStyle(errors.last_name)} value={form.last_name}
-                onChange={e => set('last_name', e.target.value)} placeholder="Last name" />
-              {errors.last_name && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)', marginTop: 3, display: 'block' }}>{errors.last_name}</span>}
-            </div>
-          </div>
-
-          {!isEdit && (
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Email Address <span style={{ color: '#c0564e' }}>*</span></label>
-              <input style={inputStyle(errors.email)} type="email" value={form.email}
-                onChange={e => set('email', e.target.value)}
-                placeholder="e.g. 2023929321@pampangastateu.edu.ph" />
-              {errors.email && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)', marginTop: 3, display: 'block' }}>{errors.email}</span>}
-            </div>
-          )}
-
-          <SectionTitle>Security & Role</SectionTitle>
-
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>
-              {isEdit ? 'New Password' : 'Password'} {!isEdit && <span style={{ color: '#c0564e' }}>*</span>}
-              {isEdit && <span style={{ fontWeight: 400, textTransform: 'none', letterSpacing: 0, marginLeft: 4, color: 'var(--text-dim)', fontSize: 10 }}>(leave blank to keep current)</span>}
-            </label>
-            <div style={{ position: 'relative' }}>
-              <input style={{ ...inputStyle(errors.password), paddingRight: 40 }}
-                type={showPw ? 'text' : 'password'} value={form.password}
-                onChange={e => set('password', e.target.value)}
-                placeholder={isEdit ? 'Leave blank to keep current' : 'Minimum 8 characters'} />
-              <button type="button" onClick={() => setShowPw(s => !s)} style={{
-                position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)',
-                background: 'none', border: 'none', cursor: 'pointer',
-                color: 'var(--text-dim)', display: 'flex', padding: 4,
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+            padding: '14px 26px', flexShrink: 0,
+            borderTop: '1px solid rgba(139,0,0,0.14)',
+            background: 'rgba(139,0,0,0.04)',
+          }}>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
+              <span style={{ color: '#c0564e' }}>*</span> Required
+            </span>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button type="button" onClick={onClose} disabled={saving} style={{
+                padding: '9px 20px', borderRadius: 8, fontSize: 13,
+                border: '1px solid rgba(139,0,0,0.22)', background: 'transparent',
+                color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+                transition: 'all 0.18s',
+              }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+              >Cancel</button>
+              <button type="submit" disabled={saving} style={{
+                padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+                border: '1px solid rgba(201,168,76,0.35)',
+                background: saving ? 'rgba(139,0,0,0.5)' : 'linear-gradient(135deg,#8B0000,#5A0000)',
+                color: GP, fontFamily: 'var(--font-sans)', cursor: saving ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 7,
+                boxShadow: '0 3px 12px rgba(80,0,0,0.28)', transition: 'all 0.18s',
               }}>
-                {showPw ? Icon.eyeOff(15) : Icon.eye(15)}
+                {saving
+                  ? <><span style={{ width: 13, height: 13, border: `2px solid rgba(245,228,168,0.3)`, borderTopColor: GP, borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Saving…</>
+                  : (isEdit ? 'Save Changes' : 'Create User')}
               </button>
             </div>
-            {errors.password && <span style={{ fontSize: 11, color: '#c0564e', fontFamily: 'var(--font-sans)', marginTop: 3, display: 'block' }}>{errors.password}</span>}
           </div>
-
-          <div style={{ marginBottom: 6 }}>
-            <label style={labelStyle}>Role <span style={{ color: '#c0564e' }}>*</span></label>
-            <select value={form.role} onChange={e => set('role', e.target.value)} style={{
-              ...inputStyle(false), appearance: 'none', cursor: 'pointer',
-            }}>
-              <option value="student">Student</option>
-              
-            </select>
-            {(form.role === 'library_manager' || form.role === 'admin') && (
-              <div style={{
-                marginTop: 8, padding: '8px 12px', borderRadius: 7,
-                background: 'rgba(201,168,76,0.08)', border: '1px solid rgba(201,168,76,0.22)',
-                fontSize: 11.5, color: G, fontFamily: 'var(--font-sans)',
-                display: 'flex', alignItems: 'center', gap: 6,
-              }}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                </svg>
-                {form.role === 'admin' ? 'Administrator' : 'Library Manager'} accounts have full system access.
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div style={{
-          display: 'flex', justifyContent: 'flex-end', gap: 10,
-          padding: '16px 24px',
-          borderTop: '1px solid rgba(139,0,0,0.14)',
-          background: 'rgba(139,0,0,0.04)',
-        }}>
-          <button onClick={onClose} disabled={saving} style={{
-            padding: '9px 20px', borderRadius: 8, fontSize: 13,
-            border: '1px solid rgba(139,0,0,0.22)', background: 'transparent',
-            color: 'var(--text-muted)', fontFamily: 'var(--font-sans)', cursor: 'pointer',
-            transition: 'all 0.18s',
-          }}
-            onMouseEnter={e => e.currentTarget.style.background = 'rgba(139,0,0,0.06)'}
-            onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-          >Cancel</button>
-          <button onClick={handleSave} disabled={saving} style={{
-            padding: '9px 22px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-            border: '1px solid rgba(201,168,76,0.35)',
-            background: saving ? 'rgba(139,0,0,0.5)' : 'linear-gradient(135deg,#8B0000,#5A0000)',
-            color: GP, fontFamily: 'var(--font-sans)', cursor: saving ? 'not-allowed' : 'pointer',
-            display: 'flex', alignItems: 'center', gap: 7,
-            boxShadow: '0 3px 12px rgba(80,0,0,0.28)', transition: 'all 0.18s',
-          }}>
-            {saving
-              ? <><span style={{ width: 13, height: 13, border: `2px solid rgba(245,228,168,0.3)`, borderTopColor: GP, borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Saving…</>
-              : (isEdit ? 'Save Changes' : 'Create User')}
-          </button>
-        </div>
+        </form>
       </div>
     </div>
   );
@@ -401,7 +741,7 @@ export default function UserManagement({ onStatsRefresh }) {
     try {
       let _q = supabaseAdmin
         .from('profiles')
-        .select('id, first_name, last_name, email, student_number, role, created_at, avatar_url, campus_id')
+        .select('id, first_name, last_name, email, student_number, employee_number, role, created_at, avatar_url, campus_id, college_id, program_id, major_id, department_id')
         .order('created_at', { ascending: false });
       // Phase 9: librarian only sees users from their campus
       if (campusId) _q = _q.eq('campus_id', campusId);
@@ -410,7 +750,23 @@ export default function UserManagement({ onStatsRefresh }) {
       // Only Super Admin manages Library Manager accounts, so this panel
       // (used by Library Managers themselves) only ever shows students —
       // exclude both super_admin and library_manager from the list.
-      setUsers((data || []).filter(u => u.role !== 'super_admin' && u.role !== 'library_manager'));
+      const visible = (data || []).filter(u => u.role !== 'super_admin' && u.role !== 'library_manager');
+      // Fallback: if a profile's avatar_url is empty but the photo is still in
+      // the 'avatars' bucket (uploads live at <user-id>/avatar.<ext>), rebuild
+      // its public URL so the picture shows again. Display-only — nothing is
+      // written back to the database.
+      const withAvatars = await Promise.all(visible.map(async (u) => {
+        if (u.avatar_url) return u;
+        try {
+          const { data: files } = await supabaseAdmin.storage.from('avatars')
+            .list(u.id, { limit: 5, sortBy: { column: 'updated_at', order: 'desc' } });
+          const f = (files || []).find(x => x.id && /^avatar\./i.test(x.name));
+          if (!f) return u;
+          const { data: pub } = supabaseAdmin.storage.from('avatars').getPublicUrl(`${u.id}/${f.name}`);
+          return { ...u, avatar_url: pub?.publicUrl ? `${pub.publicUrl}?t=${new Date(f.updated_at || Date.now()).getTime()}` : null };
+        } catch { return u; }
+      }));
+      setUsers(withAvatars);
     } catch (err) {
       showToast('Failed to load users: ' + err.message, true);
       setUsers([]);
@@ -425,7 +781,7 @@ export default function UserManagement({ onStatsRefresh }) {
     if (formData.id) {
       const { error: profileErr } = await supabaseAdmin
         .from('profiles')
-        .update({ first_name: formData.first_name.trim(), last_name: formData.last_name.trim(), role: formData.role, updated_at: new Date().toISOString() })
+        .update({ first_name: formData.first_name.trim(), last_name: formData.last_name.trim(), role: formData.role, ...academicFields(formData), updated_at: new Date().toISOString() })
         .eq('id', formData.id);
       if (profileErr) throw profileErr;
 
@@ -437,7 +793,9 @@ export default function UserManagement({ onStatsRefresh }) {
     } else {
       const { data: adminData, error: adminErr } = await supabaseAdmin.auth.admin.createUser({
         email: formData.email.trim(), password: formData.password,
-        email_confirm: true,
+        // Not auto-confirmed: like Sign Up, the new user must click the link in
+        // the confirmation email before they can log in to the student portal.
+        email_confirm: false,
         user_metadata: { first_name: formData.first_name.trim(), last_name: formData.last_name.trim(), role: formData.role },
       });
       if (adminErr) throw adminErr;
@@ -446,12 +804,30 @@ export default function UserManagement({ onStatsRefresh }) {
         id: adminData.user.id,
         first_name: formData.first_name.trim(), last_name: formData.last_name.trim(),
         email: formData.email.trim(), role: formData.role,
+        ...idFields(formData), ...academicFields(formData),
         // Phase 9: stamp campus_id so the new user belongs to this librarian's campus
         ...(campusId ? { campus_id: campusId } : {}),
         created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
       }, { onConflict: 'id' });
-      if (profileErr) throw profileErr;
-      showToast('User created successfully.');
+      if (profileErr) {
+        // Roll back the auth account so a failed profile insert never leaves
+        // an orphaned login that has no profiles row (=> "missing profile").
+        await supabaseAdmin.auth.admin.deleteUser(adminData.user.id).catch(() => {});
+        throw profileErr;
+      }
+      // Email the confirmation link — same endpoint the Sign Up page's
+      // "Resend email" uses, so the user gets the identical email.
+      let emailSent = false;
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: formData.email.trim().toLowerCase() }),
+        });
+        emailSent = res.ok;
+      } catch { /* server unreachable — handled below */ }
+      if (emailSent) showToast(`User created. A confirmation email was sent to ${formData.email.trim()}.`);
+      else showToast('User created, but the confirmation email could not be sent. The user can tap "Resend" on the login page.', true);
     }
     await loadUsers();
     onStatsRefresh?.();
@@ -542,7 +918,7 @@ export default function UserManagement({ onStatsRefresh }) {
           {search && <div className="lm-empty-sub">Try a different search term.</div>}
         </div>
       ) : (
-        <div style={{
+        <div className="um-table-scroll" style={{
           borderRadius: 10, border: '1px solid rgba(139,0,0,0.13)',
           overflow: 'auto', overflowX: 'auto', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
           WebkitOverflowScrolling: 'touch',
@@ -587,7 +963,7 @@ export default function UserManagement({ onStatsRefresh }) {
       )}
 
       {showModal && (
-        <UserModal user={modalUser} existingUsers={users} onClose={() => { setShowModal(false); setModalUser(null); }} onSave={handleSave} />
+        <UserModal user={modalUser} existingUsers={users} campusId={campusId} onClose={() => { setShowModal(false); setModalUser(null); }} onSave={handleSave} />
       )}
       {deleteUser && (
         <ConfirmDeleteModal user={deleteUser} loading={deleting}
@@ -599,6 +975,7 @@ export default function UserManagement({ onStatsRefresh }) {
 
 function UserRow({ user: u, idx, onEdit, onDelete }) {
   const [hov, setHov] = useState(false);
+  const [badAvatar, setBadAvatar] = useState(null); // avatar URL that failed to load → show initials instead
   const initials = ((u.first_name?.[0] || u.email?.[0] || '?') + (u.last_name?.[0] || '')).toUpperCase();
   const displayName = (u.first_name || u.last_name)
     ? `${u.first_name || ''} ${u.last_name || ''}`.trim()
@@ -625,8 +1002,8 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
             boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
             overflow: 'hidden',
           }}>
-            {u.avatar_url
-              ? <img src={u.avatar_url} alt={initials} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+            {u.avatar_url && badAvatar !== u.avatar_url
+              ? <img src={u.avatar_url} alt={initials} onError={() => setBadAvatar(u.avatar_url)} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
               : initials}
           </div>
           <span style={{
@@ -639,7 +1016,7 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
         </div>
       </td>
       <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
-        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.student_number || '—'}</span>
+        <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.student_number || u.employee_number || '—'}</span>
       </td>
       <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.email || '—'}</span>

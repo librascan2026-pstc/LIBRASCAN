@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus, Pencil, Trash2, ChevronRight, ChevronLeft, Copy, Ban, CheckCircle2,
   Building2, X, Camera, Check, Search, SlidersHorizontal, GraduationCap,
-  BookOpen, Users, MapPin, Eye, MoreVertical, AlertTriangle, ArrowUpDown,
+  BookOpen, Users, MapPin, MoreVertical, AlertTriangle, ArrowUpDown,
   Landmark, School, Folder, Calendar, ShieldCheck,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
@@ -121,13 +121,6 @@ const CSS = `
     color: ${TEXT}; line-height: 1.2; margin-bottom: 10px;
     display: flex; align-items: center; gap: 12px;
   }
-  .cmh-hero-icon {
-    width: 42px; height: 42px; border-radius: 14px;
-    background: ${MAROON_SOFT};
-    border: 1px solid rgba(122,0,0,0.18);
-    display: flex; align-items: center; justify-content: center;
-    color: ${MAROON}; flex-shrink: 0;
-  }
   .cmh-hero-sub {
     font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED};
     max-width: 520px; font-weight: 500;
@@ -210,17 +203,16 @@ const CSS = `
     display: flex; align-items: center; gap: 8px;
   }
   .cmh-carousel-wrap {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+    position: relative;
     padding: 6px 0 18px;
   }
   .cmh-carousel-track-outer {
-    flex: 1;
+    width: 100%;
     min-width: 0;
     overflow: hidden;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
-            mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
+    /* breathing room so the selected card's lift isn't clipped at the top */
+    padding-top: 10px;
+    margin-top: -10px;
   }
   .cmh-carousel-track {
     display: flex;
@@ -239,9 +231,14 @@ const CSS = `
     cursor: pointer;
     box-shadow: 0 8px 20px rgba(59,42,37,0.14);
     z-index: 5;
+    position: absolute;
+    top: calc(50% - 6px);
+    transform: translateY(-50%);
     transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
   }
-  .cmh-carousel-arrow:hover { background: ${MAROON}; color: #fff; border-color: ${MAROON}; transform: scale(1.07); }
+  .cmh-carousel-arrow.l { left: 10px; }
+  .cmh-carousel-arrow.r { right: 10px; }
+  .cmh-carousel-arrow:hover { background: ${MAROON}; color: #fff; border-color: ${MAROON}; transform: translateY(-50%) scale(1.07); }
   .cmh-carousel-empty {
     border: 1.5px dashed rgba(122,0,0,0.28);
     border-radius: 18px;
@@ -257,7 +254,6 @@ const CSS = `
     flex: 0 0 200px;
     height: 168px;
     background:
-      radial-gradient(circle at 30% 0%, rgba(255,255,255,0.10) 0%, transparent 55%),
       radial-gradient(circle at 100% 100%, rgba(0,0,0,0.20) 0%, transparent 62%),
       linear-gradient(160deg, ${MAROON_MID} 0%, ${MAROON} 45%, ${MAROON_DEEP} 100%);
     border: 1.5px solid rgba(212,175,55,0.22);
@@ -273,7 +269,7 @@ const CSS = `
     gap: 12px;
     text-align: center;
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
-    box-shadow: 0 4px 14px rgba(40,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06);
+    box-shadow: 0 4px 14px rgba(40,0,0,0.22);
   }
   .cmh-campus-card::before {
     content: '';
@@ -304,22 +300,20 @@ const CSS = `
     background-image:
       radial-gradient(circle at 86% 122%, transparent 54px, rgba(212,175,55,0.16) 56px, rgba(212,175,55,0.16) 58px, transparent 60px),
       radial-gradient(circle at 86% 122%, transparent 74px, rgba(212,175,55,0.09) 76px, rgba(212,175,55,0.09) 77px, transparent 79px),
-      linear-gradient(115deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.03) 22%, transparent 42%),
       radial-gradient(rgba(255,255,255,0.06) 1px, transparent 1px);
-    background-repeat: no-repeat, no-repeat, no-repeat, repeat;
-    background-size: auto, auto, auto, 15px 15px;
+    background-repeat: no-repeat, no-repeat, repeat;
+    background-size: auto, auto, 15px 15px;
   }
   .cmh-campus-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 16px 34px rgba(40,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08);
+    box-shadow: 0 16px 34px rgba(40,0,0,0.34);
     border-color: rgba(212,175,55,0.5);
   }
   .cmh-campus-card.sel {
     border-color: ${GOLD};
-    box-shadow: 0 0 0 3px rgba(212,175,55,0.22), 0 18px 38px rgba(40,0,0,0.38), inset 0 1px 0 rgba(255,255,255,0.1);
+    box-shadow: 0 0 0 3px rgba(212,175,55,0.22), 0 18px 38px rgba(40,0,0,0.38);
     transform: translateY(-6px);
     background:
-      radial-gradient(circle at 30% 0%, rgba(255,255,255,0.10) 0%, transparent 55%),
       linear-gradient(160deg, ${MAROON_MID} 0%, ${MAROON_DEEP} 100%);
   }
   .cmh-campus-card.sel::before { opacity: 1; height: 3px; }
@@ -419,23 +413,23 @@ const CSS = `
     content: '';
     position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
     border-radius: 0 0 16px 16px;
-    background: var(--accent, ${MAROON});
+    background: ${MAROON};
     opacity: 0.65;
   }
   .cmh-stat-card:hover {
     transform: translateY(-3px);
     box-shadow: 0 14px 28px rgba(59,42,37,0.09);
-    border-color: var(--accent, rgba(122,0,0,0.3));
+    border-color: rgba(122,0,0,0.35);
   }
   .cmh-stat-icon {
     position: absolute; top: 12px; right: 12px;
     display: flex; align-items: center; justify-content: center;
-    color: var(--accent, ${MAROON});
-    opacity: 0.10;
+    color: ${MAROON};
+    opacity: 0.18;
     pointer-events: none;
     transition: opacity 0.18s;
   }
-  .cmh-stat-card:hover .cmh-stat-icon { opacity: 0.16; }
+  .cmh-stat-card:hover .cmh-stat-icon { opacity: 0.28; }
   .cmh-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
   .cmh-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
 
@@ -506,9 +500,15 @@ const CSS = `
     vertical-align: middle;
   }
   .cmh-table tbody tr:last-child td { border-bottom: none; }
-  .cmh-table tbody tr:nth-child(even) td { background: ${CREAM}; }
   .cmh-table tbody tr { transition: background 0.14s; }
   .cmh-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  /* ── Unified table look: single row colour, maroon text, left aligned ── */
+  .cmh-table thead th, .cmh-table tbody td { text-align: left !important; }
+  .cmh-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .cmh-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  .cmh-table tbody td { color: ${MAROON} !important; }
+  .cmh-table .cmh-code-badge { color: ${MAROON} !important; }
+  .cmh-row-actions { justify-content: flex-start !important; }
   .cmh-table tbody td:last-child { text-align: right; }
   .cmh-table-empty { text-align: center; padding: 0; }
 
@@ -597,79 +597,96 @@ const CSS = `
   /* ── Modal ───────────────────────────────────────────────────────────── */
   .cmh-overlay {
     position: fixed; inset: 0;
-    background: rgba(59,42,37,0.45);
-    backdrop-filter: blur(4px);
+    background: rgba(35,8,8,0.55);
+    backdrop-filter: blur(6px);
     display: flex; align-items: center; justify-content: center;
     z-index: 1000; padding: 16px;
   }
   .cmh-modal {
     background: ${BG};
-    border-radius: 22px;
-    width: 480px; max-width: 100%; max-height: 90vh;
+    border-radius: 24px;
+    width: 500px; max-width: 100%; max-height: calc(100vh - 32px);
     display: flex; flex-direction: column; overflow: hidden;
-    box-shadow: 0 30px 70px rgba(40,0,0,0.35);
+    text-align: left;
+    border: 1px solid rgba(212,175,55,0.28);
+    box-shadow: 0 32px 80px rgba(40,0,0,0.42), 0 0 0 1px rgba(255,255,255,0.04);
   }
-  .cmh-modal-wide { width: 600px; }
+  .cmh-modal-wide { width: 640px; }
   .cmh-modal-hdr {
-    display: flex; align-items: center; gap: 12px;
-    padding: 20px 24px;
-    background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
+    display: flex; align-items: center; gap: 14px;
+    padding: 26px 30px 24px;
+    background:
+      radial-gradient(circle at 100% 0%, rgba(212,175,55,0.18) 0%, transparent 55%),
+      linear-gradient(135deg, ${MAROON_MID} 0%, ${MAROON} 45%, ${MAROON_DEEP} 100%);
     flex-shrink: 0; position: relative;
   }
-  .cmh-modal-hdr-icon {
-    width: 38px; height: 38px; border-radius: 12px;
-    background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.22);
-    display: flex; align-items: center; justify-content: center; color: ${GOLD}; flex-shrink: 0;
-  }
-.cmh-modal-hdr-title {
-    font-size: 15px;
+  .cmh-modal-hdr > div:not([class]) { min-width: 0; flex: 1; }
+  .cmh-modal-hdr-title {
+    font-size: 19px;
     font-weight: 800;
     color: #fff;
     text-align: left;
-    letter-spacing: -0.5px;
-    line-height: 1.1;
-    margin: 0;
-}
-  .cmh-modal-hdr-sub { font-size: 11.5px; color: rgba(255,255,255,0.65); font-weight: 500; }
+    letter-spacing: -0.2px;
+    line-height: 1.2;
+    margin: 0 0 6px;
+  }
+  .cmh-modal-hdr-sub {
+    font-size: 12.5px; line-height: 1.4; color: rgba(255,255,255,0.78); font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .cmh-modal-hdr-close, .cmh-modal-hdr-del {
     margin-left: auto; background: rgba(255,255,255,0.10); border: none; color: #fff;
-    width: 30px; height: 30px; border-radius: 9px;
+    width: 34px; height: 34px; border-radius: 10px;
     display: flex; align-items: center; justify-content: center; cursor: pointer;
-    transition: background 0.14s;
+    transition: background 0.14s, transform 0.14s;
   }
-  .cmh-modal-hdr-close:hover, .cmh-modal-hdr-del:hover { background: rgba(255,255,255,0.22); }
-  .cmh-modal-body { padding: 24px 26px 26px; overflow-y: auto; flex: 1; }
+  .cmh-modal-hdr-close:hover, .cmh-modal-hdr-del:hover { background: rgba(255,255,255,0.22); transform: translateY(-1px); }
+  .cmh-modal-body {
+    display: flex; flex-direction: column;
+    flex: 1; min-height: 0; padding: 0; overflow: hidden;
+  }
+  .cmh-modal-scroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 28px 30px 24px;
+    scrollbar-width: thin; scrollbar-color: rgba(122,0,0,0.28) transparent;
+  }
+  .cmh-modal-scroll::-webkit-scrollbar { width: 8px; }
+  .cmh-modal-scroll::-webkit-scrollbar-thumb { background: rgba(122,0,0,0.25); border-radius: 8px; }
+  .cmh-modal-scroll::-webkit-scrollbar-thumb:hover { background: rgba(122,0,0,0.4); }
 
   .cmh-section-label {
     display: flex; align-items: center; gap: 7px;
     font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
-    color: ${MAROON}; margin: 4px 0 12px;
+    color: ${MAROON}; margin: 4px 0 14px;
   }
-  .cmh-section-label:not(:first-child) { margin-top: 20px; }
-  .cmh-section-label::after { content: ''; flex: 1; height: 1px; background: ${BORDER}; }
+  .cmh-section-label svg { color: ${GOLD_DEEP}; flex-shrink: 0; }
+  .cmh-section-label:not(:first-child) { margin-top: 26px; }
+  .cmh-section-label::after { content: ''; flex: 1; height: 1px; background: linear-gradient(90deg, ${BORDER}, transparent); }
 
-  .cmh-logo-circle-wrap { display: flex; flex-direction: column; align-items: center; margin-bottom: 6px; }
+  .cmh-logo-circle-wrap { display: flex; flex-direction: column; align-items: center; margin-bottom: 10px; }
   .cmh-logo-circle {
-    position: relative; width: 108px; height: 108px; border-radius: 28px;
-    border: 2px dashed rgba(122,0,0,0.35); background: ${CREAM};
-    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
-    cursor: pointer; overflow: hidden; transition: border-color 0.15s, background 0.15s;
+    position: relative; width: 116px; height: 116px; border-radius: 30px;
+    border: 2px dashed rgba(184,145,43,0.55);
+    background: linear-gradient(160deg, #FFFFFF 0%, ${CREAM} 100%);
+    box-shadow: 0 6px 18px rgba(59,42,37,0.08);
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    cursor: pointer; overflow: hidden; transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
   }
-  .cmh-logo-circle:hover { border-color: ${MAROON}; background: ${MAROON_SOFT}; }
+  .cmh-logo-circle:hover { border-color: ${MAROON}; background: ${CREAM}; transform: translateY(-2px); box-shadow: 0 10px 24px rgba(122,0,0,0.14); }
   .cmh-logo-circle img { width: 100%; height: 100%; object-fit: cover; position: absolute; inset: 0; }
   .cmh-logo-circle-text { font-size: 10px; font-weight: 700; color: ${TEXT_MUTED}; text-align: center; line-height: 1.4; padding: 0 8px; }
   .cmh-logo-cam-badge {
-    position: absolute; bottom: 6px; right: 6px; width: 26px; height: 26px; border-radius: 50%;
-    background: ${MAROON}; display: flex; align-items: center; justify-content: center; color: #fff;
+    position: absolute; bottom: 8px; right: 8px; width: 28px; height: 28px; border-radius: 50%;
+    background: ${MAROON}; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; color: #fff;
     pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,0.2);
   }
-  .cmh-logo-label { font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: ${TEXT_MUTED}; margin-top: 8px; }
+  .cmh-logo-label { font-size: 10.5px; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; color: ${TEXT_MUTED}; margin-top: 12px; }
 
   .cmh-active-pill {
     display: inline-flex; align-items: center; gap: 6px;
-    padding: 5px 14px; border-radius: 999px; cursor: pointer;
+    padding: 6px 16px; border-radius: 999px; cursor: pointer;
     background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.32);
-    margin: 10px auto 0; width: fit-content; transition: background 0.15s;
+    margin: 12px auto 4px; width: fit-content; transition: background 0.15s;
   }
   .cmh-active-pill.off { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.30); }
   .cmh-active-dot { width: 8px; height: 8px; border-radius: 50%; background: ${SUCCESS}; }
@@ -677,7 +694,7 @@ const CSS = `
   .cmh-active-text { font-size: 11.5px; font-weight: 700; color: #178a4c; }
   .cmh-active-text.off { color: #b91c1c; }
 
-  .cmh-field { margin-bottom: 16px; }
+  .cmh-field { margin-bottom: 18px; }
   .cmh-field-row { display: flex; gap: 12px; }
   .cmh-field-row .cmh-field { flex: 1; min-width: 0; }
   .cmh-float {
@@ -685,23 +702,26 @@ const CSS = `
   }
   .cmh-float label {
     display: block;
+    text-align: left;
     font-size: 10.5px;
     font-weight: 800;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
     color: ${TEXT_MUTED};
-    margin-bottom: 7px;
+    margin-bottom: 8px;
   }
   .cmh-input-wrap { position: relative; }
   .cmh-float input {
-    width: 100%; padding: 12px 14px 12px 40px;
-    border-radius: 12px; border: 1.5px solid ${BORDER};
+    width: 100%; padding: 13px 16px; text-align: left;
+    border-radius: 13px; border: 1.5px solid ${BORDER};
     background: ${CARD}; color: ${TEXT};
-    font-family: inherit; font-size: 13.5px; font-weight: 600; outline: none;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.05);
+    font-family: inherit; font-size: 14px; font-weight: 600; outline: none;
     transition: border-color 0.15s, box-shadow 0.15s;
   }
+  .cmh-float input:hover { border-color: rgba(122,0,0,0.30); }
   .cmh-float input::placeholder { color: ${TEXT_MUTED}; opacity: 0.55; font-weight: 400; }
-  .cmh-float input:focus { border-color: ${MAROON}; box-shadow: 0 0 0 4px ${MAROON_SOFT}; }
+  .cmh-float input:focus { border-color: ${MAROON}; box-shadow: 0 0 0 4px rgba(122,0,0,0.10); }
   .cmh-float input.err { border-color: ${DANGER}; }
   .cmh-float svg.field-icon {
     position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
@@ -717,19 +737,26 @@ const CSS = `
     margin-bottom: 14px; line-height: 1.5;
   }
 
-  .cmh-modal-footer { margin-top: 10px; padding-top: 4px; display: flex; gap: 10px; }
+  .cmh-modal-footer {
+    flex-shrink: 0;
+    margin: 0; padding: 18px 30px 22px;
+    display: flex; gap: 12px;
+    background: #fff;
+    border-top: 1px solid ${BORDER};
+    box-shadow: 0 -10px 24px rgba(59,42,37,0.06);
+  }
   .cmh-btn-submit {
-    flex: 1; padding: 13px; border-radius: 12px; border: none;
-    background: ${MAROON}; color: #fff;
+    flex: 1; padding: 14px; border-radius: 13px; border: none;
+    background: linear-gradient(135deg, ${MAROON_MID} 0%, ${MAROON} 100%); color: #fff;
     font-family: inherit; font-size: 14px; font-weight: 800;
     cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px;
     transition: background 0.16s, transform 0.12s;
-    box-shadow: 0 8px 18px rgba(122,0,0,0.24);
+    box-shadow: 0 8px 18px rgba(122,0,0,0.26);
   }
-  .cmh-btn-submit:hover { background: ${MAROON_MID}; transform: translateY(-1px); }
+  .cmh-btn-submit:hover { background: ${MAROON_MID}; transform: translateY(-1px); box-shadow: 0 12px 24px rgba(122,0,0,0.32); }
   .cmh-btn-submit:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
   .cmh-btn-cancel {
-    padding: 13px 20px; border-radius: 12px; border: 1.5px solid ${BORDER};
+    padding: 14px 24px; border-radius: 13px; border: 1.5px solid ${BORDER};
     background: ${CARD}; color: ${TEXT}; font-family: inherit; font-size: 13px; font-weight: 700;
     cursor: pointer; transition: border-color 0.14s, background 0.14s;
   }
@@ -740,15 +767,17 @@ const CSS = `
     font-size: 11.5px; color: ${TEXT_MUTED}; margin-bottom: 16px; font-weight: 600;
   }
 
-  .cmh-major-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .cmh-major-row { display: flex; gap: 10px; margin-bottom: 10px; align-items: center; }
   .cmh-major-row input {
-    flex: 1; padding: 10px 13px; border-radius: 10px; border: 1.5px solid ${BORDER};
-    background: ${CARD}; font-family: inherit; font-size: 13px; color: ${TEXT}; outline: none;
-    transition: border-color 0.14s;
+    flex: 1; padding: 12px 15px; border-radius: 13px; border: 1.5px solid ${BORDER};
+    background: ${CARD}; font-family: inherit; font-size: 13.5px; font-weight: 600; color: ${TEXT}; outline: none;
+    box-shadow: 0 1px 2px rgba(59,42,37,0.05);
+    transition: border-color 0.14s, box-shadow 0.14s;
   }
-  .cmh-major-row input:focus { border-color: ${MAROON}; }
+  .cmh-major-row input::placeholder { color: ${TEXT_MUTED}; opacity: 0.55; font-weight: 400; }
+  .cmh-major-row input:focus { border-color: ${MAROON}; box-shadow: 0 0 0 4px rgba(122,0,0,0.10); }
   .cmh-major-remove {
-    width: 30px; height: 30px; border-radius: 8px; border: 1px solid ${BORDER};
+    width: 40px; height: 40px; border-radius: 12px; border: 1.5px solid ${BORDER};
     background: ${CARD}; color: ${TEXT_MUTED}; display: flex; align-items: center; justify-content: center;
     cursor: pointer; flex-shrink: 0; transition: background 0.14s, color 0.14s;
   }
@@ -813,7 +842,6 @@ const CSS = `
     .cmh-stats-grid { grid-template-columns: repeat(2, 1fr); }
     .cmh-table thead th:nth-child(1), .cmh-table tbody td:nth-child(1) { display: none; }
     .cmh-hero-title { font-size: 19px; }
-    .cmh-hero-icon { width: 34px; height: 34px; }
   }
 `;
 
@@ -1042,7 +1070,6 @@ function FloatField({ icon, label, value, onChange, error, placeholder, maxLengt
           placeholder={placeholder}
           maxLength={maxLength}
         />
-        <span className="field-icon">{icon}</span>
       </div>
       {error && <div className="cmh-err">{error}</div>}
     </div>
@@ -1141,7 +1168,6 @@ function CampusModal({ campus, onClose, onSaved, onDelete }) {
         role="dialog" aria-modal="true"
       >
         <div className="cmh-modal-hdr">
-          <div className="cmh-modal-hdr-icon"><Landmark size={18} /></div>
           <div>
             <div className="cmh-modal-hdr-title">{isEdit ? 'Edit Campus' : 'Add New Campus'}</div>
             <div className="cmh-modal-hdr-sub">{isEdit ? campus.campus_name : 'Create a campus workspace'}</div>
@@ -1157,6 +1183,7 @@ function CampusModal({ campus, onClose, onSaved, onDelete }) {
         </div>
 
         <div className="cmh-modal-body">
+          <div className="cmh-modal-scroll">
           {isEdit && (
             <div className="cmh-modal-created">
               <Calendar size={13} />
@@ -1221,6 +1248,7 @@ function CampusModal({ campus, onClose, onSaved, onDelete }) {
 
           {apiErr && <div className="cmh-api-err"><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />{apiErr}</div>}
 
+          </div>
           <div className="cmh-modal-footer">
             <button className="cmh-btn-cancel" onClick={onClose}>Cancel</button>
             <button className="cmh-btn-submit" onClick={handleSave} disabled={saving}>
@@ -1364,7 +1392,6 @@ function CourseModal({ campusId, row, onClose, onSaved }) {
         role="dialog" aria-modal="true"
       >
         <div className="cmh-modal-hdr">
-          <div className="cmh-modal-hdr-icon"><BookOpen size={18} /></div>
           <div>
             <div className="cmh-modal-hdr-title">{isEdit ? 'Edit Course' : 'Add New Course'}</div>
             <div className="cmh-modal-hdr-sub">College &amp; program details</div>
@@ -1375,6 +1402,7 @@ function CourseModal({ campusId, row, onClose, onSaved }) {
         </div>
 
         <div className="cmh-modal-body">
+          <div className="cmh-modal-scroll">
           <div className="cmh-section-label"><School size={12} />College</div>
           <div className="cmh-field-row">
             <div className="cmh-field">
@@ -1471,6 +1499,7 @@ function CourseModal({ campusId, row, onClose, onSaved }) {
 
           {apiErr && <div className="cmh-api-err" style={{ marginTop: 16 }}><AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />{apiErr}</div>}
 
+          </div>
           <div className="cmh-modal-footer">
             <button className="cmh-btn-cancel" onClick={onClose}>Cancel</button>
             <button className="cmh-btn-submit" onClick={handleSave} disabled={saving}>
@@ -1496,7 +1525,6 @@ function CourseViewModal({ row, onClose }) {
         transition={{ duration: 0.2 }}
       >
         <div className="cmh-modal-hdr">
-          <div className="cmh-modal-hdr-icon"><Eye size={18} /></div>
           <div>
             <div className="cmh-modal-hdr-title">Program Details</div>
             <div className="cmh-modal-hdr-sub">Read-only overview</div>
@@ -1506,6 +1534,7 @@ function CourseViewModal({ row, onClose }) {
           </button>
         </div>
         <div className="cmh-modal-body">
+          <div className="cmh-modal-scroll">
           <div className="cmh-section-label"><School size={12} />College</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
             <span style={{ fontWeight: 700, fontSize: 14 }}>{college.college_name}</span>
@@ -1525,6 +1554,7 @@ function CourseViewModal({ row, onClose }) {
               : '—'}
           </div>
 
+          </div>
           <div className="cmh-modal-footer" style={{ marginTop: 6 }}>
             <button className="cmh-btn-submit" onClick={onClose}>Close</button>
           </div>
@@ -1882,7 +1912,6 @@ export default function CampusManagementHub() {
         {selectedCampus && <div className="cmh-hero-bar" />}
         <div className="cmh-hero-left">
           <div className="cmh-hero-title">
-            <span className="cmh-hero-icon"><Landmark size={22} /></span>
             Campus Management
           </div>
           <div className="cmh-hero-sub">

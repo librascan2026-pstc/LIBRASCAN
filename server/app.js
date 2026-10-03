@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 import express from 'express';
 import cors from 'cors';
 import { supabaseAdmin } from './lib/supabaseAdmin.js';
-import { sendOtpEmail, sendLoginConfirmationEmail, sendVerificationEmail } from './lib/mailer.js';
+import { sendOtpEmail, sendLoginConfirmationEmail, sendVerificationEmail, sendPasswordResetEmail } from './lib/mailer.js';
 import { locateIp, describeDevice, formatLocation } from './lib/geo.js';
 import {
   generateOtp, hashOtp, generateDeviceToken, hashDeviceToken, safeEqual,
@@ -756,6 +756,144 @@ app.post('/api/auth/resend-verification', async (req, res) => {
     }
   }
   res.json({ sent: true });
+});
+
+
+// ===========================================================================
+// FORGOT PASSWORD — 6-digit code emailed through Brevo (not Supabase).
+//
+//   1. POST /api/auth/forgot-password   { email }                -> emails a code
+//   2. POST /api/auth/verify-reset-code { email, code }          -> { resetToken }
+//   3. POST /api/auth/reset-password    { email, resetToken, password }
+//
+// Needs the `password_reset_codes` table (see password_reset_codes.sql).
+// Nothing here creates a Supabase session — the browser never gets signed in
+// by the reset flow; the password is changed server-side with the service key.
+// ===========================================================================
+const RESET_CODE_TTL_MS   = 10 * 60 * 1000; // code valid for 10 minutes
+const RESET_TOKEN_TTL_MS  = 10 * 60 * 1000; // after the code is accepted, 10 min to set the password
+const RESET_RESEND_MS     = 60 * 1000;      // min gap between codes (stored in DB -> works on Vercel)
+const RESET_MAX_ATTEMPTS  = 5;
+
+const passwordOk = (pw) =>
+  typeof pw === 'string' && pw.length >= 8 && /[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[0-9]/.test(pw);
+
+// Looks up a CONFIRMED account by email. Returns { id, first_name, email } or null.
+async function findResettableUser(email) {
+  const { data: profile } = await supabaseAdmin
+    .from('profiles').select('id, first_name, email').eq('email', email).maybeSingle();
+  if (!profile) return null;
+  const { data: au } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+  if (!au?.user || !au.user.email_confirmed_at) return null;
+  return profile;
+}
+
+// POST /api/auth/forgot-password { email } — public. Always answers
+// { sent: true } so it can't be used to probe which emails are registered.
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  if (!email) return res.status(400).json({ error: 'Missing email.' });
+
+  const user = await findResettableUser(email);
+  if (!user) return res.json({ sent: true });
+
+  const { data: last } = await supabaseAdmin
+    .from('password_reset_codes').select('created_at')
+    .eq('user_id', user.id).order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (last && Date.now() - new Date(last.created_at).getTime() < RESET_RESEND_MS) {
+    return res.json({ sent: true }); // throttled: stay silent, same answer as success
+  }
+
+  const code = generateOtp();
+
+  // Only the newest code should work.
+  await supabaseAdmin.from('password_reset_codes')
+    .update({ consumed: true }).eq('user_id', user.id).eq('consumed', false);
+
+  const { error: insErr } = await supabaseAdmin.from('password_reset_codes').insert({
+    user_id: user.id,
+    code_hash: hashOtp(code),
+    expires_at: new Date(Date.now() + RESET_CODE_TTL_MS).toISOString(),
+  });
+  if (insErr) {
+    console.error('[auth/forgot-password] insert failed:', insErr.message);
+    return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+
+  try {
+    await sendPasswordResetEmail({ to: user.email || email, name: user.first_name, code });
+  } catch (err) {
+    console.error('[auth/forgot-password] email failed:', err.message);
+    return res.status(502).json({ error: 'Could not send the email. Please try again shortly.' });
+  }
+  res.json({ sent: true });
+});
+
+// POST /api/auth/verify-reset-code { email, code } — public.
+app.post('/api/auth/verify-reset-code', async (req, res) => {
+  const email = String(req.body?.email || '').trim().toLowerCase();
+  const code  = String(req.body?.code || '').trim();
+  const bad   = () => res.status(400).json({ error: 'Invalid or expired code. Please try again or request a new one.' });
+  if (!email || !/^\d{6}$/.test(code)) return bad();
+
+  const user = await findResettableUser(email);
+  if (!user) return bad();
+
+  const { data: row } = await supabaseAdmin
+    .from('password_reset_codes').select('*')
+    .eq('user_id', user.id).eq('consumed', false)
+    .order('created_at', { ascending: false }).limit(1).maybeSingle();
+  if (!row || new Date(row.expires_at).getTime() < Date.now()) return bad();
+  if (row.attempts >= RESET_MAX_ATTEMPTS) {
+    return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new code.' });
+  }
+
+  if (!safeEqual(hashOtp(code), row.code_hash)) {
+    await supabaseAdmin.from('password_reset_codes').update({ attempts: row.attempts + 1 }).eq('id', row.id);
+    return bad();
+  }
+
+  // Code accepted: burn it and hand back a one-time token for step 3.
+  const resetToken = generateConfirmToken();
+  await supabaseAdmin.from('password_reset_codes').update({
+    consumed: true,
+    reset_token_hash: hashConfirmToken(resetToken),
+    reset_token_expires_at: new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString(),
+  }).eq('id', row.id);
+
+  res.json({ verified: true, resetToken });
+});
+
+// POST /api/auth/reset-password { email, resetToken, password } — public, but
+// only works with the one-time token issued by verify-reset-code.
+app.post('/api/auth/reset-password', async (req, res) => {
+  const email      = String(req.body?.email || '').trim().toLowerCase();
+  const resetToken = String(req.body?.resetToken || '');
+  const password   = String(req.body?.password || '');
+  const expired    = () => res.status(400).json({ error: 'Your reset session expired. Please go back and request a new code.' });
+
+  if (!passwordOk(password)) {
+    return res.status(400).json({ error: 'Password must be 8+ characters with an uppercase letter, a lowercase letter and a number.' });
+  }
+  if (!email || !resetToken) return expired();
+
+  const user = await findResettableUser(email);
+  if (!user) return expired();
+
+  const { data: row } = await supabaseAdmin
+    .from('password_reset_codes').select('*')
+    .eq('user_id', user.id).eq('reset_token_hash', hashConfirmToken(resetToken)).maybeSingle();
+  if (!row || !row.reset_token_expires_at || new Date(row.reset_token_expires_at).getTime() < Date.now()) return expired();
+
+  const { error: pwErr } = await supabaseAdmin.auth.admin.updateUserById(user.id, { password });
+  if (pwErr) {
+    console.error('[auth/reset-password] update failed:', pwErr.message);
+    return res.status(500).json({ error: pwErr.message || 'Could not update the password.' });
+  }
+
+  // Single use.
+  await supabaseAdmin.from('password_reset_codes').update({ reset_token_hash: null }).eq('id', row.id);
+  res.json({ ok: true });
 });
 
 // Small self-contained result page for the emailed link (no bundler needed).

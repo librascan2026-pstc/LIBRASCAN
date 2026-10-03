@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Building2, GraduationCap, BookOpen, Users,
-  LayoutGrid, MapPin, Landmark, Search, ChevronLeft, ChevronRight,
-  CalendarDays, ShieldCheck,
+  Briefcase, Landmark, Search, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
 
@@ -34,13 +33,14 @@ const BLUE        = '#3B82F6';
 const ORANGE      = '#F97316';
 
 const STATS_CONFIG = [
-  { key: 'totalCampuses',   label: 'Total Campuses',    sub: 'active campuses',     Icon: Building2,     tint: { bg: GOLD_PALE,                    fg: GOLD_DEEP } },
-  { key: 'totalStudents',   label: 'Total Students',    sub: 'registered students', Icon: GraduationCap, tint: { bg: 'rgba(59,130,246,0.12)',      fg: BLUE } },
-  { key: 'totalBooks',      label: 'Total Books',       sub: 'across all campuses', Icon: BookOpen,      tint: { bg: 'rgba(34,197,94,0.12)',       fg: '#178A4C' } },
-  { key: 'totalLibrarians', label: 'Librarians',        sub: 'assigned librarians', Icon: Users,         tint: { bg: MAROON_SOFT,                  fg: MAROON } },
+  { key: 'totalCampuses',   label: 'Total Campuses',    sub: 'active campuses',     Icon: Building2 },
+  { key: 'totalStudents',   label: 'Total Students',    sub: 'registered students', Icon: GraduationCap },
+  { key: 'totalBooks',      label: 'Total Books',       sub: 'across all campuses', Icon: BookOpen },
+  { key: 'totalLibrarians', label: 'Librarians',        sub: 'assigned librarians', Icon: Users },
+  { key: 'totalEmployees',  label: 'Total Employees',   sub: 'campus staff',        Icon: Briefcase },
 ];
 
-const LEDGER_COLUMNS = ['Campus', 'Code', 'Status', 'Librarians', 'Students', 'Books', 'Pending Books'];
+const LEDGER_COLUMNS = ['Campus', 'Code', 'Librarians', 'Employees', 'Students', 'Books', 'Pending Books', 'Status'];
 
 const PAGE_SIZE = 9;
 
@@ -68,6 +68,18 @@ const CSS = `
     gap: 24px;
     flex-wrap: wrap;
     box-shadow: 0 10px 30px rgba(59,42,37,0.08);
+  }
+  .sao-hero-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 4px;
+    border-radius: 24px 24px 0 0;
+    background: linear-gradient(90deg, ${MAROON_DEEP}, ${MAROON}, ${GOLD}, ${MAROON}, ${MAROON_DEEP});
+    background-size: 200% 100%;
+    animation: sao-shimmer-bar 3s ease-in-out infinite;
+    z-index: 2;
+  }
+  @keyframes sao-shimmer-bar {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
   }
   .sao-hero::before {
     content: '';
@@ -101,26 +113,7 @@ const CSS = `
     color: ${TEXT}; line-height: 1.25; margin-bottom: 10px;
     display: flex; align-items: center; gap: 12px;
   }
-  .sao-hero-icon {
-    width: 42px; height: 42px; border-radius: 14px;
-    background: ${MAROON_SOFT};
-    border: 1px solid rgba(122,0,0,0.18);
-    display: flex; align-items: center; justify-content: center;
-    color: ${MAROON}; flex-shrink: 0;
-  }
   .sao-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 610px; font-weight: 500; text-align: left;}
-  .sao-hero-right { position: relative; z-index: 1; display: flex; align-items: center; }
-  .sao-date-chip {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    width: 84px; height: 84px; border-radius: 18px;
-    background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
-    border: 1.5px solid rgba(212,175,55,0.35);
-    box-shadow: 0 10px 24px rgba(122,0,0,0.28);
-    color: #fff; gap: 3px;
-  }
-  .sao-date-day  { font-size: 9px; font-weight: 800; letter-spacing: 0.12em; color: ${GOLD}; text-transform: uppercase; }
-  .sao-date-num  { font-size: 20px; font-weight: 800; line-height: 1; }
-  .sao-date-year { font-size: 9px; font-weight: 700; color: rgba(255,255,255,0.65); }
 
   /* ---------- Stat cards ---------- */
   .sao-stats-grid {
@@ -146,8 +139,8 @@ const CSS = `
     content: '';
     position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
     border-radius: 0 0 16px 16px;
-    background: var(--accent, ${MAROON});
-    opacity: 0.65;
+    background: ${MAROON};
+    opacity: 1;
   }
   .sao-stats-grid .sao-stat-card:nth-child(1) { animation-delay: 0.02s; }
   .sao-stats-grid .sao-stat-card:nth-child(2) { animation-delay: 0.05s; }
@@ -158,17 +151,17 @@ const CSS = `
   .sao-stat-card:hover {
     transform: translateY(-3px);
     box-shadow: 0 14px 28px rgba(59,42,37,0.09);
-    border-color: var(--accent, rgba(122,0,0,0.3));
+    border-color: rgba(122,0,0,0.35);
   }
   .sao-stat-icon {
     position: absolute; top: 12px; right: 12px;
     display: flex; align-items: center; justify-content: center;
-    color: var(--accent, ${MAROON});
-    opacity: 0.10;
+    color: ${MAROON};
+    opacity: 0.18;
     pointer-events: none;
     transition: opacity 0.18s;
   }
-  .sao-stat-card:hover .sao-stat-icon { opacity: 0.16; }
+  .sao-stat-card:hover .sao-stat-icon { opacity: 0.28; }
   .sao-stat-body { min-width: 0; position: relative; z-index: 1; }
   .sao-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .sao-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-bottom: 5px; }
@@ -187,100 +180,8 @@ const CSS = `
   .sao-selector-title svg { color: ${MAROON}; }
   .sao-selector-caption { font-size: 12px; color: ${TEXT_MUTED}; font-weight: 500; }
 
-  /* ---------- Campus directory carousel (matches Campus Hub cards) ------- */
-  .sao-carousel-section { margin-bottom: 28px; }
-  .sao-carousel-wrap {
-    display: flex; align-items: center; gap: 12px;
-    padding: 6px 0 4px;
-  }
-  .sao-carousel-track-outer {
-    flex: 1; min-width: 0; overflow: hidden;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
-            mask-image: linear-gradient(90deg, transparent 0, #000 32px, #000 calc(100% - 32px), transparent 100%);
-  }
-  .sao-carousel-track { display: flex; gap: 16px; width: max-content; will-change: transform; }
-  .sao-carousel-empty {
-    border: 1.5px dashed rgba(122,0,0,0.28);
-    border-radius: 18px;
-    padding: 30px 20px;
-    text-align: center;
-    color: ${TEXT_MUTED};
-    font-size: 13px; font-weight: 600;
-    width: 100%;
-  }
-
-  .sao-campus-card {
-    flex: 0 0 208px;
-    background:
-      radial-gradient(circle at 30% 0%, rgba(255,255,255,0.07) 0%, transparent 55%),
-      linear-gradient(160deg, ${MAROON_MID} 0%, ${MAROON} 45%, ${MAROON_DEEP} 100%);
-    border: 1.5px solid rgba(212,175,55,0.22);
-    border-radius: 18px;
-    padding: 18px 16px 16px;
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    text-align: center;
-    transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
-    box-shadow: 0 4px 14px rgba(40,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.06);
-  }
-  .sao-campus-card::before {
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: linear-gradient(90deg, transparent, ${GOLD}, transparent);
-    opacity: 0.7;
-  }
-  .sao-campus-card::after {
-    content: '';
-    position: absolute; inset: 0;
-    background-image: radial-gradient(rgba(255,255,255,0.05) 1px, transparent 1px);
-    background-size: 16px 16px;
-    pointer-events: none;
-  }
-  .sao-campus-card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 16px 34px rgba(40,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.08);
-    border-color: rgba(212,175,55,0.5);
-  }
-  .sao-campus-logo {
-    width: 52px; height: 52px; border-radius: 50%;
-    border: 2px solid ${GOLD};
-    background: ${CREAM};
-    overflow: hidden; flex-shrink: 0;
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 3px 10px rgba(0,0,0,0.25), 0 0 0 3px rgba(212,175,55,0.15);
-    position: relative; z-index: 1;
-  }
-  .sao-campus-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-  .sao-campus-name {
-    font-size: 13.5px; font-weight: 800; color: #fff; line-height: 1.3;
-    position: relative; z-index: 1;
-    text-shadow: 0 1px 3px rgba(0,0,0,0.25);
-  }
-  .sao-campus-code {
-    font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.6);
-    letter-spacing: 0.05em; text-transform: uppercase;
-    position: relative; z-index: 1;
-  }
-  .sao-campus-stats {
-    display: flex; gap: 12px; margin-top: 4px;
-    position: relative; z-index: 1;
-    border-top: 1px dashed rgba(255,255,255,0.16);
-    padding-top: 10px; width: 100%; justify-content: center;
-  }
-  .sao-campus-stat { display: flex; flex-direction: column; align-items: center; }
-  .sao-campus-stat b { font-size: 15px; font-weight: 800; color: ${GOLD_DEEP}; line-height: 1.2; text-shadow: 0 1px 3px rgba(0,0,0,0.35); }
-  .sao-campus-stat span { font-size: 8.5px; font-weight: 700; color: rgba(255,255,255,0.55); text-transform: uppercase; letter-spacing: 0.04em; }
-  .sao-campus-foot {
-    display: flex; align-items: center; gap: 6px;
-    position: relative; z-index: 1;
-  }
   .sao-status-dot { width: 7px; height: 7px; border-radius: 50%; background: ${SUCCESS}; box-shadow: 0 0 0 3px rgba(34,197,94,0.16); }
   .sao-status-dot.off { background: ${DANGER}; box-shadow: 0 0 0 3px rgba(239,68,68,0.16); }
-  .sao-status-text { font-size: 10px; font-weight: 700; color: rgba(255,255,255,0.7); }
 
   /* ---------- Toolbar ---------- */
   .sao-toolbar {
@@ -309,7 +210,7 @@ const CSS = `
   .sao-table-scroll { overflow-x: auto; }
   .sao-table { width: 100%; border-collapse: collapse; min-width: 700px; }
   .sao-table thead th {
-    text-align: left;
+    text-align: left !important;
     font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase;
     color: rgba(255,248,239,0.92);
     background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
@@ -321,14 +222,31 @@ const CSS = `
   .sao-table tbody td {
     padding: 14px 18px; font-size: 13px; color: ${TEXT};
     border-bottom: 1px solid ${BORDER}; vertical-align: middle;
+    text-align: left !important;
   }
   .sao-table tbody tr:last-child td { border-bottom: none; }
-  .sao-table tbody tr:nth-child(even) td { background: ${CREAM}; }
   .sao-table tbody tr { transition: background 0.14s; }
   .sao-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  /* ── Unified table look: single row colour, maroon text, left aligned ── */
+  .sao-table thead th, .sao-table tbody td { text-align: left !important; }
+  .sao-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .sao-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  .sao-name-cell, .sao-fig { color: ${MAROON} !important; }
+  .sao-code-badge { color: ${MAROON} !important; }
   .sao-table-empty { text-align: center; padding: 0; }
 
   .sao-name-cell { font-weight: 800; color: ${TEXT}; }
+  .sao-name-wrap { display: flex; align-items: center; justify-content: flex-start; gap: 12px; min-width: 0; }
+  .sao-name-logo {
+    flex: 0 0 auto;
+    width: 36px; height: 36px; border-radius: 50%;
+    padding: 2px;
+    background: linear-gradient(135deg, ${GOLD} 0%, #F5E4A8 50%, ${GOLD} 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 1px 4px rgba(59,42,37,0.18);
+  }
+  .sao-name-logo img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: #fff; display: block; }
+  .sao-name-logo.empty { background: ${MAROON_SOFT}; box-shadow: none; border: 1px solid ${BORDER}; }
   .sao-code-badge {
     display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: 0.02em;
     border-radius: 999px; padding: 4px 12px;
@@ -337,6 +255,7 @@ const CSS = `
   .sao-status-row { display: flex; align-items: center; gap: 6px; }
   .sao-status-label { font-size: 12px; font-weight: 700; }
   .sao-fig {
+    background: ${MAROON_SOFT}; color: ${MAROON};
     display: inline-block; min-width: 30px; text-align: center;
     padding: 3px 10px; border-radius: 999px;
     font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums;
@@ -381,7 +300,6 @@ const CSS = `
   }
   .sao-skel-hero { height: 148px; border-radius: 24px; margin-bottom: 24px; }
   .sao-skel-stat { height: 92px; border-radius: 16px; }
-  .sao-skel-carousel { height: 190px; border-radius: 18px; margin-bottom: 28px; }
   .sao-skel-table { height: 260px; border-radius: 18px; }
 
   /* ============================================================
@@ -393,15 +311,12 @@ const CSS = `
   @media (max-width: 768px) {
     .sao-hero { padding: 26px 22px 22px; }
     .sao-hero-title { font-size: 22px; align-items: flex-start; }
-    .sao-hero-icon { margin-top: 3px; }
-    .sao-hero-right { width: 100%; justify-content: flex-start; }
-    .sao-table thead th:nth-child(4), .sao-table tbody td:nth-child(4) { display: none; }
+    .sao-table thead th:nth-child(3), .sao-table tbody td:nth-child(3) { display: none; }
   }
   @media (max-width: 560px) {
-    .sao-table thead th:nth-child(1), .sao-table tbody td:nth-child(1) { display: none; }
+    .sao-table thead th:nth-child(2), .sao-table tbody td:nth-child(2) { display: none; }
     .sao-hero { padding: 22px 18px 18px; border-radius: 20px; }
     .sao-hero-title { font-size: 19px; gap: 10px; }
-    .sao-hero-icon { width: 34px; height: 34px; margin-top: 2px; }
     .sao-hero-sub { font-size: 13.5px; }
     .sao-stats-grid { grid-template-columns: repeat(2, 1fr); }
   }
@@ -409,96 +324,23 @@ const CSS = `
     .sao-hero { padding: 20px 16px 16px; }
     .sao-hero-eyebrow { font-size: 10px; padding: 5px 12px; margin-bottom: 12px; }
     .sao-hero-title { font-size: 17px; line-height: 1.3; gap: 9px; }
-    .sao-hero-icon { width: 30px; height: 30px; border-radius: 10px; }
-    .sao-hero-icon svg { width: 15px; height: 15px; }
     .sao-hero-sub { font-size: 12.5px; line-height: 1.55; }
-    .sao-date-chip { width: 62px; height: 62px; border-radius: 14px; gap: 2px; }
-    .sao-date-num { font-size: 15px; }
-    .sao-date-day, .sao-date-year { font-size: 7.5px; }
-    .sao-campus-card { flex: 0 0 168px; padding: 15px 13px 13px; }
     .sao-search input { font-size: 12.5px; padding: 10px 12px 10px 36px; }
   }
   @media (max-width: 340px) {
     .sao-hero-title { font-size: 15.5px; }
-    .sao-hero-icon { width: 27px; height: 27px; }
-    .sao-hero-icon svg { width: 13px; height: 13px; }
-    .sao-date-chip { width: 54px; height: 54px; }
-    .sao-date-num { font-size: 13px; }
+  }
+
+  /* ── Responsive banner: title + date adapt to every screen width ── */
+  .sao-hero { flex-wrap: nowrap; align-items: center; }
+  .sao-hero-left { flex: 1 1 0; min-width: 0; }
+  .sao-hero-title { font-size: clamp(18px, 1.2vw + 14px, 26px); line-height: 1.25; overflow-wrap: anywhere; }
+  .sao-hero-sub { font-size: clamp(12.5px, 0.35vw + 11.5px, 15px); }
+  @media (max-width: 560px) {
+    .sao-hero { flex-wrap: wrap; gap: 14px; }
+    .sao-hero-left { flex: 1 1 100%; }
   }
 `;
-
-/* ── Campus directory carousel (auto-scroll, display only) ──────────────── */
-function CampusCarousel({ campuses }) {
-  const trackRef  = useRef(null);
-  const offsetRef = useRef(0);
-  const rafRef    = useRef(null);
-  const pausedRef = useRef(false);
-
-  const loopList = campuses.length ? [...campuses, ...campuses, ...campuses] : [];
-
-  useEffect(() => {
-    if (!campuses.length) return;
-    const speed = 0.4;
-    const step = () => {
-      if (!pausedRef.current && trackRef.current) {
-        offsetRef.current -= speed;
-        const third = trackRef.current.scrollWidth / 3;
-        if (Math.abs(offsetRef.current) >= third) offsetRef.current = 0;
-        trackRef.current.style.transform = `translateX(${offsetRef.current}px)`;
-      }
-      rafRef.current = requestAnimationFrame(step);
-    };
-    rafRef.current = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [campuses.length]);
-
-  if (!campuses.length) {
-    return (
-      <div className="sao-carousel-wrap">
-        <div className="sao-carousel-empty">No campuses recorded yet — add the first branch in Campus Management.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className="sao-carousel-wrap"
-      onMouseEnter={() => { pausedRef.current = true; }}
-      onMouseLeave={() => { pausedRef.current = false; }}
-    >
-      <div className="sao-carousel-track-outer">
-        <div className="sao-carousel-track" ref={trackRef}>
-          {loopList.map((c, idx) => (
-            <div className="sao-campus-card" key={`${c.id}-${idx}`}>
-              <div className="sao-campus-logo">
-                {c.logo_url ? (
-                  <img
-                    src={c.logo_url}
-                    alt={c.campus_name}
-                    onError={ev => { ev.currentTarget.style.display = 'none'; }}
-                  />
-                ) : (
-                  <Building2 size={22} color={MAROON} />
-                )}
-              </div>
-              <div className="sao-campus-name">{c.campus_name}</div>
-              {c.campus_code && <div className="sao-campus-code">{c.campus_code}</div>}
-              <div className="sao-campus-stats">
-                <div className="sao-campus-stat"><b>{c.librarians ?? 0}</b><span>Staff</span></div>
-                <div className="sao-campus-stat"><b>{c.students ?? 0}</b><span>Students</span></div>
-                <div className="sao-campus-stat"><b>{c.books ?? 0}</b><span>Books</span></div>
-              </div>
-              <div className="sao-campus-foot">
-                <span className={`sao-status-dot${c.is_active ? '' : ' off'}`} />
-                <span className="sao-status-text">{c.is_active ? 'Active' : 'Inactive'}</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function StatSkeleton() {
   return (
@@ -519,19 +361,38 @@ export default function SuperAdminOverview() {
     async function load() {
       setLoading(true);
       try {
-        const [campusRes, profilesRes, booksRes, libRes] = await Promise.all([
+        // Supabase returns at most 1000 rows per request, which would silently
+        // cap the counts below on larger campuses — so page through profiles.
+        const fetchAllProfiles = async () => {
+          const rows = [];
+          const STEP = 1000;
+          for (let from = 0; ; from += STEP) {
+            const { data, error } = await supabaseAdmin
+              .from('profiles')
+              .select('id, campus_id, role')
+              .range(from, from + STEP - 1);
+            if (error) throw error;
+            rows.push(...(data || []));
+            if (!data || data.length < STEP) break;
+          }
+          return rows;
+        };
+
+        const [campusRes, allProfiles, booksRes] = await Promise.all([
           supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active, logo_url'),
-          supabaseAdmin.from('profiles').select('id, campus_id, role'),
+          fetchAllProfiles(),
           supabaseAdmin.from('books').select('id, campus_id, registration_status'),
-          supabaseAdmin.from('profiles').select('id, campus_id').eq('role', 'library_manager'),
         ]);
 
         const allCampuses = campusRes.data || [];
-        const allProfiles = profilesRes.data || [];
         const allBooks    = booksRes.data || [];
-        const allLibs     = libRes.data || [];
+        // Librarians = library managers assigned to a campus.
+        const allLibs     = allProfiles.filter(p => p.role === 'library_manager' && p.campus_id);
 
         const students      = allProfiles.filter(p => p.role === 'student');
+        // Total Employees = librarians + regular employees assigned to a campus.
+        // (The Librarians stat is kept separately; librarians are counted in both.)
+        const employees     = allProfiles.filter(p => (p.role === 'library_manager' || p.role === 'employee') && p.campus_id);
         // Books still waiting on Super Admin approval (same rule as the Books page).
         const pendingBooks = allBooks.filter(b => b.registration_status === 'pending');
 
@@ -540,6 +401,7 @@ export default function SuperAdminOverview() {
           totalStudents:   students.length,
           totalBooks:      allBooks.length,
           totalLibrarians: allLibs.length,
+          totalEmployees:  employees.length,
         });
 
         const breakdown = allCampuses.map(c => ({
@@ -548,6 +410,7 @@ export default function SuperAdminOverview() {
           books:      allBooks.filter(b => b.campus_id === c.id).length,
           pending:    pendingBooks.filter(b => b.campus_id === c.id).length,
           librarians: allLibs.filter(l => l.campus_id === c.id).length,
+          employees:  employees.filter(e => e.campus_id === c.id).length,
         }));
         setCampuses(breakdown);
       } catch (e) {
@@ -556,15 +419,6 @@ export default function SuperAdminOverview() {
       setLoading(false);
     }
     load();
-  }, []);
-
-  const todayParts = useMemo(() => {
-    const d = new Date();
-    return {
-      day:  d.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase(),
-      num:  d.toLocaleDateString('en-US', { month: 'short', day: '2-digit' }).toUpperCase(),
-      year: d.getFullYear(),
-    };
   }, []);
 
   const filteredCampuses = useMemo(() => {
@@ -589,22 +443,14 @@ export default function SuperAdminOverview() {
         <div className="sao-shimmer sao-skel-hero" />
       ) : (
         <div className="sao-hero">
+          <div className="sao-hero-bar" />
           <div className="sao-hero-left">
             <div className="sao-hero-title">
-              <span className="sao-hero-icon"><ShieldCheck size={22} /></span>
               Empowering Knowledge Across Every Campus
             </div>
             <div className="sao-hero-sub">
             Bringing every campus library together through centralized management,
             real-time monitoring, and intelligent insights.
-            </div>
-          </div>
-          <div className="sao-hero-right">
-            <div className="sao-date-chip">
-              <CalendarDays size={13} color={GOLD} />
-              <span className="sao-date-day">{todayParts.day}</span>
-              <span className="sao-date-num">{todayParts.num}</span>
-              <span className="sao-date-year">{todayParts.year}</span>
             </div>
           </div>
         </div>
@@ -615,8 +461,8 @@ export default function SuperAdminOverview() {
         <StatSkeleton />
       ) : (
         <div className="sao-stats-grid">
-          {STATS_CONFIG.map(({ key, label, sub, Icon, tint }) => (
-            <div key={key} className="sao-stat-card" style={{ '--accent': tint.fg }}>
+          {STATS_CONFIG.map(({ key, label, sub, Icon }) => (
+            <div key={key} className="sao-stat-card">
               <div className="sao-stat-icon"><Icon size={34} strokeWidth={1.6} /></div>
               <div className="sao-stat-body">
                 <div className="sao-stat-label">{label}</div>
@@ -627,15 +473,6 @@ export default function SuperAdminOverview() {
           ))}
         </div>
       )}
-
-      {/* Campus directory */}
-      <div className="sao-carousel-section">
-        <div className="sao-selector-head">
-          <div className="sao-selector-title"><MapPin size={14} />Campus Directory ({campuses.length})</div>
-          <div className="sao-selector-caption">Every branch in the system, front to back.</div>
-        </div>
-        {loading ? <div className="sao-shimmer sao-skel-carousel" /> : <CampusCarousel campuses={campuses} />}
-      </div>
 
       {/* Circulation ledger */}
       <div className="sao-selector-head">
@@ -680,8 +517,28 @@ export default function SuperAdminOverview() {
                     <tbody>
                       {pagedCampuses.map(c => (
                         <tr key={c.id}>
-                          <td className="sao-name-cell">{c.campus_name}</td>
+                          <td className="sao-name-cell">
+                            <div className="sao-name-wrap">
+                              <span className={`sao-name-logo${c.logo_url ? '' : ' empty'}`}>
+                                {c.logo_url ? (
+                                  <img
+                                    src={c.logo_url}
+                                    alt=""
+                                    onError={ev => { ev.currentTarget.style.display = 'none'; }}
+                                  />
+                                ) : (
+                                  <Building2 size={16} color={MAROON} />
+                                )}
+                              </span>
+                              <span>{c.campus_name}</span>
+                            </div>
+                          </td>
                           <td><span className="sao-code-badge">{c.campus_code}</span></td>
+                          <td><span className="sao-fig">{c.librarians}</span></td>
+                          <td><span className="sao-fig">{c.employees}</span></td>
+                          <td><span className="sao-fig">{c.students}</span></td>
+                          <td><span className="sao-fig">{c.books}</span></td>
+                          <td><span className="sao-fig">{c.pending}</span></td>
                           <td>
                             <div className="sao-status-row">
                               <span className={`sao-status-dot${c.is_active ? '' : ' off'}`} style={{ boxShadow: 'none' }} />
@@ -690,10 +547,6 @@ export default function SuperAdminOverview() {
                               </span>
                             </div>
                           </td>
-                          <td><span className="sao-fig" style={{ background: MAROON_SOFT, color: MAROON }}>{c.librarians}</span></td>
-                          <td><span className="sao-fig" style={{ background: 'rgba(59,130,246,0.12)', color: BLUE }}>{c.students}</span></td>
-                          <td><span className="sao-fig" style={{ background: 'rgba(34,197,94,0.12)', color: '#178A4C' }}>{c.books}</span></td>
-                          <td><span className="sao-fig" style={{ background: 'rgba(249,115,22,0.12)', color: ORANGE }}>{c.pending}</span></td>
                         </tr>
                       ))}
                     </tbody>

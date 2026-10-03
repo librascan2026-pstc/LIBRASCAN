@@ -257,3 +257,51 @@ export async function sendVerificationEmail({ to, name, verifyUrl }) {
     text: `Welcome to LibraScan!\n\nConfirm your email to activate your account: ${verifyUrl}\n\nThis link expires in 24 hours. If you didn't create an account, ignore this email.`,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Forgot-password code — emailed through Brevo (replaces Supabase's own
+// "recovery" email). Same look as the sign-in code email.
+// ---------------------------------------------------------------------------
+export async function sendPasswordResetEmail({ to, name, code }) {
+  const logoBase = (process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/$/, '');
+  const logoUrl  = process.env.EMAIL_LOGO_URL || (logoBase ? `${logoBase}/LibraryLogo.png` : '');
+  const glyph = (c) => `<span style="font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">${c}&#xFE0E;</span>`;
+
+  const html = `
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">Your LibraScan password reset code is ${escHtml(code)}. It expires in 10 minutes.</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%;max-width:480px;background:#FFFFFF;border:1px solid #EADFC8;border-radius:26px;overflow:hidden;">
+        <tr><td bgcolor="#6E1620" style="background:#6E1620;padding:26px 30px;border-bottom:2px solid #C9A84C;">
+          ${logoUrl ? `<img src="${logoUrl}" height="32" alt="" style="height:32px;width:auto;border:0;vertical-align:middle;" />` : ''}
+          <span style="color:#C9A84C;font-size:24px;vertical-align:middle;padding:0 10px;">|</span>
+          <span style="font:600 15px Georgia,serif;letter-spacing:0.24em;color:#F3E6CF;vertical-align:middle;">LIBRASCAN</span>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 30px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td width="80" height="80" align="center" bgcolor="#F3E1DC" style="width:80px;height:80px;background:#F3E1DC;border-radius:40px;font-size:32px;line-height:80px;font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">&#128273;&#xFE0E;</td></tr></table>
+          <h1 style="margin:16px 0 10px;font:600 28px Georgia,serif;color:#4A1A1E;">Reset your password</h1>
+          <p style="margin:0;font:400 15px/1.6 Arial,sans-serif;color:#6B6460;">Hi ${escHtml(name) || 'there'}, enter the code below on the LibraScan reset page to choose a new password.</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #7A1A24;border-radius:16px;">
+            <tr><td align="center" style="padding:20px 0 20px 10px;font:700 36px Georgia,serif;letter-spacing:0.3em;color:#7A1A24;">${escHtml(code)}</td></tr>
+          </table>
+          <p style="margin:12px 0 0;text-align:center;font:400 13px Arial,sans-serif;color:#7A726C;">${glyph('&#128339;')}&nbsp; Expires in 10 minutes</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td valign="top" width="30">${glyph('&#128737;')}</td>
+            <td style="font:400 12.5px/1.6 Arial,sans-serif;color:#8C837C;">Didn&rsquo;t ask to reset your password? You can safely ignore this email &mdash; your password won&rsquo;t change. Never share this code with anyone.</td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+
+  await sendViaBrevo({
+    to,
+    subject: `${code} \u2014 your LibraScan password reset code`,
+    html,
+    text: `Your LibraScan password reset code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
+  });
+}

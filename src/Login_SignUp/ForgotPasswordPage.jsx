@@ -1,6 +1,24 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { supabase } from '../supabaseClient';
+
+// Forgot-password now runs through our own server + Brevo (not Supabase's
+// built-in recovery email): /api/auth/forgot-password -> verify-reset-code
+// -> reset-password.
+const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
+
+async function postJson(path, body) {
+  try {
+    const res  = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, json };
+  } catch {
+    return { ok: false, status: 0, json: { error: 'Could not reach the server. Please check your connection and try again.' } };
+  }
+}
 import AuthLayout from './AuthLayout';
 import AuthInput from './AuthInput';
 
@@ -258,21 +276,12 @@ function Step1({ onNext, onGoLogin }) {
     setFieldErr('');
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email.trim().toLowerCase(),
-      options: { shouldCreateUser: false },
-    });
+    const { ok, json } = await postJson('/api/auth/forgot-password', { email: email.trim().toLowerCase() });
     setLoading(false);
 
-    if (error) {
-      const msg = error.message.toLowerCase();
-      if (msg.includes('rate limit') || msg.includes('too many') ||
-          msg.includes('not found')  || msg.includes('no user') ||
-          msg.includes('invalid')    || msg.includes('not registered')) {
-        onNext(email.trim().toLowerCase()); return;
-      }
-      setApiError(error.message); return;
-    }
+    // The server answers the same way whether or not the account exists,
+    // so we can always move on when it succeeds.
+    if (!ok) { setApiError(json.error || 'Could not send the code. Please try again.'); return; }
     onNext(email.trim().toLowerCase());
   };
 
@@ -319,11 +328,18 @@ function Step2({ email, onNext, onGoLogin }) {
   const [error,     setError]     = useState('');
   const [resent,    setResent]    = useState(false);
   const [resending, setResending] = useState(false);
+  const [resendIn,  setResendIn]  = useState(60);   // seconds until "request a new code" is allowed
   const refs = useRef([]);
 
   const code = digits.join('');
 
   useEffect(() => { refs.current[0]?.focus(); }, []);
+
+  useEffect(() => {
+    if (resendIn <= 0) return undefined;
+    const t = setTimeout(() => setResendIn(v => v - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendIn]);
 
   const handleChange = (i, val) => {
     const d = val.replace(/\D/g, '').slice(-1);
@@ -356,44 +372,33 @@ function Step2({ email, onNext, onGoLogin }) {
     if (code.length < 6) { setError('Please enter all 6 digits.'); return; }
     setLoading(true);
 
-    const { data, error: otpErr } = await supabase.auth.verifyOtp({
-      email, token: code, type: 'email',
-    });
+    const { ok, json } = await postJson('/api/auth/verify-reset-code', { email, code });
 
-    if (otpErr) {
+    if (!ok || !json.resetToken) {
       setLoading(false);
-      setError('Invalid or expired code. Please try again or request a new one.');
+      setError(json.error || 'Invalid or expired code. Please try again or request a new one.');
       setDigits(Array(6).fill(''));
       refs.current[0]?.focus();
       return;
     }
-
-    if (data?.session) {
-      await supabase.auth.setSession({
-        access_token:  data.session.access_token,
-        refresh_token: data.session.refresh_token,
-      });
-    }
     setLoading(false);
-    onNext();
+    onNext(json.resetToken);
   };
 
   const handleResend = async () => {
+    if (resendIn > 0 || resending) return;
     setResending(true);
     setResent(false);
     setError('');
-    const { error } = await supabase.auth.signInWithOtp({
-      email, options: { shouldCreateUser: false },
-    });
+    const { ok, json } = await postJson('/api/auth/forgot-password', { email });
     setResending(false);
-    if (!error) {
+    if (ok) {
       setResent(true);
+      setResendIn(60);
       setDigits(Array(6).fill(''));
       refs.current[0]?.focus();
-    } else if (error.message.toLowerCase().includes('rate limit') || error.message.toLowerCase().includes('too many')) {
-      setError('Too many requests — please wait a few minutes before requesting a new code.');
     } else {
-      setError(error.message);
+      setError(json.error || 'Could not send a new code. Please try again.');
     }
   };
 
@@ -496,20 +501,21 @@ function Step2({ email, onNext, onGoLogin }) {
           <InfoIcon size={13} color={C.blue} />
         </div>
         <div>
-          <strong>Code expires in 60 minutes.</strong>{' '}
+          <strong>Code expires in 10 minutes.</strong>{' '}
           Didn't receive it? Check spam or{' '}
           <button
             type="button"
             onClick={handleResend}
-            disabled={resending}
+            disabled={resending || resendIn > 0}
             style={{
               background: 'none', border: 'none', color: C.blue,
-              cursor: resending ? 'not-allowed' : 'pointer',
+              cursor: (resending || resendIn > 0) ? 'not-allowed' : 'pointer',
+              opacity: resendIn > 0 ? 0.6 : 1,
               fontWeight: 700, padding: 0, fontSize: 'inherit',
               fontFamily: 'inherit', textDecoration: 'underline',
             }}
           >
-            {resending ? 'sending…' : 'request a new code.'}
+            {resending ? 'sending…' : resendIn > 0 ? `request a new code in ${resendIn}s` : 'request a new code.'}
           </button>
         </div>
       </div>
@@ -529,7 +535,7 @@ function Step2({ email, onNext, onGoLogin }) {
   );
 }
 
-function Step3({ onGoLogin }) {
+function Step3({ email, resetToken, onGoLogin }) {
   const [newPw,       setNewPw]       = useState('');
   const [confirm,     setConfirm]     = useState('');
   const [loading,     setLoading]     = useState(false);
@@ -555,10 +561,8 @@ function Step3({ onGoLogin }) {
   useEffect(() => {
     if (!done) return;
     if (countdown <= 0) {
-      supabase.auth.signOut().then(() => {
-        window.history.replaceState(null, '', window.location.pathname);
-        onGoLogin?.();
-      });
+      window.history.replaceState(null, '', window.location.pathname);
+      onGoLogin?.();
       return;
     }
     const t = setTimeout(() => setCountdown(c => c - 1), 1000);
@@ -585,17 +589,10 @@ function Step3({ onGoLogin }) {
     if (Object.keys(errs).length) return;
     setLoading(true);
 
-    const { data: sessionData } = await supabase.auth.getSession();
-    if (!sessionData?.session) {
-      setLoading(false);
-      setApiError('Your session expired. Please go back and request a new code.');
-      return;
-    }
-
-    const { error } = await supabase.auth.updateUser({ password: newPw });
+    const { ok, json } = await postJson('/api/auth/reset-password', { email, resetToken, password: newPw });
     setLoading(false);
-    if (error) setApiError(error.message);
-    else       setDone(true);
+    if (!ok) setApiError(json.error || 'Could not reset your password. Please try again.');
+    else     setDone(true);
   };
 
   if (done) {
@@ -640,8 +637,7 @@ function Step3({ onGoLogin }) {
           Redirecting to login in <strong style={{ color: C.maroon }}>{countdown}s</strong>…
         </div>
 
-        <PrimaryButton loading={false} onClick={async () => {
-          await supabase.auth.signOut();
+        <PrimaryButton loading={false} onClick={() => {
           window.history.replaceState(null, '', window.location.pathname);
           onGoLogin?.();
         }} style={{ maxWidth: 220, marginTop: 4 }}>
@@ -754,6 +750,7 @@ function Step3({ onGoLogin }) {
 export default function ForgotPasswordPage({ onGoLogin, onGoLanding }) {
   const [step,  setStep]  = useState(1);
   const [email, setEmail] = useState('');
+  const [resetToken, setResetToken] = useState('');
 
   const handleExit = onGoLanding || (() => { window.location.href = '/'; });
 
@@ -781,8 +778,8 @@ export default function ForgotPasswordPage({ onGoLogin, onGoLanding }) {
             transition={{ duration: 0.24, ease: [0.32, 0, 0.18, 1] }}
           >
             {step === 1 && <Step1 onNext={e => { setEmail(e); setStep(2); }} onGoLogin={onGoLogin} />}
-            {step === 2 && <Step2 email={email} onNext={() => setStep(3)} onGoLogin={onGoLogin} />}
-            {step === 3 && <Step3 onGoLogin={onGoLogin} />}
+            {step === 2 && <Step2 email={email} onNext={t => { setResetToken(t); setStep(3); }} onGoLogin={onGoLogin} />}
+            {step === 3 && <Step3 email={email} resetToken={resetToken} onGoLogin={onGoLogin} />}
           </motion.div>
         </AnimatePresence>
       </AuthLayout>

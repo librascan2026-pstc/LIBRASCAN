@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, cloneElement } from 'react';
 import {
   BookOpen, Library, PackageCheck, PackageX, Search, ChevronLeft, ChevronRight,
   Building2, X, Hash, MapPin, User, Layers, Clock, Check, Ban,
+  Barcode, Tag, Calendar, FileText, Landmark, Globe, Palette, BookMarked, ZoomIn,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
 import { notifyLibrariansOfRegistration } from './notifyLibrariansOfRegistration';
@@ -25,6 +26,40 @@ function AnalogClockIcon({ size = 64 }) {
       <circle cx="32" cy="32" r="2" fill="#C98E8E" />
     </svg>
   );
+}
+
+/* ── Abstract helpers (same parsing the Browse Catalog / Book Catalog views use) ── */
+function parseAbstractData(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'object') return raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { heading: '', paragraphs: [String(parsed)], keywords: [] };
+    }
+    return parsed;
+  } catch {
+    return { heading: '', paragraphs: [raw], keywords: [] };
+  }
+}
+
+// OCR often splits a sentence across several fragments — glue them back together.
+function mergeFragmentedParagraphs(paragraphs = [], subheadings = []) {
+  const merged = [];
+  let buffer = '';
+  for (const para of paragraphs) {
+    if (subheadings?.includes(para)) {
+      if (buffer.trim()) { merged.push(buffer.trim()); buffer = ''; }
+      merged.push(para);
+      continue;
+    }
+    const trimmed = (para || '').trim();
+    if (!trimmed) continue;
+    buffer = buffer ? `${buffer} ${trimmed}` : trimmed;
+    if (/[.!?:]/.test(buffer.trimEnd().slice(-1))) { merged.push(buffer.trim()); buffer = ''; }
+  }
+  if (buffer.trim()) merged.push(buffer.trim());
+  return merged;
 }
 
 /* ============================================================================
@@ -57,8 +92,11 @@ const ORANGE      = '#F97316';
 
 const PAGE_SIZE = 10;
 
+// Same genre list librarians pick from in Book Catalog — keeps the filter complete even before a genre has any books.
+const GENRES = ['Fiction', 'Non-Fiction', 'Science', 'Technology', 'History', 'Education', 'Others'];
+
 const CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700&family=Playfair+Display:wght@500;600;700&display=swap');
 
   .sab, .sab * { box-sizing: border-box; }
   .sab {
@@ -105,23 +143,7 @@ const CSS = `
     color: ${TEXT}; line-height: 1.2; margin-bottom: 10px;
     display: flex; align-items: center; gap: 12px;
   }
-  .sab-hero-icon {
-    width: 42px; height: 42px; border-radius: 14px;
-    background: ${MAROON_SOFT}; border: 1px solid rgba(122,0,0,0.18);
-    display: flex; align-items: center; justify-content: center;
-    color: ${MAROON}; flex-shrink: 0;
-  }
   .sab-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 500px; font-weight: 500; text-align: left; }
-  .sab-hero-right { position: relative; z-index: 1; }
-  .sab-hero-badge {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    width: 84px; height: 84px; border-radius: 18px; gap: 2px;
-    background: linear-gradient(135deg, ${MAROON} 0%, ${MAROON_DEEP} 100%);
-    border: 1.5px solid rgba(212,175,55,0.35);
-    box-shadow: 0 10px 24px rgba(122,0,0,0.28); color: #fff;
-  }
-  .sab-hero-badge b { font-size: 22px; font-weight: 800; line-height: 1; }
-  .sab-hero-badge span { font-size: 8.5px; font-weight: 800; letter-spacing: 0.08em; color: ${GOLD}; text-transform: uppercase; text-align: center; }
 
   /* ---------- Stat cards ---------- */
   .sab-stats-grid {
@@ -149,22 +171,22 @@ const CSS = `
   .sab-stats-grid .sab-stat-card:nth-child(5) { animation-delay: 0.18s; }
   .sab-stat-card::before {
     content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
-    border-radius: 0 0 16px 16px; background: var(--accent-grad); opacity: 0.65;
+    border-radius: 0 0 16px 16px; background: ${MAROON}; opacity: 1;
   }
   .sab-stat-card:hover {
     transform: translateY(-3px);
     box-shadow: 0 14px 28px rgba(59,42,37,0.09);
-    border-color: var(--accent-border);
+    border-color: rgba(122,0,0,0.35);
   }
   .sab-stat-icon {
     position: absolute; top: 12px; right: 12px;
     display: flex; align-items: center; justify-content: center;
-    color: var(--accent-fg);
-    opacity: 0.10;
+    color: ${MAROON};
+    opacity: 0.18;
     pointer-events: none;
     transition: opacity 0.18s;
   }
-  .sab-stat-card:hover .sab-stat-icon { opacity: 0.16; }
+  .sab-stat-card:hover .sab-stat-icon { opacity: 0.28; }
   .sab-stat-body { min-width: 0; position: relative; z-index: 1; }
   .sab-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .sab-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; margin-bottom: 5px; }
@@ -243,9 +265,15 @@ const CSS = `
   .sab-table thead th:last-child { border-top-right-radius: 18px; }
   .sab-table tbody td { padding: 12px 18px; font-size: 13px; color: ${TEXT}; border-bottom: 1px solid ${BORDER}; vertical-align: middle; }
   .sab-table tbody tr:last-child td { border-bottom: none; }
-  .sab-table tbody tr:nth-child(even) td { background: ${CREAM}; }
   .sab-table tbody tr { transition: background 0.14s; cursor: pointer; }
   .sab-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  /* ── Unified table look: single row colour, maroon text, left aligned ── */
+  .sab-table thead th, .sab-table tbody td { text-align: left !important; }
+  .sab-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .sab-table tbody tr:hover td { background: ${MAROON_SOFT}; }
+  .sab-book-title, .sab-book-author, .sab-copies, .sab-copies span { color: ${MAROON} !important; }
+  .sab-code-badge, .sab-genre-badge { color: ${MAROON} !important; }
+  .sab-action-cell { justify-content: flex-start !important; }
 
   .sab-book-cell { display: flex; align-items: center; gap: 10px; max-width: 260px; }
   .sab-book-cover {
@@ -355,6 +383,115 @@ const CSS = `
   .sab-modal-field-label svg { color: ${MAROON}; }
   .sab-modal-field-value { font-size: 13px; font-weight: 600; color: ${TEXT}; }
 
+  /* ---------- Book Details modal (matches the student's Browse Catalog popup) ---------- */
+  .sab-modal.sab-bd {
+    --bd-text: #3A0000; --bd-text2: #5A1010; --bd-muted: #7A3030; --bd-dim: rgba(90,16,16,0.55);
+    max-width: 860px; max-height: calc(100vh - 80px);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: #FDF8F0;
+    box-shadow: 0 24px 64px rgba(40,0,0,0.50), 0 0 0 1px rgba(201,168,76,0.10);
+  }
+  .sab-bd-hdr {
+    position: relative; flex-shrink: 0; display: flex; align-items: center; gap: 14px;
+    padding: 16px 22px; background: linear-gradient(135deg, ${MAROON_DEEP}, ${MAROON_MID});
+    border-bottom: 1px solid rgba(201,168,76,0.35);
+  }
+  .sab-bd-hdr-ico { display: flex; flex: none; color: #F5E4A8; }
+  .sab-bd-hdr-text { flex: 1; min-width: 0; text-align: left; }
+  .sab-bd-hdr-title { font-family: 'Playfair Display', Georgia, serif; font-size: 24px; font-weight: 600; line-height: 1.15; color: #FFF6DF; }
+  .sab-bd-hdr-sub {
+    display: flex; align-items: center; gap: 8px; margin-top: 4px;
+    font-size: 10.5px; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(245,228,168,0.70);
+  }
+  .sab-bd-hdr-sub::before { content: ''; flex: none; width: 16px; height: 1px; background: rgba(245,228,168,0.55); }
+  .sab-bd-close {
+    flex: none; width: 36px; height: 36px; border-radius: 50%;
+    background: rgba(245,228,168,0.10); border: 1px solid rgba(245,228,168,0.18);
+    color: rgba(245,228,168,0.80); display: flex; align-items: center; justify-content: center;
+    cursor: pointer; transition: all 0.18s;
+  }
+  .sab-bd-close:hover { background: rgba(245,228,168,0.22); color: #F5E4A8; transform: scale(1.08); }
+
+  .sab-bd-body {
+    flex: 1; overflow-y: auto; padding: 16px; text-align: left;
+    display: grid; grid-template-columns: minmax(200px, 31%) minmax(0, 1fr); gap: 14px; align-items: start;
+    background: #FDF8F0;
+  }
+  .sab-bd-side, .sab-bd-main { border: 1px solid rgba(139,0,0,0.18); border-radius: 14px; background: rgba(255,255,255,0.55); }
+  .sab-bd-side { position: sticky; top: 0; padding: 18px 14px 16px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .sab-bd-cover { position: relative; flex-shrink: 0; width: 82%; aspect-ratio: 160 / 204; }
+  .sab-bd-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: 3px; filter: drop-shadow(0 6px 10px rgba(50,0,0,0.30)); }
+  .sab-bd-cover-ph {
+    position: absolute; inset: 0; border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(139,0,0,0.10), rgba(201,168,76,0.06));
+    border: 1px solid rgba(139,0,0,0.15); color: var(--bd-dim);
+  }
+  .sab-bd-scan { width: 100%; }
+  .sab-bd-scan-label { font-size: 9.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--bd-dim); margin-bottom: 6px; text-align: left; }
+  .sab-bd-scan-frame {
+    position: relative; width: 100%; aspect-ratio: 160 / 204; border-radius: 8px; overflow: hidden;
+    border: 1px solid rgba(139,0,0,0.18); background: #fff; cursor: zoom-in; padding: 0; display: block;
+  }
+  .sab-bd-scan-frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+  .sab-bd-scan-zoom {
+    position: absolute; right: 6px; bottom: 6px; width: 26px; height: 26px; border-radius: 8px;
+    display: flex; align-items: center; justify-content: center; color: #fff;
+    background: rgba(90,0,0,0.72); opacity: 0; transition: opacity 0.16s;
+  }
+  .sab-bd-scan-frame:hover .sab-bd-scan-zoom, .sab-bd-scan-frame:focus-visible .sab-bd-scan-zoom { opacity: 1; }
+
+  .sab-bd-main { padding: 20px 20px 22px; min-width: 0; }
+  .sab-bd-title { font-family: 'Playfair Display', Georgia, serif; font-size: clamp(22px, 2.6vw, 28px); font-weight: 700; line-height: 1.2; color: var(--bd-text); margin: 0 0 6px; }
+  .sab-bd-by { font-size: 13.5px; color: var(--bd-text2); }
+  .sab-bd-vol { font-size: 12.5px; color: var(--bd-muted); font-style: italic; margin-top: 2px; }
+  .sab-bd-await {
+    display: inline-flex; align-items: center; gap: 5px; margin-top: 10px; padding: 3px 10px; border-radius: 20px;
+    font-size: 11px; font-weight: 700; background: rgba(201,168,76,0.16); color: #8a6d1f; border: 1px solid rgba(201,168,76,0.35);
+  }
+  .sab-bd-facts {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin-top: 16px; padding: 14px 16px;
+    border: 1px solid rgba(139,0,0,0.16); border-radius: 12px; background: rgba(255,255,255,0.45);
+  }
+  .sab-bd-fact { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .sab-bd-fact-ico {
+    flex: none; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+    color: ${MAROON_DEEP}; background: rgba(255,255,255,0.70); border: 1px solid rgba(139,0,0,0.18); border-radius: 9px;
+  }
+  .sab-bd-fact-k { font-size: 9.5px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--bd-dim); }
+  .sab-bd-fact-v { margin-top: 1px; font-size: 13px; color: var(--bd-text); overflow-wrap: anywhere; }
+  .sab-bd-abs-hd {
+    display: flex; align-items: center; gap: 10px; margin: 22px 0 12px;
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.2em; text-transform: uppercase; color: var(--bd-dim);
+  }
+  .sab-bd-abs-hd svg { flex: none; }
+  .sab-bd-abs-hd::after { content: ''; flex: 1; height: 1px; background: rgba(139,0,0,0.16); }
+  .sab-bd-abs-title { font-family: 'Playfair Display', Georgia, serif; font-size: 22px; font-weight: 700; line-height: 1.25; color: var(--bd-text); margin: 0 0 10px; }
+  .sab-bd-abs-sub { font-size: 12.5px; font-weight: 700; color: ${MAROON_MID}; letter-spacing: 0.06em; text-transform: uppercase; margin: 16px 0 8px; }
+  .sab-bd-abs-p { margin: 0 0 12px; font-size: 13.5px; line-height: 1.75; color: var(--bd-text2); }
+  .sab-bd-kw { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 6px; }
+  .sab-bd-kw span {
+    font-size: 11.5px; padding: 4px 13px; border-radius: 14px; font-style: italic; font-weight: 500;
+    background: rgba(139,0,0,0.06); border: 1px solid rgba(139,0,0,0.16); color: ${MAROON_MID};
+  }
+  .sab-bd-added { margin-top: 16px; padding-top: 12px; border-top: 1px solid rgba(139,0,0,0.08); font-size: 11px; color: var(--bd-dim); }
+
+  .sab-scan-lightbox {
+    position: fixed; inset: 0; z-index: 1100; background: rgba(15,0,0,0.82); backdrop-filter: blur(5px);
+    display: flex; align-items: center; justify-content: center; padding: 28px; cursor: zoom-out;
+    animation: sab-fade-in 0.18s ease;
+  }
+  .sab-scan-lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; background: #fff; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+
+  @media (max-width: 720px) {
+    .sab-bd-body { grid-template-columns: 1fr; }
+    .sab-bd-side { position: static; }
+    .sab-bd-cover { width: 58%; }
+    .sab-bd-scan { max-width: 260px; }
+    .sab-bd-facts { grid-template-columns: 1fr; }
+    .sab-bd-hdr { padding: 14px 16px; }
+    .sab-bd-hdr-title { font-size: 20px; }
+  }
+
   /* ---------- Tabs (Book / Pending Requests) ---------- */
   .sab-tabs { display: flex; flex: 1; gap: 28px; border-bottom: 1.5px solid ${BORDER}; }
   .sab-tab {
@@ -435,6 +572,16 @@ const CSS = `
     .sab-stat-value { font-size: 21px; }
     .sab-modal-grid { grid-template-columns: 1fr; }
   }
+
+  /* ── Responsive banner: title + badge adapt to every screen width ── */
+  .sab-hero { flex-wrap: nowrap; align-items: center; }
+  .sab-hero-left { flex: 1 1 0; min-width: 0; }
+  .sab-hero-title { font-size: clamp(18px, 1.2vw + 14px, 26px); line-height: 1.25; overflow-wrap: anywhere; }
+  .sab-hero-sub { font-size: clamp(12.5px, 0.35vw + 11.5px, 15px); }
+  @media (max-width: 560px) {
+    .sab-hero { flex-wrap: wrap; gap: 14px; }
+    .sab-hero-left { flex: 1 1 100%; }
+  }
 `;
 
 const ACCENTS = {
@@ -486,6 +633,8 @@ export default function SuperAdminBooks() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage]         = useState(1);
   const [viewBook, setViewBook] = useState(null);
+  const [scanZoom, setScanZoom] = useState(null); // abstract-scan lightbox (image url)
+  const closeView = () => { setViewBook(null); setScanZoom(null); };
 
   // 'book' = registered, live catalog · 'pending' = new titles submitted by
   // librarians awaiting Super Admin confirmation (book registration).
@@ -553,8 +702,9 @@ export default function SuperAdminBooks() {
   );
 
   const genres = useMemo(() => {
-    const set = new Set(approvedBooks.map(b => b.genre).filter(Boolean));
-    return Array.from(set).sort();
+    // Canonical genres first (in the librarians' order), then any legacy/custom genre found in the data.
+    const extra = Array.from(new Set(approvedBooks.map(b => b.genre).filter(g => g && !GENRES.includes(g)))).sort();
+    return [...GENRES, ...extra];
   }, [approvedBooks]);
 
   const baseBooks = activeTab === 'pending' ? pendingBooks : approvedBooks;
@@ -687,19 +837,12 @@ export default function SuperAdminBooks() {
           <div className="sab-hero-bar" />
           <div className="sab-hero-left">
             <div className="sab-hero-title">
-              <span className="sab-hero-icon"><BookOpen size={22} /></span>
               Every Campus, One Catalog
             </div>
             <div className="sab-hero-sub">
               {selectedCampusName
                 ? `Showing holdings for ${selectedCampusName} only switch back to "All Campuses" for the system wide view.`
                 : 'A system wide view of every book title held across all campus libraries is searchable, filterable, and always up to date.'}
-            </div>
-          </div>
-          <div className="sab-hero-right">
-            <div className="sab-hero-badge">
-              <b>{stats.titles}</b>
-              <span>Titles</span>
             </div>
           </div>
         </div>
@@ -875,14 +1018,14 @@ export default function SuperAdminBooks() {
                             </div>
                           </td>
                           <td><span className="sab-code-badge">{b.campus?.campus_name || 'Unassigned'}</span></td>
-                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.isbn || '—'}</span></td>
-                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.call_number || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: MAROON }}>{b.isbn || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: MAROON }}>{b.call_number || '—'}</span></td>
                           <td>{b.genre ? <span className="sab-genre-badge">{b.genre}</span> : '—'}</td>
                           <td>
                             <span className="sab-copies">{b.copies}</span>
                           </td>
                           <td>
-                            <span style={{ fontSize: 12, color: TEXT_MUTED }}>
+                            <span style={{ fontSize: 12, color: MAROON }}>
                               {b.created_at ? new Date(b.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
                             </span>
                           </td>
@@ -952,8 +1095,8 @@ export default function SuperAdminBooks() {
                             </div>
                           </td>
                           <td><span className="sab-code-badge">{b.campus?.campus_name || 'Unassigned'}</span></td>
-                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.isbn || '—'}</span></td>
-                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: TEXT_MUTED }}>{b.call_number || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: MAROON }}>{b.isbn || '—'}</span></td>
+                          <td><span style={{ fontSize: 12, fontFamily: 'monospace', color: MAROON }}>{b.call_number || '—'}</span></td>
                           <td>{b.genre ? <span className="sab-genre-badge">{b.genre}</span> : '—'}</td>
                           <td>
                             <span className="sab-copies">
@@ -1031,76 +1174,117 @@ export default function SuperAdminBooks() {
         </div>
       )}
 
-      {viewBook && (
-        <div className="sab-modal-overlay" onClick={e => e.target === e.currentTarget && setViewBook(null)}>
-          <div className="sab-modal">
-            <div className="sab-modal-head">
-              <button className="sab-modal-close" onClick={() => setViewBook(null)}><X size={15} /></button>
-              {viewBook.cover_image_url ? (
-                <img className="sab-modal-cover" src={viewBook.cover_image_url} alt="" />
-              ) : (
-                <div className="sab-modal-cover-fallback"><BookOpen size={22} /></div>
-              )}
-              <div>
-                <div className="sab-modal-title">{viewBook.title}</div>
-                <div className="sab-modal-author">{viewBook.authors || 'Unknown author'}</div>
-                {viewBook.registration_status === 'pending' && (
-                  <div style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 8,
-                    padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700,
-                    background: 'rgba(212,175,55,0.20)', color: '#F5E4A8',
-                    border: '1px solid rgba(245,228,168,0.35)',
-                  }}>
-                    <Clock size={11} /> Awaiting Confirmation
+      {viewBook && (() => {
+        const b = viewBook;
+        const abs = parseAbstractData(b.abstract_text);
+        const absParas = abs ? mergeFragmentedParagraphs(abs.paragraphs || [], abs.subheadings || []) : [];
+        const absKeywords = abs?.keywords || [];
+        const hasAbstractText = absParas.length > 0;
+        const availCount = parseInt(b.available_copies) || 0;
+        const facts = [
+          ['Campus',               Building2, b.campus?.campus_name || 'Unassigned'],
+          ['ISBN',                 Barcode,   b.isbn],
+          ['Call Number',          Tag,       b.call_number],
+          ['Publisher',            Landmark,  b.publisher],
+          ['Place of Publication', Globe,     b.place_of_publication],
+          ['Year Published',       Calendar,  b.year],
+          ['Volume Number',        Layers,    b.volume_number],
+          ['Edition',              FileText,  b.edition],
+          ['Total Pages',          FileText,  b.pages],
+          ['Shelf Location',       MapPin,    b.shelf_location],
+          ['Genre',                BookMarked, b.genre],
+          ['Copies',               BookOpen,  `${availCount} available / ${b.copies} total`],
+          ['Color',                Palette,   b.color],
+        ].filter(([, , v]) => v !== undefined && v !== null && String(v).trim() !== '');
+
+        return (
+          <div className="sab-modal-overlay" onClick={e => e.target === e.currentTarget && closeView()}>
+            <div className="sab-modal sab-bd">
+              <div className="sab-bd-hdr">
+                <span className="sab-bd-hdr-ico"><BookOpen size={30} strokeWidth={1.7} /></span>
+                <div className="sab-bd-hdr-text">
+                  <div className="sab-bd-hdr-title">Book Details</div>
+                  <div className="sab-bd-hdr-sub">{b.genre || 'Library Catalog'}</div>
+                </div>
+                <button className="sab-bd-close" onClick={closeView} aria-label="Close"><X size={16} /></button>
+              </div>
+
+              <div className="sab-bd-body">
+                <aside className="sab-bd-side">
+                  <div className="sab-bd-cover">
+                    {b.cover_image_url
+                      ? <img src={b.cover_image_url} alt={`${b.title} cover`} />
+                      : <div className="sab-bd-cover-ph"><BookOpen size={34} strokeWidth={1.5} /></div>}
                   </div>
-                )}
+
+                  {b.abstract_image_url && (
+                    <div className="sab-bd-scan">
+                      <div className="sab-bd-scan-label">Original Scan</div>
+                      <button
+                        type="button"
+                        className="sab-bd-scan-frame"
+                        onClick={() => setScanZoom(b.abstract_image_url)}
+                        aria-label="Enlarge original abstract scan"
+                      >
+                        <img src={b.abstract_image_url} alt="Original abstract scan" />
+                        <span className="sab-bd-scan-zoom"><ZoomIn size={14} /></span>
+                      </button>
+                    </div>
+                  )}
+                </aside>
+
+                <section className="sab-bd-main">
+                  <h2 className="sab-bd-title">{b.title}</h2>
+                  <div className="sab-bd-by">by {b.authors || b.author || 'Unknown author'}</div>
+                  {b.volume_title && <div className="sab-bd-vol">{b.volume_title}</div>}
+                  {b.registration_status === 'pending' && (
+                    <span className="sab-bd-await"><Clock size={11} /> Awaiting Confirmation</span>
+                  )}
+
+                  <div className="sab-bd-facts">
+                    {facts.map(([label, Icon, value]) => (
+                      <div key={label} className="sab-bd-fact">
+                        <span className="sab-bd-fact-ico"><Icon size={16} strokeWidth={1.8} /></span>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="sab-bd-fact-k">{label}</div>
+                          <div className="sab-bd-fact-v">{value}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {hasAbstractText && (
+                    <>
+                      <div className="sab-bd-abs-hd"><BookOpen size={16} /><span>Abstract</span></div>
+                      {abs.heading && <div className="sab-bd-abs-title">{abs.heading}</div>}
+                      {absParas.map((para, i) => (
+                        abs.subheadings?.includes(para)
+                          ? <div key={i} className="sab-bd-abs-sub">{para}</div>
+                          : <p key={i} className="sab-bd-abs-p">{para}</p>
+                      ))}
+                      {absKeywords.length > 0 && (
+                        <div className="sab-bd-kw">{absKeywords.map((kw, i) => <span key={i}>{kw}</span>)}</div>
+                      )}
+                    </>
+                  )}
+
+                  {b.created_at && (
+                    <div className="sab-bd-added">
+                      Added on {new Date(b.created_at).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}
+                    </div>
+                  )}
+                </section>
               </div>
             </div>
-            <div className="sab-modal-body">
-              <div className="sab-modal-grid">
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><Building2 size={12} />Campus</div>
-                  <div className="sab-modal-field-value">{viewBook.campus?.campus_name || 'Unassigned'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><Hash size={12} />ISBN</div>
-                  <div className="sab-modal-field-value">{viewBook.isbn || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><Hash size={12} />Call Number</div>
-                  <div className="sab-modal-field-value">{viewBook.call_number || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><User size={12} />Publisher</div>
-                  <div className="sab-modal-field-value">{viewBook.publisher || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><MapPin size={12} />Shelf Location</div>
-                  <div className="sab-modal-field-value">{viewBook.shelf_location || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><Layers size={12} />Genre</div>
-                  <div className="sab-modal-field-value">{viewBook.genre || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label"><BookOpen size={12} />Copies</div>
-                  <div className="sab-modal-field-value">{viewBook.available_copies} available / {viewBook.copies} total</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label">Year</div>
-                  <div className="sab-modal-field-value">{viewBook.year || '—'}</div>
-                </div>
-                <div className="sab-modal-field">
-                  <div className="sab-modal-field-label">Status</div>
-                  <div className="sab-modal-field-value" style={{ color: viewBook.status === 'Available' ? '#178A4C' : DANGER }}>
-                    {viewBook.status}
-                  </div>
-                </div>
+
+            {scanZoom && (
+              <div className="sab-scan-lightbox" onClick={e => { e.stopPropagation(); setScanZoom(null); }}>
+                <img src={scanZoom} alt="Original abstract scan (enlarged)" />
               </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

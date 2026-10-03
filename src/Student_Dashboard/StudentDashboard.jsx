@@ -4862,20 +4862,7 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
               onChange={handleMfaToggle}
             />
 
-            {mfaEnabled && (
-              <div style={{
-                display:'flex', alignItems:'center', justifyContent:'space-between',
-                gap:10, marginTop:14, flexWrap:'wrap',
-              }}>
-                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', lineHeight:1.6 }}>
-                  Chose "remember this device" on a shared or public computer by mistake?
-                </div>
-                <button type="button" className="sdb-btn sdb-btn-ghost" style={{ fontSize:11.5, padding:'6px 14px' }}
-                  onClick={handleForgetDevice}>
-                  Forget This Device
-                </button>
-              </div>
-            )}
+
 
             <LoginSessionsPanel show={show} />
           </div>
@@ -5869,7 +5856,7 @@ export default function StudentDashboard({ user, onSignOut }) {
               }
               <div>
                 <div className="sdb-profile-name">{displayName}</div>
-                <div className="sdb-profile-role">Student</div>
+                <div className="sdb-profile-role">{(profile?.role || user?.user_metadata?.role) === 'employee' ? 'Employee' : 'Student'}</div>
               </div>
             </div>
           </div>
