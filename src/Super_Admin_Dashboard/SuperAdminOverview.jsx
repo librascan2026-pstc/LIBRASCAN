@@ -111,7 +111,7 @@ const CSS = `
   .sao-hero-title {
     font-size: 25px; font-weight: 800; letter-spacing: -0.01em;
     color: ${TEXT}; line-height: 1.25; margin-bottom: 10px;
-    display: flex; align-items: center; gap: 12px;
+    display: flex; align-items: center; gap: 12px;  text-align: left;
   }
   .sao-hero-sub { font-size: 15px; line-height: 1.65; color: ${TEXT_MUTED}; max-width: 610px; font-weight: 500; text-align: left;}
 
