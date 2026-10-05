@@ -19,6 +19,9 @@ import {
   clearNotifHistory,
   deleteNotifHistoryEntry,
   restoreNotifHistoryEntry,
+  isNotifDeleted,
+  startNotifHistorySync,
+  NOTIF_HISTORY_EVENT,
 } from '../Admin_Dashboard/notificationHistory';
 import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
 
@@ -5091,6 +5094,33 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
 
+  // Cross-device sync: the persisted history (and each notification's
+  // read/deleted state) lives in Supabase, so every device shows the same
+  // thing. After each sync that changed something, refresh the "See all"
+  // list and carry the shared read/deleted state onto the live bell list.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    const applySyncedHistory = (e) => {
+      if (e?.detail?.uid !== uid) return;
+      const hist = getNotifHistory(uid);
+      setNotifHistory(hist);
+      const readIds = new Set(hist.filter(h => h.read).map(h => h.id));
+      Array.from(seenNotifIdsInStateRef.current).forEach(id => {
+        if (isNotifDeleted(uid, id)) seenNotifIdsInStateRef.current.delete(id);
+      });
+      setNotifications(prev => prev
+        .filter(n => !isNotifDeleted(uid, n.id))
+        .map(n => (!n.read && readIds.has(n.id) ? { ...n, read: true } : n)));
+    };
+    window.addEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
+    const stopSync = startNotifHistorySync(uid);
+    return () => {
+      window.removeEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
+      stopSync();
+    };
+  }, [user?.id]);
+
   const playStudentNotifSound = useCallback(() => {
     try {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -5116,7 +5146,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     if (!incoming.length) return;
     // Strict opt-in ("=== true"): a type absent from prefs — disabled, or
     // a retired/legacy type with no toggle at all — must never pass.
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true);
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
 
     if (allowed.length) {
       const existingIds = new Set(seenNotifIdsInStateRef.current);
@@ -5137,7 +5167,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const showInitialStudentBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true);
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
     if (!allowed.length) return;
 
     const readIds = new Set(getNotifHistory(user?.id).filter(h => h.read).map(h => h.id));
@@ -5472,7 +5502,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
     return (
       <>
-        <PageHero title="Notification History" sub="Your full notification activity, saved on this device." />
+        <PageHero title="Notification History" sub="Your full notification activity, synced across your devices." />
         <div className="sdb-module sdb-cat-module">
         <div className="sdb-cat-panel">
         <div className="sdb-hist-inner">

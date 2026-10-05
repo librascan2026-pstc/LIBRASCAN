@@ -15,6 +15,9 @@ import {
   clearNotifHistory,
   deleteNotifHistoryEntry,
   restoreNotifHistoryEntry,
+  isNotifDeleted,
+  startNotifHistorySync,
+  NOTIF_HISTORY_EVENT,
 } from './notificationHistory';
 import './Dashboard.css';
 
@@ -357,6 +360,33 @@ export default function Dashboard({ user, onSignOut }) {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
 
+  // Cross-device sync: the persisted history (and each notification's
+  // read/deleted state) lives in Supabase, so every device shows the same
+  // thing. After each sync that changed something, refresh the "See all"
+  // list and carry the shared read/deleted state onto the live bell list.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    const applySyncedHistory = (e) => {
+      if (e?.detail?.uid !== uid) return;
+      const hist = getNotifHistory(uid);
+      setNotifHistory(hist);
+      const readIds = new Set(hist.filter(h => h.read).map(h => h.id));
+      Array.from(seenNotifIdsInStateRef.current).forEach(id => {
+        if (isNotifDeleted(uid, id)) seenNotifIdsInStateRef.current.delete(id);
+      });
+      setNotifications(prev => prev
+        .filter(n => !isNotifDeleted(uid, n.id))
+        .map(n => (!n.read && readIds.has(n.id) ? { ...n, read: true } : n)));
+    };
+    window.addEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
+    const stopSync = startNotifHistorySync(uid);
+    return () => {
+      window.removeEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
+      stopSync();
+    };
+  }, [user?.id]);
+
 
   
   const playNotifSound = useCallback(() => {
@@ -389,7 +419,7 @@ export default function Dashboard({ user, onSignOut }) {
     // Strict opt-in ("=== true") rather than "!== false" — a type absent
     // from prefs entirely (disabled, or a retired/legacy type with no
     // toggle at all) must never be treated as allowed.
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true);
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
 
     if (allowed.length) {
       // De-dupe against the CURRENT id set (a plain ref-tracked set the
@@ -439,7 +469,7 @@ export default function Dashboard({ user, onSignOut }) {
   // had already added a moment earlier.
   const showInitialBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true);
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
     if (!allowed.length) return;
 
     // Bug fix: a notification the person already opened/read in a previous
@@ -1273,7 +1303,7 @@ export default function Dashboard({ user, onSignOut }) {
           </div>
 
           <div className="lm-notif-hist-foot">
-            <span className="lm-notif-hist-foot-note">Kept locally on this device — up to 300 notifications.</span>
+            <span className="lm-notif-hist-foot-note">Synced to your account — up to 2,000 notifications.</span>
           </div>
         </div>
       </div>
@@ -1478,7 +1508,7 @@ export default function Dashboard({ user, onSignOut }) {
             </button>
             <div className="lm-topbar-title">{historyOpen ? 'Notification History' : (LABEL_MAP[activeTab] || 'Dashboard')}</div>
             <div className="lm-breadcrumb">
-              {historyOpen ? 'Your full notification activity, saved locally on this device.' : <>
+              {historyOpen ? 'Your full notification activity, synced across your devices.' : <>
               {activeTab === 'overview'    && "Welcome back. Here's what's happening at the library today."}
               {activeTab === 'attendance'  && 'Track and manage student library attendance records.'}
               {activeTab === 'bookmanage'  && 'Manage book borrowing and returns via QR scanning.'}
