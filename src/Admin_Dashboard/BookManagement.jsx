@@ -21,6 +21,70 @@ const today   = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 const nowISO  = () => new Date().toISOString();
+// Local (not UTC) calendar-day string for any ISO timestamp, used by the
+// date picker so "Oct 1" matches what the table shows in the PH timezone.
+const localDay = (v) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+// "2026-10-01" -> "Oct 1, 2026" (parsed as local, not UTC)
+const prettyDay = (s) => {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Calendar-icon date filter. Click the icon to open the calendar; picking a
+// day filters the table to that day only (Download / Print follow the table).
+function DateFilterButton({ value, onChange, onFocus, onBlur }) {
+  const inputRef = useRef(null);
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    onFocus?.();
+    try {
+      if (typeof el.showPicker === 'function') { el.showPicker(); return; }
+    } catch { /* fall through to focus/click */ }
+    el.focus();
+    el.click();
+  };
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <button
+        type="button" onClick={openPicker}
+        title={value ? `Showing ${prettyDay(value)} — click to change` : 'Filter by date'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          height: 35, padding: '0 12px', borderRadius: 9, cursor: 'pointer',
+          border: value ? '1.5px solid #C9A84C' : '1.5px solid rgba(139,0,0,0.18)',
+          background: 'var(--cream-light)',
+          boxShadow: value ? '0 0 0 2px rgba(201,168,76,0.35)' : 'none',
+          fontSize: 12.5, fontWeight: 600, color: '#8B0000', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        {value && <span>{prettyDay(value)}</span>}
+      </button>
+      {value && (
+        <button
+          type="button" onClick={() => { onChange(''); onBlur?.(); }} title="Clear date"
+          style={{
+            height: 35, width: 30, borderRadius: 9, cursor: 'pointer',
+            border: '1.5px solid rgba(139,0,0,0.18)', background: 'var(--cream-light)',
+            fontSize: 15, fontWeight: 700, color: '#8B0000', fontFamily: 'var(--font-sans)', lineHeight: 1,
+          }}
+        >×</button>
+      )}
+      <input
+        ref={inputRef} type="date" value={value} tabIndex={-1} aria-hidden="true"
+        onChange={e => { onChange(e.target.value); onBlur?.(); }}
+        onBlur={() => onBlur?.()}
+        style={{ position: 'absolute', left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', border: 0, padding: 0 }}
+      />
+    </div>
+  );
+}
 const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—';
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', hour12:true }) : '—';
 const fmtFull = (iso) => iso ? `${fmtDate(iso)} · ${fmtTime(iso)}` : '—';
@@ -965,6 +1029,7 @@ export default function BookManagement({ initialTab }) {
   const [loadingTx,    setLoadingTx]    = useState(true);
   const [search,       setSearch]       = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
   const [selectedTx,   setSelectedTx]  = useState(null);
   const [campusMap,    setCampusMap]   = useState({});
 
@@ -1891,13 +1956,16 @@ export default function BookManagement({ initialTab }) {
     const studentNoEmbedded = String(tx.student_number || '').trim() || String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
     const matchQ = !q || [tx.student_name, studentNoEmbedded, tx.book_title, tx.copy_label].some(v => v?.toLowerCase().includes(q));
     const matchS = statusFilter === 'all' || tx.status?.toLowerCase() === statusFilter.toLowerCase();
-    return matchQ && matchS;
+    const matchD = !dateFilter || localDay(tx.borrowed_at) === dateFilter || localDay(tx.returned_at) === dateFilter;
+    return matchQ && matchS && matchD;
   });
 
   // Export / Print — Transaction History.
   // Both always operate on `filtered`, which already honors the status
   // dropdown: "All Status" includes borrowed + returned, "Borrowed" limits
   // to borrowed only, "Returned" limits to returned only.
+  // The date picker is part of `filtered` (borrowed or returned on that day),
+  // so Download / Print only include the picked day when one is selected.
   const txExportRows = useCallback(() => filtered.map(tx => {
     const studentNo = (() => {
       const embedded = String(tx.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || null;
@@ -1919,23 +1987,23 @@ export default function BookManagement({ initialTab }) {
 
   const exportTxExcel = useCallback(() => {
     const rows = txExportRows();
-    if (!rows.length) { showToast('No transactions to export.', 'error'); return; }
+    if (!rows.length) { showToast(dateFilter ? `No transactions for ${prettyDay(dateFilter)}.` : 'No transactions to export.', 'error'); return; }
     const cols = Object.keys(rows[0]);
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
     const label = statusFilter === 'all' ? 'all' : statusFilter.toLowerCase();
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
-    a.download = `transaction-history-${label}-${today()}.csv`;
+    a.download = `transaction-history-${label}-${dateFilter || today()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-  }, [txExportRows, statusFilter, showToast]);
+  }, [txExportRows, statusFilter, dateFilter, showToast]);
 
   const printTxHistory = useCallback(() => {
     const rows = txExportRows();
-    if (!rows.length) { showToast('No transactions to print.', 'error'); return; }
+    if (!rows.length) { showToast(dateFilter ? `No transactions for ${prettyDay(dateFilter)}.` : 'No transactions to print.', 'error'); return; }
     const cols = Object.keys(rows[0]);
-    const label = statusFilter === 'all' ? 'All Status' : (statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1));
+    const label = (statusFilter === 'all' ? 'All Status' : (statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1))) + (dateFilter ? ` · ${prettyDay(dateFilter)}` : '');
     const win = window.open('', '_blank');
     if (!win) { showToast('Please allow pop-ups to print.', 'error'); return; }
     const thead = cols.map(c => `<th>${c}</th>`).join('');
@@ -1944,7 +2012,7 @@ export default function BookManagement({ initialTab }) {
     win.document.close();
     win.focus();
     win.print();
-  }, [txExportRows, statusFilter, showToast]);
+  }, [txExportRows, statusFilter, dateFilter, showToast]);
 
   const borrowedCount = transactions.filter(t => t.status?.toLowerCase() === 'borrowed').length;
   const returnedToday = transactions.filter(t => t.status?.toLowerCase() === 'returned' && t.date === today()).length;
@@ -2602,6 +2670,8 @@ export default function BookManagement({ initialTab }) {
               <option value="returned">Returned</option>
             </select>
 
+            <DateFilterButton value={dateFilter} onChange={setDateFilter} onFocus={() => setFocused(false)} onBlur={() => { setFocused(true); refocusIfSafe(); }} />
+
             <button
               onClick={exportTxExcel}
               title="Export current view to Excel (CSV)"
@@ -2635,7 +2705,7 @@ export default function BookManagement({ initialTab }) {
           <div style={{ textAlign:'center', padding:'48px 24px', background: CREAM }}>
             <div style={{ fontSize:36, marginBottom:10 }}>📋</div>
             <div style={{ fontFamily:"'Cinzel', serif", fontSize:14, color:'var(--text-primary)', marginBottom:6 }}>No transactions found</div>
-            <div style={{ fontSize:12.5, color:'var(--text-dim)', fontFamily:'var(--font-sans)' }}>{search ? 'Try a different search term.' : 'Start scanning to log borrowing activity.'}</div>
+            <div style={{ fontSize:12.5, color:'var(--text-dim)', fontFamily:'var(--font-sans)' }}>{search ? 'Try a different search term.' : dateFilter ? `No transactions on ${prettyDay(dateFilter)}.` : 'Start scanning to log borrowing activity.'}</div>
           </div>
         ) : (
           <div style={{ overflowX:'auto' }}>

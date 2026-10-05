@@ -80,7 +80,7 @@ const GOLD        = '#D4AF37';
 const GOLD_DEEP   = '#B8912B';
 const GOLD_PALE   = 'rgba(212,175,55,0.14)';
 const BG          = '#F8F6F2';
-const CARD        = '#FFFFFF';
+const CARD        = '#FDF8F0';
 const CREAM       = '#FFF8EF';
 const TEXT        = '#3B2A25';
 const TEXT_MUTED  = '#8A7368';
@@ -157,10 +157,10 @@ const CSS = `
   }
   .sab-stat-card {
     position: relative;
-    background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px;
+    background: #FDF8F0; border: 1px solid rgba(139,0,0,0.22); border-radius: 16px;
     padding: 16px 18px 14px; overflow: hidden;
     text-align: center;
-    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    box-shadow: 0 2px 8px rgba(80,0,0,0.08);
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     animation: sab-rise 0.45s cubic-bezier(.22,1,.36,1) both;
   }
@@ -170,7 +170,7 @@ const CSS = `
   .sab-stats-grid .sab-stat-card:nth-child(4) { animation-delay: 0.14s; }
   .sab-stats-grid .sab-stat-card:nth-child(5) { animation-delay: 0.18s; }
   .sab-stat-card::before {
-    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 4px;
     border-radius: 0 0 16px 16px; background: ${MAROON}; opacity: 1;
   }
   .sab-stat-card:hover {
@@ -180,7 +180,7 @@ const CSS = `
   }
   .sab-stat-icon {
     position: absolute; top: 12px; right: 12px;
-    display: flex; align-items: center; justify-content: center;
+    display: none;
     color: ${MAROON};
     opacity: 0.18;
     pointer-events: none;
@@ -188,9 +188,9 @@ const CSS = `
   }
   .sab-stat-card:hover .sab-stat-icon { opacity: 0.28; }
   .sab-stat-body { min-width: 0; position: relative; z-index: 1; }
-  .sab-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .sab-stat-label { font-size: 11px; font-weight: 800; color: ${TEXT}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .sab-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; margin-bottom: 5px; }
-  .sab-stat-sub { font-size: 10.5px; color: ${TEXT_MUTED}; font-weight: 500; opacity: 0.85; }
+  .sab-stat-sub { font-size: 11.5px; color: ${TEXT_MUTED}; font-weight: 500; opacity: 1; }
 
   /* ---------- Section head ---------- */
   .sab-selector-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; flex-wrap: wrap; gap: 8px; }
@@ -252,7 +252,7 @@ const CSS = `
   .sab-select:focus { border-color: ${MAROON}; }
 
   /* ---------- Table ---------- */
-  .sab-table-wrap { background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 18px; overflow: hidden; box-shadow: 0 2px 10px rgba(59,42,37,0.04); }
+  .sab-table-wrap { background: #FDF8F0; border: 1px solid ${BORDER}; border-radius: 18px; overflow: hidden; box-shadow: 0 2px 10px rgba(59,42,37,0.04); }
   .sab-table-scroll { overflow-x: auto; }
   .sab-table { width: 100%; border-collapse: collapse; min-width: 780px; }
   .sab-table thead th {
@@ -269,7 +269,7 @@ const CSS = `
   .sab-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   /* ── Unified table look: single row colour, maroon text, left aligned ── */
   .sab-table thead th, .sab-table tbody td { text-align: left !important; }
-  .sab-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .sab-table tbody tr td { background: #FDF8F0; color: ${MAROON}; }
   .sab-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   .sab-book-title, .sab-book-author, .sab-copies, .sab-copies span { color: ${MAROON} !important; }
   .sab-code-badge, .sab-genre-badge { color: ${MAROON} !important; }

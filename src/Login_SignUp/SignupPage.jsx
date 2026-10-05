@@ -14,6 +14,10 @@ const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 const FONT_BODY  = "'Crimson Pro', Georgia, serif";
 const FONT_SANS  = "'Josefin Sans', sans-serif";
 
+// Cream backgrounds for inputs (instead of near-white) so they blend with the parchment card.
+const FIELD_BG          = '#F4E6C2';
+const FIELD_BG_DISABLED = '#E9D7AE';
+
 // Auto-generates the student's school email from their Student ID —
 // the student never types this field manually, it just follows along
 // as they type their Student ID.
@@ -202,9 +206,9 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
           onFocus={() => setFocused(true)} placeholder={placeholder}
           disabled={disabled} autoComplete={autoComplete}
           style={{
-            width: '100%', padding: isPassword ? '7px 32px 7px 12px' : '7px 12px',
+            width: '100%', padding: isPassword ? '8px 34px 8px 14px' : '8px 14px',
             borderRadius: 18, border: `1.5px solid ${borderColor}`,
-            background: disabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+            background: disabled ? FIELD_BG_DISABLED : FIELD_BG,
             color: '#2d1000', fontSize: 12, fontFamily: FONT_BODY, outline: 'none',
             boxSizing: 'border-box', cursor: disabled ? 'not-allowed' : 'text',
             transition: 'border-color 0.16s',
@@ -228,7 +232,7 @@ function Field({ label, type = 'text', value, onChange, onBlur, placeholder, err
 }
 
 // ─── Dropdown field ───────────────────────────────────────────────────────────
-function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder, isLoading, custom = false }) {
+function SelectField({ label, value, onChange, onBlur, error, disabled, options, placeholder, isLoading, custom = true }) {
   const [focused, setFocused] = useState(false);
   // Custom dropdown state (only used when `custom` is true). The native
   // <select> popup is drawn by the browser, so it ignores the card's theme
@@ -302,9 +306,9 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
             onBlur={() => { if (!open) { setFocused(false); onBlur?.(); } }}
             onKeyDown={onKeyDown}
             style={{
-              width: '100%', padding: '7px 32px 7px 12px', borderRadius: 18, textAlign: 'left',
+              width: '100%', padding: '8px 34px 8px 14px', borderRadius: 18, textAlign: 'left',
               border: `1.5px solid ${open ? '#8B0000' : borderColor}`,
-              background: isDisabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+              background: isDisabled ? FIELD_BG_DISABLED : FIELD_BG,
               color: selected ? '#2d1000' : '#9a7040', fontSize: 12, fontFamily: FONT_BODY,
               outline: 'none', boxSizing: 'border-box', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
               cursor: isDisabled ? 'not-allowed' : 'pointer', transition: 'border-color 0.16s',
@@ -321,7 +325,7 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
             <div ref={menuRef} role="listbox" style={{
               position: 'absolute', top: 'calc(100% + 5px)', left: 0, right: 0, zIndex: 30,
               maxHeight: 190, overflowY: 'auto', padding: 4,
-              background: '#FFFBF0', border: '1.5px solid rgba(139,0,0,0.25)', borderRadius: 14,
+              background: '#F8EDCD', border: '1.5px solid rgba(139,0,0,0.25)', borderRadius: 14,
               boxShadow: '0 10px 24px rgba(60,20,0,0.25)',
             }}>
               {options.map((o, i) => {
@@ -331,8 +335,9 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
                     onMouseEnter={() => setActive(i)} onMouseDown={e => e.preventDefault()} onClick={() => pick(o)}
                     style={{
                       padding: '7px 10px', borderRadius: 10, cursor: 'pointer', fontSize: 12, fontFamily: FONT_BODY,
-                      color: isSel ? '#8B0000' : '#2d1000', fontWeight: isSel ? 700 : 500,
-                      background: isSel ? 'rgba(139,0,0,0.10)' : (i === active ? 'rgba(139,0,0,0.06)' : 'transparent'),
+                      color: i === active ? '#F5E4A8' : (isSel ? '#8B0000' : '#2d1000'), fontWeight: isSel ? 700 : 500,
+                      background: i === active ? '#8B0000' : (isSel ? 'rgba(139,0,0,0.14)' : 'transparent'),
+                      transition: 'background 0.12s, color 0.12s',
                       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     }}>
                     <span>{o.name}</span>
@@ -350,9 +355,9 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
           onFocus={() => setFocused(true)}
           disabled={disabled || isLoading}
           style={{
-            width: '100%', padding: '7px 32px 7px 12px', borderRadius: 18,
+            width: '100%', padding: '8px 34px 8px 14px', borderRadius: 18,
             border: `1.5px solid ${borderColor}`,
-            background: (disabled || isLoading) ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+            background: (disabled || isLoading) ? FIELD_BG_DISABLED : FIELD_BG,
             color: value ? '#2d1000' : '#9a7040', fontSize: 12, fontFamily: FONT_BODY,
             outline: 'none', boxSizing: 'border-box',
             cursor: (disabled || isLoading) ? 'not-allowed' : 'pointer',
@@ -381,7 +386,7 @@ function SelectField({ label, value, onChange, onBlur, error, disabled, options,
 function CascadeHint({ label }) {
   return (
     <div style={{ marginBottom: 7 }}>
-      <div style={{ fontSize: 8.5, fontWeight: 700, fontFamily: FONT_SANS, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5a2800', marginBottom: 3 }}>
+      <div style={{ fontSize: 8.5, fontWeight: 700, fontFamily: FONT_SANS, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5a2800', marginBottom: 3, textAlign: 'left' }}>
         {label}
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', borderRadius: 18, border: '1.5px solid rgba(139,70,20,0.15)', background: 'rgba(230,215,190,0.3)' }}>
@@ -447,7 +452,7 @@ function RoleToggle({ role, onChange, disabled }) {
       <div style={{ fontSize: 8.5, fontWeight: 700, fontFamily: FONT_SANS, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#5a2800', marginBottom: 3 }}>
         I am registering as
       </div>
-      <div style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 20, border: '1.5px solid rgba(139,70,20,0.28)', background: 'rgba(255,252,242,0.92)' }}>
+      <div style={{ display: 'flex', gap: 4, padding: 3, borderRadius: 20, border: '1.5px solid rgba(139,70,20,0.28)', background: FIELD_BG }}>
         {opts.map(o => {
           const active = role === o.id;
           return (
@@ -803,7 +808,17 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
   // ── Registration form ──
   return (
     <AuthLayout title="Create Account" subtitle={`${PSU_DOMAIN} addresses only`} onExit={handleExit}>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column' }}>
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {/* Only the fields scroll. The Register button + login link live below the
+            scroll area, so they never sit inside the scrollbar or cover any textfield. */}
+        <style>{`
+          .auth-pane { overflow: hidden !important; display: flex; flex-direction: column; padding-right: 0 !important; }
+          .signup-scroll { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0 0 6px 0; display: flex; flex-direction: column; scrollbar-width: none; -ms-overflow-style: none; }
+          .signup-scroll > * { flex-shrink: 0; }
+          .signup-scroll::-webkit-scrollbar { display: none; }
+        `}</style>
+
+        <div className="signup-scroll">
 
         <RoleToggle role={role} onChange={handleRoleChange} disabled={loading} />
 
@@ -832,7 +847,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         )}
 
         {/* ── Cascading academic info ── */}
-        <div style={{ background: 'rgba(201,168,76,0.06)', border: '1px solid rgba(201,168,76,0.18)', borderRadius: 10, padding: '10px 12px 6px', marginBottom: 8 }}>
+        <div style={{ background: 'rgba(201,168,76,0.10)', border: '1px solid rgba(201,168,76,0.30)', borderRadius: 10, padding: '10px 12px 6px', marginBottom: 8 }}>
           <div style={{ fontSize: 8, fontFamily: FONT_SANS, fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'rgba(139,70,20,0.55)', marginBottom: 8 }}>
             {role === 'student' ? 'Academic Information' : 'Employment Information'}
           </div>
@@ -936,14 +951,19 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
           Password: 8+ chars · 1 uppercase · 1 lowercase · 1 number
         </div>
 
-        <AnimatePresence>{error && <ErrorBox message={error} />}</AnimatePresence>
+        </div>
 
-        <PrimaryButton loading={loading}>Register</PrimaryButton>
+        {/* Fixed footer: no background/border, outside the scroll area. */}
+        <div style={{ flexShrink: 0, padding: '10px 0 2px 0' }}>
+          <AnimatePresence>{error && <ErrorBox message={error} />}</AnimatePresence>
 
-        <p style={{ textAlign: 'center', marginTop: 8, fontSize: 11.5, fontFamily: FONT_BODY, color: '#6a3c1c' }}>
-          Already have an account?{' '}
-          <LinkBtn onClick={onGoLogin} style={{ fontSize: 11.5 }}>Log in here</LinkBtn>
-        </p>
+          <PrimaryButton loading={loading} style={{ marginTop: 0 }}>Register</PrimaryButton>
+
+          <p style={{ textAlign: 'center', margin: '8px 0 0', fontSize: 11.5, fontFamily: FONT_BODY, color: '#6a3c1c' }}>
+            Already have an account?{' '}
+            <LinkBtn onClick={onGoLogin} style={{ fontSize: 11.5 }}>Log in here</LinkBtn>
+          </p>
+        </div>
       </form>
     </AuthLayout>
   );

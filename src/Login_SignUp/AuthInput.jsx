@@ -34,7 +34,7 @@ export default function AuthInput({ label, type = 'text', value, onChange, place
           style={{
             display: 'block', fontSize: 9.5, fontWeight: 700,
             fontFamily: FONT_SANS, marginBottom: 4,
-            letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'default',
+            letterSpacing: '0.1em', textTransform: 'uppercase', cursor: 'default', textAlign: 'left',
           }}
         >
           {hasError ? `${label} — Invalid` : label}
@@ -62,7 +62,7 @@ export default function AuthInput({ label, type = 'text', value, onChange, place
             width: '100%',
             padding: isPassword ? '8px 36px 8px 13px' : '8px 13px',
             borderRadius: 20, border: '1.5px solid rgba(139,70,20,0.28)',
-            background: disabled ? 'rgba(230,215,190,0.5)' : 'rgba(255,252,242,0.92)',
+            background: disabled ? '#E9D7AE' : '#F4E6C2', // cream (matches the Signup fields)
             color: '#2d1000', fontSize: 12.5,
             fontFamily: FONT_BODY, outline: 'none',
             boxSizing: 'border-box',

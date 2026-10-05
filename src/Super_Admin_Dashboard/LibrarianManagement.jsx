@@ -91,7 +91,7 @@ const GOLD        = '#D4AF37';
 const GOLD_DEEP   = '#B8912B';
 const GOLD_PALE   = 'rgba(212,175,55,0.14)';
 const BG          = '#F8F6F2';
-const CARD        = '#FFFFFF';
+const CARD        = '#FDF8F0';
 const CREAM       = '#FFF8EF';
 const TEXT        = '#3B2A25';
 const TEXT_MUTED  = '#8A7368';
@@ -219,18 +219,18 @@ const CSS = `
   .lbm-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .lbm-stat-card {
     position: relative;
-    background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 16px; padding: 16px 18px 14px;
+    background: #FDF8F0; border: 1px solid rgba(139,0,0,0.22); border-radius: 16px; padding: 16px 18px 14px;
     text-align: center;
-    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    box-shadow: 0 2px 8px rgba(80,0,0,0.08);
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     overflow: hidden;
   }
   .lbm-stat-card::after {
     content: '';
-    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    position: absolute; bottom: 0; left: 0; right: 0; height: 4px;
     border-radius: 0 0 16px 16px;
     background: ${MAROON};
-    opacity: 0.65;
+    opacity: 1;
   }
   .lbm-stat-card:hover {
     transform: translateY(-3px);
@@ -239,14 +239,14 @@ const CSS = `
   }
   .lbm-stat-icon {
     position: absolute; top: 12px; right: 12px;
-    display: flex; align-items: center; justify-content: center;
+    display: none;
     color: ${MAROON};
     opacity: 0.18;
     pointer-events: none;
     transition: opacity 0.18s;
   }
   .lbm-stat-card:hover .lbm-stat-icon { opacity: 0.28; }
-  .lbm-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
+  .lbm-stat-label { font-size: 11px; font-weight: 800; color: ${TEXT}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
   .lbm-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
 
   /* ---------- Toolbar ---------- */
@@ -263,7 +263,7 @@ const CSS = `
   .lbm-search input::placeholder { color: rgba(58,42,37,0.35); }
 
   /* ---------- Table ---------- */
-  .lbm-table-wrap { background: ${CARD}; border: 1px solid ${BORDER}; border-radius: 18px; overflow: hidden; box-shadow: 0 2px 10px rgba(59,42,37,0.04); }
+  .lbm-table-wrap { background: #FDF8F0; border: 1px solid ${BORDER}; border-radius: 18px; overflow: hidden; box-shadow: 0 2px 10px rgba(59,42,37,0.04); }
   .lbm-table-scroll { overflow-x: auto; }
   .lbm-table { width: 100%; border-collapse: collapse; min-width: 820px; }
   .lbm-table thead th {
@@ -280,7 +280,7 @@ const CSS = `
   .lbm-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   /* ── Unified table look: single row colour, maroon text, left aligned ── */
   .lbm-table thead th, .lbm-table tbody td { text-align: left !important; }
-  .lbm-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .lbm-table tbody tr td { background: #FDF8F0; color: ${MAROON}; }
   .lbm-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   .lbm-name-text, .lbm-email-text, .lbm-date-text, .lbm-id-text { color: ${MAROON} !important; }
   .lbm-campus-badge:not(.warn) { color: ${MAROON} !important; background: ${MAROON_SOFT} !important; border: none !important; }

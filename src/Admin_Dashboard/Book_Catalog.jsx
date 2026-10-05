@@ -1020,7 +1020,7 @@ function ViewModal({ book, onClose, onEdit }) {
           <div>
             <h2 style={{
               fontFamily: 'var(--font-display)', fontSize: 16, fontWeight: 600,
-              color: '#F5E4A8', letterSpacing: '0.05em',
+              color: '#F5E4A8', letterSpacing: '0.05em', textAlign: 'left',
             }}>Book Details</h2>
             <p style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.65)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>
               Full record from the catalog

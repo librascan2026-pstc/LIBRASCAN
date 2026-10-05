@@ -9,6 +9,7 @@ import {
   sendLoginConfirmation, getLoginConfirmationStatus, markMfaPending,
   onLoginConfirmationPing, recordSession,
 } from '../utils/mfaClient';
+import { recordUntrustedLoginAlert } from '../utils/securityAlerts';
 
 const FONT_DISPLAY = "'Playfair Display', Georgia, serif";
 const FONT_BODY    = "'Crimson Pro', Georgia, serif";
@@ -480,6 +481,11 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
       return;
     }
 
+    // 2FA is ON for this account and this device isn't trusted (that's the
+    // only way we get here) — leave a security alert for the account owner.
+    // Fire-and-forget: it can never delay or break the sign-in flow.
+    recordUntrustedLoginAlert(user.id);
+
     await startEmailConfirmation();
   };
 
@@ -830,16 +836,18 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             style={{ display: 'flex', flexDirection: 'column', textAlign: 'left' }}
           >
             <h2 style={{
-              margin: '0 0 6px', fontFamily: FONT_SANS,
-              fontSize: 20, lineHeight: 1.2, letterSpacing: '0.02em',
-              fontWeight: 700, color: '#5E1119', textAlign: 'center',
+              margin: '0 0 2px', fontFamily: FONT_DISPLAY,
+              fontSize: 'clamp(16px, 3vw, 22px)',
+              fontWeight: 700, color: '#4a1200', textAlign: 'center',
+              letterSpacing: '0.07em', textTransform: 'uppercase',
             }}>
               Verification
             </h2>
 
             <p style={{
-              margin: '0 0 14px', fontFamily: FONT_SANS, fontSize: 12.5,
-              lineHeight: 1.6, color: '#6b5236', textAlign: 'center',
+              margin: '0 0 14px', fontFamily: FONT_BODY,
+              fontSize: 'clamp(10px, 2vw, 12px)', lineHeight: 1.6,
+              color: '#7a3820', fontStyle: 'italic', textAlign: 'center',
             }}>
               Enter the <strong style={{ color: '#8B0000' }}>6 characters</strong> shown
               in the image to complete sign in.
@@ -855,7 +863,7 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             <PrimaryButton
               onClick={handleCaptchaSubmit}
               disabled={!captchaOk || mfaChecking}
-              style={{ marginTop: 14, color: '#fff', padding: '10px 0' }}
+              style={{ marginTop: 14, padding: '10px 0' }}
             >
               {mfaChecking ? 'Checking…' : 'Submit'}
             </PrimaryButton>
@@ -883,7 +891,7 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             <h2 style={{
               margin: '0 0 8px', fontFamily: FONT_DISPLAY,
               fontSize: 'clamp(22px, 3vw, 27px)', lineHeight: 1.15,
-              fontWeight: 700, color: '#5E1119', textAlign: 'left',
+              fontWeight: 700, color: '#5E1119', textAlign: 'center',
             }}>
               Check Your Email
             </h2>

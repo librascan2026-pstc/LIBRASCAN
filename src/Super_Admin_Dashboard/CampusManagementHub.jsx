@@ -24,7 +24,7 @@ const GOLD         = '#D4AF37';
 const GOLD_DEEP    = '#B8912B';
 const GOLD_PALE    = 'rgba(212,175,55,0.14)';
 const BG           = '#F8F6F2';
-const CARD         = '#FFFFFF';
+const CARD         = '#FDF8F0';
 const CREAM        = '#FFF8EF';
 const TEXT         = '#3B2A25';
 const TEXT_MUTED   = '#8A7368';
@@ -380,7 +380,7 @@ const CSS = `
   .cmh-info-left { display: flex; align-items: center; gap: 16px; }
   .cmh-info-logo {
     width: 56px; height: 56px; border-radius: 16px;
-    border: 1.5px solid ${BORDER}; background: #fff;
+    border: 1.5px solid ${BORDER}; background: #FDF8F0;
     display: flex; align-items: center; justify-content: center; overflow: hidden; flex-shrink: 0;
   }
   .cmh-info-logo img { width: 100%; height: 100%; object-fit: cover; }
@@ -400,21 +400,21 @@ const CSS = `
   }
   .cmh-stat-card {
     position: relative;
-    background: ${CARD};
-    border: 1px solid ${BORDER};
+    background: #FDF8F0;
+    border: 1px solid rgba(139,0,0,0.22);
     border-radius: 16px;
     padding: 16px 18px 14px;
     text-align: center;
-    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    box-shadow: 0 2px 8px rgba(80,0,0,0.08);
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     overflow: hidden;
   }
   .cmh-stat-card::after {
     content: '';
-    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    position: absolute; bottom: 0; left: 0; right: 0; height: 4px;
     border-radius: 0 0 16px 16px;
     background: ${MAROON};
-    opacity: 0.65;
+    opacity: 1;
   }
   .cmh-stat-card:hover {
     transform: translateY(-3px);
@@ -423,14 +423,14 @@ const CSS = `
   }
   .cmh-stat-icon {
     position: absolute; top: 12px; right: 12px;
-    display: flex; align-items: center; justify-content: center;
+    display: none;
     color: ${MAROON};
     opacity: 0.18;
     pointer-events: none;
     transition: opacity 0.18s;
   }
   .cmh-stat-card:hover .cmh-stat-icon { opacity: 0.28; }
-  .cmh-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
+  .cmh-stat-label { font-size: 11px; font-weight: 800; color: ${TEXT}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; position: relative; z-index: 1; }
   .cmh-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; position: relative; z-index: 1; }
 
   /* ── Toolbar ─────────────────────────────────────────────────────────── */
@@ -473,7 +473,7 @@ const CSS = `
 
   /* ── Table ───────────────────────────────────────────────────────────── */
   .cmh-table-wrap {
-    background: ${CARD};
+    background: #FDF8F0;
     border: 1px solid ${BORDER};
     border-radius: 18px;
     overflow: hidden;
@@ -504,7 +504,7 @@ const CSS = `
   .cmh-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   /* ── Unified table look: single row colour, maroon text, left aligned ── */
   .cmh-table thead th, .cmh-table tbody td { text-align: left !important; }
-  .cmh-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .cmh-table tbody tr td { background: #FDF8F0; color: ${MAROON}; }
   .cmh-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   .cmh-table tbody td { color: ${MAROON} !important; }
   .cmh-table .cmh-code-badge { color: ${MAROON} !important; }
@@ -667,7 +667,7 @@ const CSS = `
   .cmh-logo-circle {
     position: relative; width: 116px; height: 116px; border-radius: 30px;
     border: 2px dashed rgba(184,145,43,0.55);
-    background: linear-gradient(160deg, #FFFFFF 0%, ${CREAM} 100%);
+    background: linear-gradient(160deg, #FDF8F0 0%, ${CREAM} 100%);
     box-shadow: 0 6px 18px rgba(59,42,37,0.08);
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
     cursor: pointer; overflow: hidden; transition: border-color 0.15s, background 0.15s, transform 0.15s, box-shadow 0.15s;
@@ -741,7 +741,7 @@ const CSS = `
     flex-shrink: 0;
     margin: 0; padding: 18px 30px 22px;
     display: flex; gap: 12px;
-    background: #fff;
+    background: #FDF8F0;
     border-top: 1px solid ${BORDER};
     box-shadow: 0 -10px 24px rgba(59,42,37,0.06);
   }

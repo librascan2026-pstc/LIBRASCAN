@@ -19,6 +19,7 @@ import {
   startNotifHistorySync,
   NOTIF_HISTORY_EVENT,
 } from './notificationHistory';
+import { fetchSecurityAlerts, securityAlertMessage } from '../utils/securityAlerts';
 import './Dashboard.css';
 
 
@@ -705,6 +706,36 @@ export default function Dashboard({ user, onSignOut }) {
     addNotifications(newNotifs, isRealtime);
   }, [addNotifications, showInitialBatch, user?.id]);
 
+  // Security alerts — a sign-in was attempted from an untrusted device on this
+  // account while 2FA is ON (recorded by LoginPage, see utils/securityAlerts.js).
+  // Shown as a SYSTEM_ALERT, so it follows Settings → Notifications → System Alerts.
+  const isFirstSecurityAlertLoad = useRef(true);
+  const fetchSecurityAlertNotifs = useCallback(async (isRealtime = false) => {
+    if (!user?.id) return;
+    const rows = await fetchSecurityAlerts(user.id, NOTIF_MAX);
+    if (!rows) return;
+
+    const toNotif = (r) => buildNotification({
+      id:        `sec_alert_${r.id}`,
+      type:      'SYSTEM_ALERT',
+      title:     'Security Alert',
+      message:   securityAlertMessage(r),
+      createdAt: r.created_at,
+      extra:     { securityAlertId: r.id },
+    });
+
+    if (isFirstSecurityAlertLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`sec_alert_${r.id}`));
+      isFirstSecurityAlertLoad.current = false;
+      showInitialBatch(rows.map(toNotif));
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`sec_alert_${r.id}`));
+    if (!newRows.length) return;
+    addNotifications(newRows.map(toNotif), isRealtime);
+  }, [addNotifications, showInitialBatch, user?.id]);
+
 
   // Unique-per-*attempt* channel name generator — NOT a ref computed once.
   // Reusing the same topic string across retries causes Supabase-js to
@@ -725,6 +756,7 @@ export default function Dashboard({ user, onSignOut }) {
       fetchRecentNewUsers(false);
       fetchRecentReturns(false);
       fetchRecentRegistrationDecisions(false);
+      fetchSecurityAlertNotifs(false);
     };
     load();
 
@@ -822,6 +854,25 @@ export default function Dashboard({ user, onSignOut }) {
           }
           fetchRecentRegistrationDecisions(false);
         })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'security_alerts',
+          filter: `user_id=eq.${user?.id}`,
+        }, (payload) => {
+          // Untrusted-device sign-in on this account (2FA ON) — push it into
+          // the bell the instant it happens; the fetch below only reconciles.
+          const r = payload?.new;
+          if (r && r.user_id === user?.id) {
+            addNotifications([buildNotification({
+              id:        `sec_alert_${r.id}`,
+              type:      'SYSTEM_ALERT',
+              title:     'Security Alert',
+              message:   securityAlertMessage(r),
+              createdAt: r.created_at,
+              extra:     { securityAlertId: r.id },
+            })], true);
+          }
+          fetchSecurityAlertNotifs(true);
+        })
         .subscribe((status) => {
           if (cancelled) return;
           setRealtimeStatus(status);
@@ -856,6 +907,7 @@ export default function Dashboard({ user, onSignOut }) {
       fetchRecentNewUsers(true);
       fetchRecentReturns(true);
       fetchRecentRegistrationDecisions(true);
+      fetchSecurityAlertNotifs(true);
     }, 15000);
 
     return () => {
@@ -864,7 +916,7 @@ export default function Dashboard({ user, onSignOut }) {
       if (resubscribeTimer) clearTimeout(resubscribeTimer);
       if (ch) supabase.removeChannel(ch);
     };
-  }, [fetchPendingRequests, fetchRecentNewUsers, fetchRecentReturns, fetchRecentRegistrationDecisions, addNotifications, removeNotifications, campusId, user?.id]);
+  }, [fetchPendingRequests, fetchRecentNewUsers, fetchRecentReturns, fetchRecentRegistrationDecisions, fetchSecurityAlertNotifs, addNotifications, removeNotifications, campusId, user?.id]);
 
   // Optimistic: flip local state first (badge updates instantly), then
   // persist. Persistence here is localStorage (notificationHistory.js) —

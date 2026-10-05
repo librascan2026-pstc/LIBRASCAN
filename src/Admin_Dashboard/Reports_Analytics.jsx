@@ -52,13 +52,13 @@ const RA_STYLES = `
   .ra-sh-meta { font-family:var(--font-sans); font-size:11px; color:var(--text-dim); }
 
   .ra-root .ra-stat-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin-bottom:22px; width:100%; box-sizing:border-box; }
-  .ra-root .ra-stat { background:var(--cream-light); border:1px solid rgba(139,0,0,0.12); border-radius:var(--radius-md); padding:14px 16px; position:relative; overflow:hidden; transition:box-shadow var(--ease),transform var(--ease),border-color var(--ease); animation:ra-count .38s ease both; width:100%; min-width:0; box-sizing:border-box; }
+  .ra-root .ra-stat { background:var(--cream-light); border:1px solid rgba(139,0,0,0.22); box-shadow:0 2px 8px rgba(80,0,0,0.08); border-radius:var(--radius-md); padding:14px 16px; position:relative; overflow:hidden; transition:box-shadow var(--ease),transform var(--ease),border-color var(--ease); animation:ra-count .38s ease both; width:100%; min-width:0; box-sizing:border-box; }
   .ra-stat:hover { box-shadow:0 6px 22px rgba(50,0,0,0.12); transform:translateY(-2px); border-color:rgba(139,0,0,0.24); }
-  .ra-stat::after { content:''; position:absolute; bottom:0; left:0; right:0; height:3px; border-radius:0 0 var(--radius-md) var(--radius-md); background:var(--ra-ac,#8B0000); opacity:.60; }
-  .ra-stat-lbl { font-family:var(--font-sans); font-size:10.5px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text-dim); margin-bottom:8px; }
+  .ra-stat::after { content:''; position:absolute; bottom:0; left:0; right:0; height:4px; border-radius:0 0 var(--radius-md) var(--radius-md); background:#8B0000; opacity:1; }
+  .ra-stat-lbl { font-family:var(--font-sans); font-size:11px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--text-secondary); margin-bottom:8px; }
   .ra-stat-val { font-family:var(--font-display); font-size:clamp(22px,2.4vw,30px); font-weight:700; color:var(--maroon-deep); line-height:1; margin-bottom:5px; }
-  .ra-stat-sub { font-family:var(--font-sans); font-size:11px; color:var(--text-muted); }
-  .ra-stat-ico { position:absolute; right:12px; top:12px; opacity:.08; color:var(--maroon-mid); }
+  .ra-stat-sub { font-family:var(--font-sans); font-size:11.5px; color:var(--text-muted); }
+  .ra-stat-ico { display:none; }
   .ra-alert-stat { background:linear-gradient(135deg,rgba(139,0,0,0.08),rgba(139,0,0,0.04)); border-color:rgba(139,0,0,0.22) !important; }
   .ra-alert-stat .ra-stat-val { color:#8B0000; }
 
@@ -767,6 +767,52 @@ const FILL_CLASSES = ['maroon','gold','blue','teal','purple','maroon','teal','bl
 // ─────────────────────────────────────────────────────────────────────────────
 const fmtNum   = n  => n == null ? '—' : Number(n).toLocaleString();
 const fmtDate  = iso => iso ? new Date(iso).toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'}) : '—';
+// Local (not UTC) calendar-day string for any ISO timestamp, used by the
+// date picker so "Oct 1" matches what the table shows in the PH timezone.
+const localDay = (v) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+// "2026-10-01" -> "Oct 1, 2026" (parsed as local, not UTC)
+const prettyDay = (s) => {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Calendar-icon date filter for RaTable. Click the icon to open the calendar;
+// picking a day filters the table to that day only (CSV / Print follow it).
+function RaDateFilter({ value, onChange }) {
+  const inputRef = useRef(null);
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    try {
+      if (typeof el.showPicker === 'function') { el.showPicker(); return; }
+    } catch { /* fall through to focus/click */ }
+    el.focus();
+    el.click();
+  };
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <button
+        type="button" className="ra-btn" onClick={openPicker}
+        title={value ? `Showing ${prettyDay(value)} — click to change` : 'Filter by date'}
+        style={value ? { borderColor: '#8B0000', background: 'rgba(139,0,0,0.08)', color: '#8B0000', fontWeight: 600 } : undefined}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        {value && <span>{prettyDay(value)}</span>}
+      </button>
+      {value && <button type="button" className="ra-btn" onClick={() => onChange('')} title="Clear date">×</button>}
+      <input
+        ref={inputRef} type="date" value={value} tabIndex={-1} aria-hidden="true"
+        onChange={e => onChange(e.target.value)}
+        style={{ position: 'absolute', left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', border: 0, padding: 0 }}
+      />
+    </div>
+  );
+}
 const fmtShort = iso => iso ? new Date(iso).toLocaleDateString('en-PH',{month:'short',day:'numeric'}) : '—';
 const fmtTime  = iso => iso ? new Date(iso).toLocaleTimeString('en-PH',{hour:'2-digit',minute:'2-digit',hour12:true}) : '—';
 const initials = name => (name||'?').split(' ').map(p=>p[0]||'').join('').toUpperCase().slice(0,2);
@@ -1134,36 +1180,43 @@ function SkelRows({cols,rows=5}){
   ));
 }
 
-function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterable=null, exportable=true, title='' }) {
+function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterable=null, exportable=true, title='', dateKey=null }) {
   const [q,setQ]=useState('');
   const [fil,setFil]=useState('all');
   const [sk,setSk]=useState(null);
   const [sd,setSd]=useState('asc');
   const [pg,setPg]=useState(1);
+  const [dd,setDd]=useState('');
   const sort=key=>{ if(sk===key)setSd(d=>d==='asc'?'desc':'asc'); else{setSk(key);setSd('asc');} setPg(1); };
   const filtered=useMemo(()=>{
     let r=rows;
     if(q){const lq=q.toLowerCase(); r=r.filter(row=>cols.some(c=>String(row[c.key]??'').toLowerCase().includes(lq)));}
     if(fil!=='all'&&filterable) r=r.filter(row=>row[filterable.key]===fil);
+    if(dateKey&&dd) r=r.filter(row=>localDay(row[dateKey])===dd);
     if(sk) r=[...r].sort((a,b)=>{ const cmp=String(a[sk]??'').localeCompare(String(b[sk]??''),undefined,{numeric:true}); return sd==='asc'?cmp:-cmp; });
     return r;
-  },[rows,q,fil,sk,sd,filterable,cols]);
-  useEffect(()=>setPg(1),[q,fil]);
+  },[rows,q,fil,sk,sd,filterable,cols,dateKey,dd]);
+  useEffect(()=>setPg(1),[q,fil,dd]);
   const total=Math.max(1,Math.ceil(filtered.length/pageSize));
   const paged=filtered.slice((pg-1)*pageSize,pg*pageSize);
 
+  // Date picker (only when the table passes dateKey) is part of `filtered`, so
+  // CSV / Print only include the picked day when one is selected.
+  const exportRows=filtered;
   const exportCSV=()=>{
+    if(dateKey&&dd&&!exportRows.length){ window.alert(`No records for ${prettyDay(dd)}.`); return; }
     const h=cols.map(c=>c.label).join(',');
-    const b=filtered.map(r=>cols.map(c=>`"${r[c.key]??''}"`).join(',')).join('\n');
+    const b=exportRows.map(r=>cols.map(c=>`"${r[c.key]??''}"`).join(',')).join('\n');
     const a=document.createElement('a');
     a.href=URL.createObjectURL(new Blob([h+'\n'+b],{type:'text/csv'}));
-    a.download=`${title||'report'}.csv`; a.click();
+    a.download=`${title||'report'}${dateKey&&dd?`-${dd}`:''}.csv`; a.click();
   };
   const doPrint=()=>{
+    if(dateKey&&dd&&!exportRows.length){ window.alert(`No records for ${prettyDay(dd)}.`); return; }
     const win=window.open('','_blank');
     const thead=cols.map(c=>`<th>${c.label}</th>`).join('');
-    const tbody=filtered.map(row=>`<tr>${cols.map(c=>`<td>${row[c.key]??'—'}</td>`).join('')}</tr>`).join('');
-    win.document.write(`<html><head><title>${title}</title><style>body{font-family:sans-serif;font-size:12px}h2{color:#7B0000}table{width:100%;border-collapse:collapse}th{background:#7B0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>${title}</h2><p style="color:#888;font-size:11px">${filtered.length} records · ${new Date().toLocaleString('en-PH')}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
+    const tbody=exportRows.map(row=>`<tr>${cols.map(c=>`<td>${row[c.key]??'—'}</td>`).join('')}</tr>`).join('');
+    win.document.write(`<html><head><title>${title}</title><style>body{font-family:sans-serif;font-size:12px}h2{color:#7B0000}table{width:100%;border-collapse:collapse}th{background:#7B0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>${title}${dateKey&&dd?` — ${prettyDay(dd)}`:''}</h2><p style="color:#888;font-size:11px">${exportRows.length} records · ${new Date().toLocaleString('en-PH')}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
     win.document.close(); win.print();
   };
 
@@ -1173,6 +1226,7 @@ function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterab
         {searchable&&<div className="ra-search">{Ic.search()}<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search…"/>{q&&<button onClick={()=>setQ('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:14}}>×</button>}</div>}
         {filterable&&<select className="ra-fsel" value={fil} onChange={e=>setFil(e.target.value)}><option value="all">All {filterable.label}</option>{filterable.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>}
         <div className="ra-sp"/>
+        {exportable&&dateKey&&<RaDateFilter value={dd} onChange={setDd}/>}
         {exportable&&<><button className="ra-btn" onClick={exportCSV}>{Ic.dl()} CSV</button><button className="ra-btn" onClick={doPrint}>{Ic.print()} Print</button></>}
       </div>
       <div className="ra-table-wrap">
@@ -1274,8 +1328,29 @@ function BookCard({ book, rank, delay, onClick }) {
 }
 
 
+// ── Shared period switcher + Refresh ──
+// One copy sits in every tab's section header (under the stat cards). It replaces
+// the old page-level "7 Days / 30 Days / 1 Year" + Refresh controls so the same
+// choice isn't offered twice. Refresh re-fetches everything (stats + all tab data).
+const RA_PERIODS = [['7d','Daily (7d)'],['30d','Weekly (30d)'],['1y','Monthly (1y)']];
+function RaControls({ period, setPeriod, onRefresh, showPeriod=true, children }) {
+  return (
+    <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
+      {children}
+      {showPeriod && (
+        <div className="ra-period">
+          {RA_PERIODS.map(([v,l])=>(
+            <button key={v} className={`ra-p-btn${period===v?' active':''}`} onClick={()=>setPeriod(v)}>{l}</button>
+          ))}
+        </div>
+      )}
+      <button type="button" className="ra-btn" onClick={onRefresh}>{Ic.refresh()} Refresh</button>
+    </div>
+  );
+}
+
 // ── Tab: Book Popularity ──
-function TabBooks({ data, loading, period }) {
+function TabBooks({ data, loading, period, setPeriod, onRefresh }) {
   const { topBooks=[], categoryBorrows=[] } = data;
   const maxB = topBooks[0]?.count || 1;
   const periodLabel = period==='7d'?'Last 7 Days':period==='30d'?'Last 30 Days':'Last 1 Year';
@@ -1367,6 +1442,7 @@ function TabBooks({ data, loading, period }) {
       {/* ── Book cards strip ── */}
       <div className="ra-sh">
         <span className="ra-sh-title">Top 10 Most Borrowed · {periodLabel}</span>
+        <RaControls period={period} setPeriod={setPeriod} onRefresh={onRefresh}/>
       </div>
 
       {/* Auto-running carousel */}
@@ -1453,7 +1529,7 @@ function TabBooks({ data, loading, period }) {
 }
 
 // ── Tab: Student Activity ──
-function TabStudents({ data, loading, period }) {
+function TabStudents({ data, loading, period, setPeriod, onRefresh }) {
   const { topStudents=[], byProgram=[] } = data;
   const periodLabel = period==='7d'?'Last 7 days':period==='30d'?'Last 30 days':'Last 12 months';
   const totalBorrows = topStudents.reduce((s,b)=>s+b.borrows,0);
@@ -1481,7 +1557,12 @@ function TabStudents({ data, loading, period }) {
       
 
       {/* ── Leaderboard + Pie ── */}
-      <div className="ra-sh"><span className="ra-sh-title">Most Active Borrowers</span><span className="ra-sh-meta">{periodLabel} · From borrowings history</span></div>
+      <div className="ra-sh">
+        <span className="ra-sh-title">Most Active Borrowers</span>
+        <RaControls period={period} setPeriod={setPeriod} onRefresh={onRefresh}>
+       
+        </RaControls>
+      </div>
       <div className="ra-two-col" style={{marginBottom:20,alignItems:'stretch'}}>
         <div className="ra-panel" style={{display:'flex',flexDirection:'column'}}>
           <div className="ra-panel-hd"><span className="ra-panel-title">Student Leaderboard</span><span className="ra-panel-sub">Top 10</span></div>
@@ -1837,7 +1918,7 @@ function BorrowingActivityTrendChart({ reqData=[], borrData=[], retData=[], load
   );
 }
 
-function TabTrends({ data, loading, period, setPeriod }) {
+function TabTrends({ data, loading, period, setPeriod, onRefresh }) {
   const [selectedSeries, setSelectedSeries] = useState(null);
   const trendData  = data[`req_${period}`]    || [];
   const borrowData = data[`borrow_${period}`] || [];
@@ -1855,12 +1936,12 @@ function TabTrends({ data, loading, period, setPeriod }) {
       <div className="ra-sh" style={{marginBottom:18}}>
         <span className="ra-sh-title">Borrowing Trends</span>
         <div style={{display:'flex',alignItems:'center',gap:10}}>
-          <span style={{fontFamily:'var(--font-sans)',fontSize:11,color:'var(--text-dim)'}}>{periodLabel}</span>
           <div className="ra-period">
             {[['7d','Daily (7d)'],['30d','Weekly (30d)'],['1y','Monthly (1y)']].map(([v,l])=>(
               <button key={v} className={`ra-p-btn${period===v?' active':''}`} onClick={()=>setPeriod(v)}>{l}</button>
             ))}
           </div>
+          <button type="button" className="ra-btn" onClick={onRefresh}>{Ic.refresh()} Refresh</button>
         </div>
       </div>
 
@@ -2117,7 +2198,7 @@ function TabAvailability({ data, loading }) {
 }
 
 // ── Tab: Transactions ──
-function TabTransactions({ data, loading }) {
+function TabTransactions({ data, loading, onRefresh }) {
   const { transactions=[] } = data;
   const borrowed  = transactions.filter(t=>t.status==='Borrowed').length;
   const returned  = transactions.filter(t=>t.status==='Returned').length;
@@ -2158,10 +2239,12 @@ function TabTransactions({ data, loading }) {
 
       <div className="ra-sh">
         <span className="ra-sh-title">All Transactions</span>
-        <span className="ra-sh-meta">{fmtNum(transactions.length)} records · borrowings + requests</span>
+        <RaControls showPeriod={false} onRefresh={onRefresh}>
+          
+        </RaControls>
       </div>
       <RaTable
-        title="Transactions" cols={cols} rows={transactions}
+        title="Transactions" cols={cols} rows={transactions} dateKey="_ts"
         loading={loading} pageSize={10}
         filterable={{key:'status',label:'Status',options:[
           {value:'Borrowed', label:'Borrowed'},
@@ -2437,7 +2520,7 @@ function generateAttendanceInsights(dailyCounts) {
   return insights;
 }
 
-function TabAttendance({ data, loading, period }) {
+function TabAttendance({ data, loading, period, setPeriod, onRefresh }) {
   const { logs=[], logsAll=[], byProgram=[], dailyCounts=[], periodAttendLabel='' } = data;
   const periodLabel = periodAttendLabel||(period==='7d'?'Last 7 Days':period==='30d'?'Last 30 Days':'Last 1 Year');
   const peakDay = dailyCounts.length ? dailyCounts.reduce((a,b)=>b.value>a.value?b:a,dailyCounts[0]) : null;
@@ -2484,7 +2567,9 @@ function TabAttendance({ data, loading, period }) {
       {/* ── ATTENDANCE OVERVIEW label ── */}
       <div className="ra-sh" style={{marginBottom:10}}>
         <span className="ra-sh-title">Attendance Overview</span>
-        <span className="ra-sh-meta">{periodLabel}</span>
+        <RaControls period={period} setPeriod={setPeriod} onRefresh={onRefresh}>
+          
+        </RaControls>
       </div>
 
       {/* ── TWO-PANEL ROW: Line Chart + Pie Chart ── */}
@@ -3168,23 +3253,13 @@ export default function ReportsAnalytics() {
     {key:'studentCount',  label:'Students',        ac:'#1A4DA0', sub:'registered profiles', ic:Ic.users   },
   ];
 
+  // Refresh everything (summary cards + every tab's data).
+  const refreshAll = ()=>{ fetchStats(); fetchData(); };
+
   return (
     <>
       <style>{RA_STYLES}</style>
       <div className="lm-module ra-root">
-
-        {/* Module header */}
-        <div className="ra-mod-hd">
-
-          <div className="ra-mod-controls">
-            <div className="ra-period">
-              {[['7d','7 Days'],['30d','30 Days'],['1y','1 Year']].map(([v,l])=>(
-                <button key={v} className={`ra-p-btn${period===v?' active':''}`} onClick={()=>setPeriod(v)}>{l}</button>
-              ))}
-            </div>
-            <button className="ra-btn" onClick={()=>{fetchStats();fetchData();}}>{Ic.refresh()} Refresh</button>
-          </div>
-        </div>
 
         {/* Summary stat cards */}
         <div className="ra-stat-grid">
@@ -3210,11 +3285,11 @@ export default function ReportsAnalytics() {
         </div>
 
         {/* Tab content */}
-        {tab==='books'        && <TabBooks        data={bookData}    loading={dataLoading} period={period}/>}
-        {tab==='students'     && <TabStudents     data={stuData}     loading={dataLoading} period={period}/>}
-        {tab==='trends'       && <TabTrends       data={trendData}   loading={dataLoading} period={period} setPeriod={setPeriod}/>}
-        {tab==='transactions' && <TabTransactions data={txData}      loading={dataLoading}/>}
-        {tab==='attendance'   && <TabAttendance   data={attendData}  loading={dataLoading} period={period}/>}
+        {tab==='books'        && <TabBooks        data={bookData}    loading={dataLoading} period={period} setPeriod={setPeriod} onRefresh={refreshAll}/>}
+        {tab==='students'     && <TabStudents     data={stuData}     loading={dataLoading} period={period} setPeriod={setPeriod} onRefresh={refreshAll}/>}
+        {tab==='trends'       && <TabTrends       data={trendData}   loading={dataLoading} period={period} setPeriod={setPeriod} onRefresh={refreshAll}/>}
+        {tab==='transactions' && <TabTransactions data={txData}      loading={dataLoading} onRefresh={refreshAll}/>}
+        {tab==='attendance'   && <TabAttendance   data={attendData}  loading={dataLoading} period={period} setPeriod={setPeriod} onRefresh={refreshAll}/>}
 
       </div>
     </>

@@ -1,4 +1,3 @@
-
 export const NOTIF_PREF_TYPES = [
   {
     key:   'BORROW_REQUEST',
@@ -57,6 +56,29 @@ export const NOTIF_PREF_TYPES = [
     color: '#EF5350',
     roles: ['library_manager'],
   },
+  // ── Student-only preferences that have their own dedicated toggles at the
+  // top of the student Settings > Notifications tab (so `standalone: true`
+  // keeps them out of the "Alert Types" list and its Enable all / Turn all
+  // off buttons).
+  {
+    key:   'DUE_DATE_REMINDER',
+    label: 'Due Date Reminders',
+    desc:  'Get reminded before your books are due.',
+    icon:  'alert',
+    color: '#C97A1B',
+    roles: ['student'],
+    standalone: true,
+  },
+  {
+    key:   'NEW_ARRIVAL',
+    label: 'New Arrivals',
+    desc:  'Notify me when new books are added.',
+    icon:  'book',
+    color: '#1D6FA5',
+    roles: ['student'],
+    standalone: true,
+    defaultEnabled: false, // off until the student turns it on (matches the previous Settings default)
+  },
   {
     key:   'SYSTEM_ALERT',
     label: 'System Alerts',
@@ -67,9 +89,13 @@ export const NOTIF_PREF_TYPES = [
   },
 ];
 
-/** Returns only the preference types a given role's Settings page should show a toggle for. */
+/**
+ * Returns only the preference types a given role's Settings page should show
+ * in its "Alert Types" list. `standalone` types (Due Date Reminders, New
+ * Arrivals) are excluded — they have their own dedicated toggles.
+ */
 export function getNotifPrefTypesForRole(role) {
-  return NOTIF_PREF_TYPES.filter(t => t.roles.includes(role));
+  return NOTIF_PREF_TYPES.filter(t => t.roles.includes(role) && !t.standalone);
 }
 
 const PREFS_PREFIX = 'librascan_notif_prefs_';
@@ -84,7 +110,7 @@ function soundKey(uid)  { return `${SOUND_PREFIX}${uid || 'guest'}`; }
 
 function defaultPrefs() {
   const prefs = {};
-  NOTIF_PREF_TYPES.forEach(t => { prefs[t.key] = true; });
+  NOTIF_PREF_TYPES.forEach(t => { prefs[t.key] = t.defaultEnabled !== false; });
   return prefs;
 }
 

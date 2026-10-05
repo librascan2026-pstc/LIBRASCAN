@@ -22,7 +22,7 @@ const GOLD        = '#D4AF37';
 const GOLD_DEEP   = '#B8912B';
 const GOLD_PALE   = 'rgba(212,175,55,0.14)';
 const BG          = '#F8F6F2';
-const CARD        = '#FFFFFF';
+const CARD        = '#FDF8F0';
 const CREAM       = '#FFF8EF';
 const TEXT        = '#3B2A25';
 const TEXT_MUTED  = '#8A7368';
@@ -125,19 +125,19 @@ const CSS = `
   @keyframes sao-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
   .sao-stat-card {
     position: relative;
-    background: ${CARD};
-    border: 1px solid ${BORDER};
+    background: #FDF8F0;
+    border: 1px solid rgba(139,0,0,0.22);
     border-radius: 16px;
     padding: 16px 18px 14px;
     text-align: center;
-    box-shadow: 0 1px 2px rgba(59,42,37,0.04);
+    box-shadow: 0 2px 8px rgba(80,0,0,0.08);
     transition: transform 0.18s cubic-bezier(.22,1,.36,1), box-shadow 0.18s, border-color 0.18s;
     animation: sao-rise 0.4s ease both;
     overflow: hidden;
   }
   .sao-stat-card::after {
     content: '';
-    position: absolute; bottom: 0; left: 0; right: 0; height: 3px;
+    position: absolute; bottom: 0; left: 0; right: 0; height: 4px;
     border-radius: 0 0 16px 16px;
     background: ${MAROON};
     opacity: 1;
@@ -155,7 +155,7 @@ const CSS = `
   }
   .sao-stat-icon {
     position: absolute; top: 12px; right: 12px;
-    display: flex; align-items: center; justify-content: center;
+    display: none;
     color: ${MAROON};
     opacity: 0.18;
     pointer-events: none;
@@ -163,9 +163,9 @@ const CSS = `
   }
   .sao-stat-card:hover .sao-stat-icon { opacity: 0.28; }
   .sao-stat-body { min-width: 0; position: relative; z-index: 1; }
-  .sao-stat-label { font-size: 10.5px; font-weight: 800; color: ${TEXT_MUTED}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .sao-stat-label { font-size: 11px; font-weight: 800; color: ${TEXT}; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .sao-stat-value { font-size: clamp(22px, 2.4vw, 28px); font-weight: 800; color: ${TEXT}; line-height: 1; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; margin-bottom: 5px; }
-  .sao-stat-sub { font-size: 10.5px; color: rgba(138,115,104,0.7); font-weight: 500; }
+  .sao-stat-sub { font-size: 11.5px; color: ${TEXT_MUTED}; font-weight: 500; }
 
   /* ---------- Section titles ---------- */
   .sao-selector-head {
@@ -201,7 +201,7 @@ const CSS = `
 
   /* ---------- Table (matches Campus Hub) ---------- */
   .sao-table-wrap {
-    background: ${CARD};
+    background: #FDF8F0;
     border: 1px solid ${BORDER};
     border-radius: 18px;
     overflow: hidden;
@@ -229,7 +229,7 @@ const CSS = `
   .sao-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   /* ── Unified table look: single row colour, maroon text, left aligned ── */
   .sao-table thead th, .sao-table tbody td { text-align: left !important; }
-  .sao-table tbody tr td { background: ${CARD}; color: ${MAROON}; }
+  .sao-table tbody tr td { background: #FDF8F0; color: ${MAROON}; }
   .sao-table tbody tr:hover td { background: ${MAROON_SOFT}; }
   .sao-name-cell, .sao-fig { color: ${MAROON} !important; }
   .sao-code-badge { color: ${MAROON} !important; }

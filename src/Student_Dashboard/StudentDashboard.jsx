@@ -24,6 +24,7 @@ import {
   NOTIF_HISTORY_EVENT,
 } from '../Admin_Dashboard/notificationHistory';
 import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
+import { fetchSecurityAlerts, securityAlertMessage } from '../utils/securityAlerts';
 
 /* ═══════════════════════════════════════════════════════════════
    INLINE STYLES  — mirrors every token in Dashboard.css exactly
@@ -2462,6 +2463,8 @@ const STUDENT_NOTIF_TYPES = {
   BORROW_APPROVED:  { label: 'Approved',  color: '#3F6B4A' },
   BORROW_CANCELLED: { label: 'Rejected',  color: '#8B3A3A' },
   SYSTEM_ALERT:     { label: 'System',    color: '#9C5A2E' },
+  DUE_DATE_REMINDER:{ label: 'Due Soon',    color: '#C97A1B' },
+  NEW_ARRIVAL:      { label: 'New Arrival', color: '#1D6FA5' },
 };
 
 function buildStudentNotification({ id, type, title, message, createdAt, extra = {} }) {
@@ -2469,11 +2472,117 @@ function buildStudentNotification({ id, type, title, message, createdAt, extra =
 }
 
 
+/* ── Due-date reminders & new-arrival alerts ─────────────────────────────
+   Both are rebuilt from live tables with deterministic ids (like the borrow
+   decisions above), so they de-dupe against the bell list and the saved
+   history and can never be created twice for the same borrowing / book.      */
+
+// The `borrowings` table has no due-date column (the History page sets
+// `due_date: null`), so a book's due date = borrowed_at + this many days.
+// Change this if your library's loan period is different.
+const STUDENT_LOAN_PERIOD_DAYS = 7;
+const DUE_REMINDER_DAYS_BEFORE = 2;          // remind when this many days (or fewer) remain
+const DUE_REMINDER_POLL_MS     = 5 * 60 * 1000;
+const NEW_ARRIVAL_POLL_MS      = 30 * 1000;
+const NEW_ARRIVAL_FETCH_LIMIT  = 300;
+const NEW_ARRIVAL_SEEN_PREFIX  = 'librascan_new_arrivals_seen_';
+
+function startOfLocalDay(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+/** Due date (local midnight) + whole calendar days left for a borrowing. daysLeft < 0 = overdue. */
+function getStudentDueInfo(borrowedAtIso, now = new Date()) {
+  const borrowedAt = new Date(borrowedAtIso);
+  if (!borrowedAtIso || Number.isNaN(borrowedAt.getTime())) return null;
+  const due = new Date(borrowedAt);
+  due.setDate(due.getDate() + STUDENT_LOAN_PERIOD_DAYS);
+  const dueDay   = startOfLocalDay(due);
+  const daysLeft = Math.round((dueDay.getTime() - startOfLocalDay(now).getTime()) / 86400000);
+  return { dueDay, daysLeft };
+}
+
+/**
+ * Notifications per active (unreturned) borrowing:
+ *  - 2 days / 1 day / due today  → "Due Date Reminder" (one distinct notification per stage,
+ *    so the wording is always correct for the day it was raised)
+ *  - past the due date           → one "Overdue Notice" (no day count, so it never goes stale)
+ * All use the DUE_DATE_REMINDER type, so the Settings toggle controls them together.
+ */
+function buildDueReminderNotifications(borrowings, now = new Date()) {
+  const out = [];
+  (borrowings || []).forEach(b => {
+    if (!b || b.id == null || !b.borrowed_at) return;
+    if (b.returned_at) return;                                   // already returned
+    if (String(b.status || '').toLowerCase() === 'returned') return;
+    const info = getStudentDueInfo(b.borrowed_at, now);
+    if (!info) return;
+    const { dueDay, daysLeft } = info;
+    const dueLabel = dueDay.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' });
+    const title = b.book_title || 'A borrowed book';
+
+    if (daysLeft < 0) {
+      // First overdue day (day after the due date) — a fixed point in time, stable across polls/devices.
+      out.push(buildStudentNotification({
+        id:        `due_overdue_${b.id}`,
+        type:      'DUE_DATE_REMINDER',
+        title:     'Overdue Notice',
+        message:   `"${title}" was due on ${dueLabel} and is now overdue. Please return it to the library as soon as possible.`,
+        createdAt: new Date(dueDay.getFullYear(), dueDay.getMonth(), dueDay.getDate() + 1).toISOString(),
+        extra:     { borrowId: b.id, dueDate: dueDay.toISOString(), overdue: true },
+      }));
+      return;
+    }
+    if (daysLeft > DUE_REMINDER_DAYS_BEFORE) return;             // not within the reminder window yet
+
+    const when = daysLeft === 0 ? 'today' : daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+    out.push(buildStudentNotification({
+      id:        `due_reminder_${b.id}_d${daysLeft}`,
+      type:      'DUE_DATE_REMINDER',
+      title:     'Due Date Reminder',
+      message:   `"${title}" is due ${when} (${dueLabel}). Please return it to the library on time.`,
+      // Fixed point in time (start of the day this stage begins) so it is stable across polls/devices.
+      createdAt: new Date(dueDay.getFullYear(), dueDay.getMonth(), dueDay.getDate() - daysLeft).toISOString(),
+      extra:     { borrowId: b.id, dueDate: dueDay.toISOString() },
+    }));
+  });
+  return out;
+}
+
+function buildNewArrivalNotification(book, now = new Date()) {
+  const authors = Array.isArray(book.authors) ? book.authors.join(', ') : book.authors;
+  return buildStudentNotification({
+    id:        `new_arrival_${book.id}`,
+    type:      'NEW_ARRIVAL',
+    title:     'New Arrival',
+    message:   `${book.title ? `"${book.title}"` : 'A new book'}${authors ? ` by ${authors}` : ''} has just been added to the library.`,
+    createdAt: now.toISOString(),
+    extra:     { bookId: book.id },
+  });
+}
+
+// The set of approved book ids this student has already "seen". The first time
+// it runs it just records what's on the shelf (so a student never gets flooded
+// with the whole catalog); after that, any approved book not in the set is new.
+function loadNewArrivalSeen(uid) {
+  try {
+    const raw = localStorage.getItem(`${NEW_ARRIVAL_SEEN_PREFIX}${uid}`);
+    if (raw === null) return null;
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? new Set(arr.map(String)) : null;
+  } catch { return null; }
+}
+function saveNewArrivalSeen(uid, set) {
+  try { localStorage.setItem(`${NEW_ARRIVAL_SEEN_PREFIX}${uid}`, JSON.stringify([...set])); } catch { /* storage unavailable */ }
+}
+
 function getStudentNotifTarget(n) {
   switch (n?.type) {
     case 'BORROW_APPROVED':
     case 'BORROW_CANCELLED':
       return { kind: 'area', tab: 'history' };
+    case 'DUE_DATE_REMINDER':
+      return { kind: 'area', tab: 'history' };
+    case 'NEW_ARRIVAL':
+      return { kind: 'area', tab: 'catalog' };
     default:
       return { kind: 'area', tab: 'home' }; // SYSTEM_ALERT and anything unrecognized
   }
@@ -3290,9 +3399,7 @@ function PageHome({ user, profile, onNavigate }) {
               onClick={() => onNavigate('catalog')}
             >
               Browse Books
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
+
             </button>
             <button
               type="button"
@@ -3921,33 +4028,17 @@ function PageHistory({ user }) {
     (async () => {
       setLoading(true);
       try {
-        // A borrow can land under this account's student_id, or — if it was
-        // logged by scanning the student's physical ID at the circulation
-        // desk — under a different/blank student_id that only shares the
-        // same student_number. Look up this account's own student_number so
-        // both kinds of records are recognized as the same student's history.
+
         let studentNumber = null;
         try {
           const { data: prof } = await supabase.from('profiles')
             .select('student_number').eq('id', user.id).maybeSingle();
           studentNumber = prof?.student_number ? String(prof.student_number).trim() : null;
         } catch (profErr) { console.error('[History] profile lookup failed:', profErr); }
-        // Escape LIKE metacharacters so a number containing % or _ can't
-        // turn into an unintended wildcard.
+
         const likeSafeNumber = studentNumber ? studentNumber.replace(/[%_]/g, m => `\\${m}`) : null;
 
-        // A record only matching this account's own student_id catches
-        // requests/borrowings made while logged in. Everything else needs a
-        // separate lookup because a desk scan of the physical ID doesn't
-        // reliably land in the same column each time:
-        //   - student_number IS the right column, but BookManagement's own
-        //     QR/ID-scan checkout flow never actually fills it in — it only
-        //     embeds the number in student_name as "Name [Number]".
-        //   - Some older rows (scanned before this account existed, or
-        //     before the scan could be resolved to a UUID) stored the raw
-        //     student number directly in student_id instead of a UUID.
-        // Run all four lookups and merge/dedupe by id, since a plain OR
-        // filter can't do the "search inside student_name" part anyway.
+
         const fetchAllForStudent = async (table, selectCols) => {
           const seen = new Map();
           const add = (rows) => { (rows||[]).forEach(r => { if (r?.id != null) seen.set(r.id, r); }); };
@@ -3961,14 +4052,7 @@ function PageHistory({ user }) {
             if (byNumber.error) console.error(`[History] ${table} student_number lookup failed:`, byNumber.error);
             add(byNumber.data);
 
-            // Legacy rows that stored the raw student number in `student_id`:
-            // `student_id` is a uuid column, so comparing it to a plain
-            // student number (e.g. "2023313830") makes Postgres reject the
-            // whole request with a 400 (invalid input syntax for type uuid).
-            // A non-UUID value can never actually be stored in that column,
-            // so only run this lookup when the number is UUID-shaped.
-            // Rows scanned by the student's physical ID are still found by
-            // the student_number and embedded-name lookups around this one.
+ 
             if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentNumber)) {
               const byLegacyId = await supabase.from(table).select(selectCols).eq('student_id', studentNumber);
               if (byLegacyId.error) console.error(`[History] ${table} legacy student_id lookup failed:`, byLegacyId.error);
@@ -3986,11 +4070,7 @@ function PageHistory({ user }) {
         const data = (await fetchAllForStudent('borrow_requests', '*'))
           .sort((a,b) => new Date(b.created_at) - new Date(a.created_at));
 
-        // borrow_requests only stores book_id/book_title — it has no cover
-        // column, so covers must be looked up from `books` separately.
-        // NOTE: `books` only has `cover_image_url` (no `cover_url` column) —
-        // requesting a non-existent column makes Postgrest reject the whole
-        // query, which is why the previous attempt silently returned nothing.
+    
         const bookIds = [...new Set((data||[]).map(r=>r.book_id).filter(Boolean))];
         let coverMap = {};
         if (bookIds.length) {
@@ -4000,17 +4080,6 @@ function PageHistory({ user }) {
           (bookRows||[]).forEach(b => { coverMap[b.id] = b.cover_image_url || null; });
         }
 
-        // Return/due dates also don't live on borrow_requests — there's no
-        // due_date column anywhere in this schema. The real borrowed_at /
-        // returned_at timestamps live on the separate `borrowings` table,
-        // created once a request is approved. Match by book_id, and if a
-        // student borrowed the same book more than once, prefer the
-        // borrowing row closest in time to each request.
-        // (Selecting the extra columns below — id/status/book_title/etc —
-        // is so any borrowing left unmatched after pairing can still be
-        // turned into its own history row further down; a walk-in checkout
-        // scanned straight from the student's physical ID never has a
-        // borrow_requests row to begin with, only this borrowings row.)
         const borrowRows = await fetchAllForStudent(
           'borrowings', 'id,book_id,book_title,status,borrowed_at,returned_at'
         );
@@ -4020,10 +4089,7 @@ function PageHistory({ user }) {
           borrowingsByBook[b.book_id].push(b);
         });
 
-        // Match each approved/active/returned request to its own borrowing
-        // record (not shared) by processing oldest-first and removing each
-        // matched borrowing from the pool so a later request for the same
-        // book can't accidentally reuse it.
+
         const pool = {};
         Object.keys(borrowingsByBook).forEach(k => { pool[k] = [...borrowingsByBook[k]]; });
         const matchByReqId = {};
@@ -4048,29 +4114,19 @@ function PageHistory({ user }) {
             }
           });
 
-        // NOTE: `status` on borrow_requests can say "approved" before the
-        // librarian actually scans the book out in Book Management — that
-        // scan is what creates the `borrowings` row. So an approved request
-        // may legitimately have no match yet; that's "awaiting pickup",
-        // not missing data, and the UI below says so instead of showing "—".
+  
         const withCovers = (data||[]).map(r => {
           const match = matchByReqId[r.id] || null;
           return {
             ...r,
             cover_image_url: coverMap[r.book_id] || null,
             return_date: match?.returned_at || null,
-            due_date: null, // no due-date concept in this schema
+            // No due-date column in the schema: due = borrowed_at + loan period.
+            due_date: !match?.returned_at ? (getStudentDueInfo(match?.borrowed_at)?.dueDay.toISOString() || null) : null,
             _borrowed_at: match?.borrowed_at || null,
           };
         });
 
-        // Whatever's left in `pool` after matching is a borrowing that never
-        // had — or never got matched to — a borrow_requests row (a walk-in
-        // checkout where the desk scanned the student's physical ID). Those
-        // still belong in this student's history, so turn each into its own
-        // row. "Approved" here is what "Borrowed" means on the Book
-        // Management side; a returned_at on the borrowing itself is what
-        // flips the badge to "Returned" (see effectiveStatus below).
         const unmatchedBorrowings = Object.values(pool).flat();
         let extraRows = [];
         if (unmatchedBorrowings.length) {
@@ -4090,7 +4146,7 @@ function PageHistory({ user }) {
             created_at: b.borrowed_at,
             cover_image_url: coverMap[b.book_id] || null,
             return_date: b.returned_at || null,
-            due_date: null,
+            due_date: !b.returned_at ? (getStudentDueInfo(b.borrowed_at)?.dueDay.toISOString() || null) : null,
             _borrowed_at: b.borrowed_at || null,
           }));
         }
@@ -4104,13 +4160,18 @@ function PageHistory({ user }) {
     })();
   }, [user?.id]); // eslint-disable-line
 
-  // Source of truth for "is this actually returned?" is the matched
-  // `borrowings.returned_at` (r.return_date), not the raw borrow_requests
-  // .status column — that column can be stale if a book was checked back in
-  // through Book Management without the request status being synced. Use
-  // the real return data whenever we have it so the badge always agrees
-  // with the return date shown next to it.
-  const effectiveStatus = (r) => r.return_date ? 'returned' : normalizeStatus(r.status);
+
+  const effectiveStatus = (r) => {
+    if (r.return_date) return 'returned';
+    const st = normalizeStatus(r.status);
+    // A borrowed (picked-up) book that is unreturned: flag overdue / due soon.
+    if (st === 'approved' && r._borrowed_at) {
+      const info = getStudentDueInfo(r._borrowed_at);
+      if (info && info.daysLeft < 0) return 'overdue';
+      if (info && info.daysLeft <= DUE_REMINDER_DAYS_BEFORE) return 'due_soon';
+    }
+    return st;
+  };
 
   const filtered = rows.filter(r=>{
     const q = search.toLowerCase();
@@ -4131,7 +4192,7 @@ function PageHistory({ user }) {
         </div>
         <select className="sdb-select" value={statusF} onChange={e=>setStatusF(e.target.value)}>
           <option value="">All Statuses</option>
-          {['pending','approved','returned','rejected'].map(s=><option key={s} value={s}>{s.charAt(0).toUpperCase()+s.slice(1)}</option>)}
+          {['pending','approved','due_soon','overdue','returned','rejected'].map(s=><option key={s} value={s}>{statusCfg(s).label}</option>)}
         </select>
         <div className="sdb-count">{filtered.length} record{filtered.length!==1?'s':''}</div>
       </div>
@@ -4172,7 +4233,13 @@ function PageHistory({ user }) {
                     </>
                   ) : r._borrowed_at ? (
                     <>
-                      <div style={{ color:'var(--text-muted)' }}>Not yet returned</div>
+                      {r.due_date ? (
+                        <div style={{ fontWeight:600, color: effectiveStatus(r)==='overdue' ? '#B23A3A' : effectiveStatus(r)==='due_soon' ? '#C97A1B' : 'var(--text-primary)' }}>
+                          Due {fmtDate(r.due_date)}{effectiveStatus(r)==='overdue' ? ' · Overdue' : ''}
+                        </div>
+                      ) : (
+                        <div style={{ color:'var(--text-muted)' }}>Not yet returned</div>
+                      )}
                       <div style={{ fontSize:11, color:'var(--text-muted)' }}>Borrowed {fmtFull(r._borrowed_at)}</div>
                     </>
                   ) : effectiveStatus(r) === 'approved' ? (
@@ -4203,17 +4270,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
   const fileRef = useRef(null);
   const { toast, show } = useToast();
 
-  // Field names below are mapped to the columns that actually exist on
-  // `profiles`: first_name, last_name, student_number, program_id (a
-  // foreign key into `programs`, not a free-text column — there is no
-  // `program_legacy` column on this table; sending that key is what used
-  // to make every save fail with "Could not find the 'program_legacy'
-  // column of 'profiles' in the schema cache"). There is no `phone` column
-  // yet, so it stays local-only (typeable, but not persisted) until that
-  // column is added. `campus` and `course` are both resolved read-only
-  // display labels for foreign keys (campus_id / program_id) — see the two
-  // lookup effects below — and `middle_name` is a real, existing `profiles`
-  // column so it's fully editable + saved.
+
   const [form, setForm] = useState({
     first_name:  profile?.first_name     || user?.user_metadata?.first_name || '',
     middle_name: profile?.middle_name    || user?.user_metadata?.middle_name || '',
@@ -4239,11 +4296,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     }));
   }, [profile, user]);
 
-  // Campus is a foreign key (profiles.campus_id -> campuses.id), so its
-  // display name is resolved separately here (same pattern used for book
-  // campus lookups elsewhere in this file) instead of living in the form
-  // as free text. It is shown read-only — editing it would mean changing
-  // campus_id via a picker, which is out of scope here.
+
   useEffect(() => {
     let cancelled = false;
     if (!profile?.campus_id) { setForm(f => ({ ...f, campus: '' })); return; }
@@ -4253,10 +4306,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     return () => { cancelled = true; };
   }, [profile?.campus_id]);
 
-  // Course / Program is also a foreign key (profiles.program_id ->
-  // programs.id) — resolved to its display name the same way Campus is
-  // above, so the read-only view always shows the real program name even
-  // before the editable dropdown (below) has finished loading.
+
   useEffect(() => {
     let cancelled = false;
     if (!profile?.program_id) { setForm(f => ({ ...f, course: '' })); return; }
@@ -4266,11 +4316,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     return () => { cancelled = true; };
   }, [profile?.program_id]);
 
-  // Programs selectable in the edit dropdown, scoped to the student's own
-  // campus only — `programs.college_id` links to `colleges.id`, and
-  // `colleges.campus_id` links to the campus, so filtering on the joined
-  // colleges.campus_id keeps the dropdown to "courses this campus actually
-  // offers" instead of every program in the system.
+
   const [programs,        setPrograms]        = useState([]);
   const [loadingPrograms, setLoadingPrograms]  = useState(false);
   useEffect(() => {
@@ -4292,11 +4338,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
   }, [profile?.campus_id]);
 
   const set = (k,v) => setForm(f=>({...f,[k]:v}));
-  // Derived straight from `profile`/`user` (not `form`) so the banner name
-  // is correct on the very first paint — `form` only catches up a tick
-  // later via the sync effect above, which was leaving this blank right
-  // after navigating to the Profile tab. Same source pattern already used
-  // by the working header higher up in this file.
+
   const heroFirst    = profile?.first_name || user?.user_metadata?.first_name || '';
   const heroLast     = profile?.last_name  || user?.user_metadata?.last_name  || '';
   const displayName  = `${heroFirst} ${heroLast}`.trim() || (user?.email ? user.email.split('@')[0] : 'Student');
@@ -4327,14 +4369,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     if (!user?.id) return;
     setSaving(true);
     try {
-      // IMPORTANT: only send columns that actually exist on `profiles`.
-      // student_id -> student_number, course -> program_id (a foreign key,
-      // not free text — see the note above the form's initial state).
-      // phone has no column yet, so it's intentionally left out of the
-      // payload — sending it causes Postgrest to reject the whole upsert
-      // ("column not found in schema cache"), which is why saving used to
-      // fail entirely. campus is a read-only lookup, not user-editable here,
-      // so it's never sent either.
+
       const payload = {
         id:              user.id,
         first_name:      form.first_name,
@@ -4346,9 +4381,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
       };
       const { error } = await supabase.from('profiles').upsert(payload);
       if (error) throw error;
-      // Keep the read-only display name in sync immediately, rather than
-      // waiting on the program-name lookup effect to re-fire off the
-      // updated `profile` prop.
+
       const pickedName = programs.find(p => p.id === form.program_id)?.name || '';
       setForm(f => ({ ...f, course: pickedName }));
       if (onProfileUpdate) onProfileUpdate({...profile,...payload});
@@ -4373,14 +4406,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     </div>
   );
 
-  // Course / Program gets its own field: unlike the plain-text Fields
-  // above, editing it must update `program_id` (the real FK column that
-  // actually gets saved) rather than the free-text `course` label. The
-  // dropdown is pre-scoped to the student's own campus by the `programs`
-  // fetch effect above, so it only ever lists courses that campus offers.
-  // Picking an option updates `course` in the same change so the banner
-  // subtitle (which reads form.course) stays in sync immediately, not
-  // just after Save resolves it from the `programs` list again.
+
   const CourseField = () => (
     <div className="sdb-form-group">
       <label className="sdb-label">Course / Program</label>
@@ -4504,13 +4530,8 @@ function PageProfile({ user, profile, onProfileUpdate }) {
   );
 }
 
-/* ═══════════════════════════════════════════════════════
-   "View Logins" — collapsible list of signed-in devices, nested in the
-   Security panel below. Logging a device out goes through the server
-   (/api/mfa/sessions/revoke): it kills that device's Supabase session for
-   real (not just hides the row) and, if it had been trusted, removes it
-   from the trusted-devices table too.
-═══════════════════════════════════════════════════════ */
+
+
 function LoginSessionsPanel({ show }) {
   const [open, setOpen]           = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -4662,19 +4683,30 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
   const [pwForm,   setPwForm]   = useState({ oldPw:'', newPw:'', confirm:'' });
   const [showPw,   setShowPw]   = useState(false);
   const [pwSaving, setPwSaving] = useState(false);
-  const [notif,    setNotif]    = useState({ email:true, due_reminders:true, new_arrivals:false });
   const { toast, show } = useToast();
 
-  // Real, persisted notification preferences (shared with the bell) —
-  // separate from the `notif` state above, which only drives the three
-  // unrelated email/reminder toggles further down this page.
+ 
   const [notifPrefs, setNotifPrefs] = useState(() => getNotifPrefs(user?.id));
   const [notifSound, setNotifSound] = useState(() => getNotifSoundEnabled(user?.id));
-  const notifPrefTypes = getNotifPrefTypesForRole('student');
-  const notifOnCount = notifPrefTypes.filter(t => notifPrefs[t.key] !== false).length;
+  // Alert Types = the role's built-in types (Approved / Rejected) PLUS the
+  // Due Date Reminder and New Arrival alerts, so "Enable all" / "Turn off all"
+  // and the "x/y on" counter cover every toggle in the list.
+  const EXTRA_NOTIF_TYPES = [
+    { key: 'DUE_DATE_REMINDER', label: 'Due Date Reminders', desc: 'Get reminded before your books are due' },
+    { key: 'NEW_ARRIVAL',       label: 'New Arrivals',       desc: 'Notify me when new books are added' },
+  ];
+  const baseNotifPrefTypes = getNotifPrefTypesForRole('student');
+  const notifPrefTypes = [
+    ...baseNotifPrefTypes,
+    ...EXTRA_NOTIF_TYPES.filter(x => !baseNotifPrefTypes.some(t => t.key === x.key)),
+  ];
+  // Due/New Arrival are delivered only when explicitly `true` (see the bell's
+  // notifPrefsRef checks), so the UI reads them the same way.
+  const isNotifOn = (key) =>
+    EXTRA_NOTIF_TYPES.some(x => x.key === key) ? notifPrefs[key] === true : notifPrefs[key] !== false;
+  const notifOnCount = notifPrefTypes.filter(t => isNotifOn(t.key)).length;
 
-  // Two-factor authentication (email OTP) — same on/off toggle the Librarian
-  // Manager's Settings page uses, just surfaced here for student accounts.
+
   const [mfaEnabled, setMfaEnabled] = useState(false);
   const [mfaLoading, setMfaLoading] = useState(true);
   const [mfaBusy,    setMfaBusy]    = useState(false);
@@ -4717,7 +4749,7 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
   };
 
   const handleNotifPrefToggle = (key, label) => {
-    const next = notifPrefs[key] === false;
+    const next = !isNotifOn(key);
     setNotifPrefs(p => ({ ...p, [key]: next }));
     setNotifPref(user?.id, key, next);
     show(`${label} notifications ${next ? 'enabled' : 'turned off'}.`);
@@ -4730,14 +4762,19 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
     show(`Notification sound ${next ? 'enabled' : 'turned off'}.`);
   };
 
-  const enableAllNotifs = () => {
-    setAllNotifPrefs(user?.id, true, 'student');
+  const setEveryNotifPref = (value) => {
+    // Built-in types first, then write every type (incl. Due Date / New Arrival)
+    // individually so none are missed regardless of what setAllNotifPrefs covers.
+    setAllNotifPrefs(user?.id, value, 'student');
+    notifPrefTypes.forEach(t => setNotifPref(user?.id, t.key, value));
     setNotifPrefs(getNotifPrefs(user?.id));
+  };
+  const enableAllNotifs = () => {
+    setEveryNotifPref(true);
     show('All notification types enabled.');
   };
   const disableAllNotifs = () => {
-    setAllNotifPrefs(user?.id, false, 'student');
-    setNotifPrefs(getNotifPrefs(user?.id));
+    setEveryNotifPref(false);
     show('All notification types turned off.');
   };
 
@@ -4748,10 +4785,7 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
     if (pwForm.newPw !== pwForm.confirm) { show('Passwords do not match.',true); return; }
     setPwSaving(true);
     try {
-      // Supabase's updateUser() will happily change the password without
-      // knowing the old one — it only checks that the session is valid.
-      // Re-authenticating with the old password first is what actually
-      // enforces "you must know your current password to change it".
+
       const { error: verifyErr } = await supabase.auth.signInWithPassword({
         email: user?.email, password: pwForm.oldPw,
       });
@@ -4787,20 +4821,13 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
 
   return (
     <>
-      {/* Same photo-hero banner every other page (Browse Catalog, History,
-          Favorites) uses — Settings was missing it before, just showing a
-          plain text title. */}
+
       <PageHero title="Settings" sub="Manage your profile, security, and notification preferences." />
 
-      {/* Tab bar + the active tab's content now live inside ONE single
-          framed border (same look as the Browse Catalog / Borrowing
-          History panel), pulled up over the hero the same way those
-          pages do (sdb-cat-module), instead of the tabs and each tab's
-          content being separate, un-bordered blocks. */}
+
       <div className="sdb-module sdb-cat-module">
         <div className="sdb-settings-panel">
-          {/* Tabs — same Profile / Security / Notifications layout as the
-              Super Admin Settings page */}
+
           <div className="sdb-stabs">
             {SETTINGS_TABS.map(t => (
               <button
@@ -4822,11 +4849,7 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
           {/* Change Password */}
           <div className="sdb-panel" style={{ marginBottom:18 }}>
             <div className="sdb-panel-hdr">
-              {/* Icon + label kept in one flex group so panel-hdr's
-                  justify-content:space-between only splits this group from the
-                  button below, instead of splitting the icon from its own
-                  label across the whole row. Same fix applied to the
-                  Notifications and Privacy headers underneath. */}
+
               <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.lock} Change Password</span>
               <button className="sdb-btn sdb-btn-primary" style={{ fontSize:11.5, padding:'6px 14px' }} onClick={changePw} disabled={pwSaving}>
                 {Ic.lock}&nbsp;{pwSaving?'Updating…':'Update Password'}
@@ -4889,11 +4912,6 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
               <span style={{ display:'inline-flex', alignItems:'center', gap:8 }}>{Ic.bell} Notification Preferences</span>
             </div>
 
-            <Toggle label="Email Notifications"  desc="Receive library updates via email"         value={notif.email}         onChange={v=>setNotif(p=>({...p,email:v}))} />
-            <Toggle label="Due Date Reminders"   desc="Get reminded before your books are due"   value={notif.due_reminders} onChange={v=>setNotif(p=>({...p,due_reminders:v}))} />
-            <Toggle label="New Arrivals"         desc="Notify me when new books are added"        value={notif.new_arrivals}  onChange={v=>setNotif(p=>({...p,new_arrivals:v}))} />
-
-            <div style={{ height:1, background:'rgba(139,0,0,0.10)', margin:'14px 0' }} />
 
             {/* Notification sound — plays a short chime when a new alert arrives
                 on this dashboard, matching the Librarian's Settings page. */}
@@ -4929,17 +4947,17 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
               </div>
             </div>
 
-            {/* Real, bell-connected preferences (Approved / Canceled-Rejected) */}
+            {/* Bell-connected preferences: Approved / Rejected + Due Date Reminders + New Arrivals */}
             {notifPrefTypes.map(t => (
               <Toggle
                 key={t.key}
                 label={t.label}
                 desc={t.desc}
-                value={notifPrefs[t.key] !== false}
+                value={isNotifOn(t.key)}
                 onChange={() => handleNotifPrefToggle(t.key, t.label)}
               />
             ))}
-          </div>
+           </div>
             </>
           )}
         </div>
@@ -4968,20 +4986,12 @@ export default function StudentDashboard({ user, onSignOut }) {
   const [mobileOpen,  setMobileOpen]  = useState(false);
   const [showLogout,  setShowLogout]  = useState(false);
   const [profile,     setProfile]     = useState(null);
-  const [catalogCategory, setCatalogCategory] = useState(''); // category to pre-filter Browse Catalog with, set via navigate('catalog', key)
-  const [catalogCampus, setCatalogCampus] = useState(''); // campus_id to pre-filter Browse Catalog with, set via navigate('catalog', category, campusId)
-
-  /* ═══════════════ NOTIFICATIONS ═══════════════
-     Mirrors Dashboard.jsx's architecture: live bell list (max 15, in
-     state) backed by a fuller persisted history (localStorage, via
-     notificationHistory.js) for "See all". The only notification type a
-     student currently receives is a canceled/rejected (or approved) borrow
-     request, synthesized the same way Dashboard.jsx synthesizes the
-     Librarian's equivalent — from a realtime UPDATE on borrow_requests —
-     just filtered to this student's own requests instead of a campus. */
+  const [campusName,  setCampusName]  = useState('');
+  const [catalogCategory, setCatalogCategory] = useState(''); 
+  const [catalogCampus, setCatalogCampus] = useState('');
   const [notifications, setNotifications] = useState([]);
   const [notifOpen,     setNotifOpen]     = useState(false);
-  const [notifTab,      setNotifTab]      = useState('all'); // 'all' | 'unread'
+  const [notifTab,      setNotifTab]      = useState('all'); 
   const [realtimeStatus, setRealtimeStatus] = useState('connecting');
 
   const [notifHistory, setNotifHistory] = useState(() => getNotifHistory(user?.id));
@@ -4989,21 +4999,13 @@ export default function StudentDashboard({ user, onSignOut }) {
   const [historySearch, setHistorySearch] = useState('');
   const [historyTypeFilter, setHistoryTypeFilter] = useState('all');
 
-  // Per-row "…" menu (bell dropdown + "See all" history page) — tracks
-  // which single notification's menu is open, if any.
+
   const [notifMenuOpenId, setNotifMenuOpenId] = useState(null);
   const notifMenuRef = useRef(null);
-  // The Notification History page's row menu is portaled straight to
-  // document.body (see notifRowMenuPos below) because its row list lives
-  // inside a scrolling/overflow:hidden panel (.lm-notif-hist-list /
-  // .lm-notif-hist-panel / .sdb-cat-panel) — a plain position:absolute
-  // dropdown there gets silently clipped and never appears. This holds the
-  // fixed on-screen coordinates for that portaled menu, computed from the
-  // "…" button's own position right when it's opened.
+
   const [notifRowMenuPos, setNotifRowMenuPos] = useState(null);
 
-  // "Notification deleted" undo toast. Holds the just-deleted notification
-  // object so Undo can restore it without looking it up again.
+
   const [deletedNotifToast, setDeletedNotifToast] = useState(null);
   const notifUndoTimerRef = useRef(null);
   const NOTIF_UNDO_MS = 6000;
@@ -5015,11 +5017,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   useEffect(() => {
     if (!notifMenuOpenId) return;
     const onClick = (e) => {
-      // Checked by CSS class via closest(), not notifMenuRef.contains() —
-      // the History-page version of this menu is portaled to document.body
-      // (see notifRowMenuPos), which puts it outside the DOM subtree that
-      // ref would see, so a plain .contains() check would close the menu
-      // the instant something inside the portaled dropdown was clicked.
+
       if (e.target.closest && (e.target.closest('.lm-notif-menu-wrap') || e.target.closest('.lm-notif-menu'))) return;
       setNotifMenuOpenId(null);
       setNotifRowMenuPos(null);
@@ -5040,7 +5038,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const computeNotifPanelPos = useCallback(() => {
     if (!notifBtnRef.current) return null;
-    if (window.innerWidth <= 560) return null; // mobile sheet handled entirely by CSS
+    if (window.innerWidth <= 560) return null;
     const r = notifBtnRef.current.getBoundingClientRect();
     const right = NOTIF_PANEL_EDGE_GAP;
     const bellCenterX = r.left + r.width / 2;
@@ -5069,10 +5067,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const notifPrefsRef = useRef(getNotifPrefs(user?.id));
   const notifSoundRef = useRef(getNotifSoundEnabled(user?.id));
-  // Bumped on every prefs change so memoized lists derived from
-  // notifPrefsRef (a plain ref — mutating it doesn't itself trigger a
-  // re-render) recompute immediately instead of waiting for unrelated
-  // state to change first.
+
   const [prefsVersion, setPrefsVersion] = useState(0);
 
   useEffect(() => {
@@ -5094,10 +5089,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
 
-  // Cross-device sync: the persisted history (and each notification's
-  // read/deleted state) lives in Supabase, so every device shows the same
-  // thing. After each sync that changed something, refresh the "See all"
-  // list and carry the shared read/deleted state onto the live bell list.
+
   useEffect(() => {
     const uid = user?.id;
     if (!uid) return;
@@ -5144,8 +5136,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const addStudentNotifications = useCallback((incoming, isRealtime = false) => {
     if (!incoming.length) return;
-    // Strict opt-in ("=== true"): a type absent from prefs — disabled, or
-    // a retired/legacy type with no toggle at all — must never pass.
+
     const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
 
     if (allowed.length) {
@@ -5186,9 +5177,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(addNotifHistory(user?.id, allowed));
   }, [user?.id]);
 
-  // Recent decisions (approved/rejected) on THIS student's own borrow
-  // requests. Same query shape as Dashboard.jsx's fetchRecentDecisions,
-  // just scoped by student_id instead of campus_id.
+
   const isFirstStudentDecisionLoad = useRef(true);
   const fetchStudentRequestDecisions = useCallback(async (isRealtime = false) => {
     if (!user?.id) return;
@@ -5238,6 +5227,34 @@ export default function StudentDashboard({ user, onSignOut }) {
     addStudentNotifications(newNotifs, isRealtime);
   }, [addStudentNotifications, showInitialStudentBatch, user?.id]);
 
+
+  const isFirstStudentSecurityAlertLoad = useRef(true);
+  const fetchStudentSecurityAlerts = useCallback(async (isRealtime = false) => {
+    if (!user?.id) return;
+    const rows = await fetchSecurityAlerts(user.id, STUDENT_NOTIF_MAX);
+    if (!rows) return;
+
+    const toNotif = (r) => buildStudentNotification({
+      id:        `sec_alert_${r.id}`,
+      type:      'SYSTEM_ALERT',
+      title:     'Security Alert',
+      message:   securityAlertMessage(r),
+      createdAt: r.created_at,
+      extra:     { securityAlertId: r.id },
+    });
+
+    if (isFirstStudentSecurityAlertLoad.current) {
+      rows.forEach(r => seenNotifIdsRef.current.add(`sec_alert_${r.id}`));
+      isFirstStudentSecurityAlertLoad.current = false;
+      showInitialStudentBatch(rows.map(toNotif));
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenNotifIdsRef.current.has(`sec_alert_${r.id}`));
+    if (!newRows.length) return;
+    addStudentNotifications(newRows.map(toNotif), isRealtime);
+  }, [addStudentNotifications, showInitialStudentBatch, user?.id]);
+
   const studentNotifChannelRef = useRef(`student-notif-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
@@ -5246,7 +5263,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     let resubscribeTimer = null;
     let ch = null;
 
-    const load = () => { fetchStudentRequestDecisions(false); };
+    const load = () => { fetchStudentRequestDecisions(false); fetchStudentSecurityAlerts(false); };
     load();
 
     const subscribe = () => {
@@ -5271,6 +5288,24 @@ export default function StudentDashboard({ user, onSignOut }) {
           }
           fetchStudentRequestDecisions(true);
         })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'security_alerts',
+          filter: `user_id=eq.${user.id}`,
+        }, (payload) => {
+
+          const r = payload?.new;
+          if (r && r.user_id === user.id) {
+            addStudentNotifications([buildStudentNotification({
+              id:        `sec_alert_${r.id}`,
+              type:      'SYSTEM_ALERT',
+              title:     'Security Alert',
+              message:   securityAlertMessage(r),
+              createdAt: r.created_at,
+              extra:     { securityAlertId: r.id },
+            })], true);
+          }
+          fetchStudentSecurityAlerts(true);
+        })
         .subscribe((status) => {
           if (cancelled) return;
           setRealtimeStatus(status);
@@ -5282,10 +5317,8 @@ export default function StudentDashboard({ user, onSignOut }) {
     };
     subscribe();
 
-    // Safety-net poll — same reasoning as Dashboard.jsx: guarantees new
-    // activity still shows up even if Realtime replication happens to be
-    // switched off for this table on this Supabase project.
-    const pollId = setInterval(() => { fetchStudentRequestDecisions(true); }, 15000);
+
+    const pollId = setInterval(() => { fetchStudentRequestDecisions(true); fetchStudentSecurityAlerts(true); }, 15000);
 
     return () => {
       cancelled = true;
@@ -5293,7 +5326,139 @@ export default function StudentDashboard({ user, onSignOut }) {
       if (resubscribeTimer) clearTimeout(resubscribeTimer);
       if (ch) supabase.removeChannel(ch);
     };
-  }, [user?.id, fetchStudentRequestDecisions, addStudentNotifications]);
+  }, [user?.id, fetchStudentRequestDecisions, fetchStudentSecurityAlerts, addStudentNotifications]);
+
+  /* ── Due-date reminders & new-arrival notifications ─────────────────────
+     Delivery is gated by the student's Settings preferences (DUE_DATE_REMINDER /
+     NEW_ARRIVAL), skips anything the student deleted, and de-dupes by id against
+     both the bell list and this session's already-delivered ids. */
+  const deliveredExtraNotifIdsRef = useRef(new Set());
+  const deliverExtraStudentNotifs = useCallback((notifs, isRealtime) => {
+    const uid = user?.id;
+    if (!uid || !notifs.length) return;
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(uid, n.id));
+    if (!allowed.length) return;
+
+    const readIds = new Set(getNotifHistory(uid).filter(h => h.read).map(h => h.id));
+    const fresh = allowed
+      .filter(n => !deliveredExtraNotifIdsRef.current.has(n.id) && !seenNotifIdsInStateRef.current.has(n.id))
+      .map(n => (readIds.has(n.id) ? { ...n, read: true } : n));
+
+    if (fresh.length) {
+      fresh.forEach(n => {
+        deliveredExtraNotifIdsRef.current.add(n.id);
+        seenNotifIdsInStateRef.current.add(n.id);
+      });
+      setNotifications(prev =>
+        [...fresh, ...prev]
+          .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+          .slice(0, STUDENT_NOTIF_MAX)
+      );
+      if (isRealtime && notifSoundRef.current && fresh.some(n => !n.read)) playStudentNotifSound();
+    }
+    setNotifHistory(addNotifHistory(uid, allowed));
+  }, [playStudentNotifSound, user?.id]);
+
+  // Due Date Reminders — a book 0–2 days from its due date. Skips the query
+  // entirely while the preference is off.
+  const isFirstDueReminderRun = useRef(true);
+  const dueReminderRunRef = useRef(null);
+  const fetchStudentDueReminders = useCallback(() => {
+    const uid = user?.id;
+    if (!uid || notifPrefsRef.current.DUE_DATE_REMINDER !== true) return Promise.resolve();
+    if (dueReminderRunRef.current) return dueReminderRunRef.current;
+    const run = (async () => {
+      try {
+        const rows = await fetchStudentBorrowings(uid);
+        if (notifPrefsRef.current.DUE_DATE_REMINDER !== true) return; // switched off mid-fetch
+        deliverExtraStudentNotifs(buildDueReminderNotifications(rows), !isFirstDueReminderRun.current);
+        isFirstDueReminderRun.current = false;
+      } catch (err) {
+        console.error('[StudentDashboard] due reminder check failed:', err);
+      } finally {
+        dueReminderRunRef.current = null;
+      }
+    })();
+    dueReminderRunRef.current = run;
+    return run;
+  }, [deliverExtraStudentNotifs, user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    fetchStudentDueReminders();
+    const id = setInterval(fetchStudentDueReminders, DUE_REMINDER_POLL_MS);
+    return () => clearInterval(id);
+    // prefsVersion: re-check right away when the student flips the toggle.
+  }, [user?.id, fetchStudentDueReminders, prefsVersion]);
+
+  // New Arrivals — a book becomes visible to students once its registration is
+  // approved. Always keeps the "already seen" set current (even while the
+  // preference is off) so turning it on later only announces books added after.
+  const newArrivalSeenRef = useRef(null);
+  const fetchStudentNewArrivals = useCallback(async (isRealtime = false) => {
+    const uid = user?.id;
+    if (!uid) return;
+    try {
+      const { data, error } = await supabase
+        .from('books')
+        .select('id, title, authors')
+        .eq('registration_status', 'approved')
+        .order('created_at', { ascending: false })
+        .limit(NEW_ARRIVAL_FETCH_LIMIT);
+      if (error) { console.error('[StudentDashboard] new arrivals fetch error:', error.message); return; }
+      const books = data || [];
+
+      let known = newArrivalSeenRef.current || loadNewArrivalSeen(uid);
+      if (!known) {
+        // First run on this device: record the current shelf, notify nothing.
+        newArrivalSeenRef.current = new Set(books.map(b => String(b.id)));
+        saveNewArrivalSeen(uid, newArrivalSeenRef.current);
+        return;
+      }
+      newArrivalSeenRef.current = known;
+
+      const fresh = books.filter(b => !known.has(String(b.id)));
+      if (!fresh.length) return;
+      if (notifPrefsRef.current.NEW_ARRIVAL === true) {
+        const now = new Date();
+        deliverExtraStudentNotifs(fresh.map(b => buildNewArrivalNotification(b, now)), isRealtime);
+      }
+      fresh.forEach(b => known.add(String(b.id)));
+      saveNewArrivalSeen(uid, known);
+    } catch (err) {
+      console.error('[StudentDashboard] new arrivals check failed:', err);
+    }
+  }, [deliverExtraStudentNotifs, user?.id]);
+
+  const newArrivalChannelRef = useRef(`student-arrivals-${Math.random().toString(36).slice(2)}`);
+  useEffect(() => {
+    if (!user?.id) return undefined;
+    let ch = null;
+    try {
+      // Own channel (not the one above) so a Realtime hiccup here can never
+      // affect the request-decision / security-alert subscription.
+      const onBookChange = (payload) => {
+        const r = payload?.new;
+        if (!r || r.registration_status !== 'approved') return;
+        const known = newArrivalSeenRef.current;
+        if (known && known.has(String(r.id))) return; // not new — ignore routine book updates
+        fetchStudentNewArrivals(true);
+      };
+      ch = supabase
+        .channel(newArrivalChannelRef.current)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books' }, onBookChange)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'books' }, onBookChange)
+        .subscribe();
+    } catch (err) {
+      console.warn('[StudentDashboard] new-arrival realtime unavailable, polling only:', err);
+    }
+    fetchStudentNewArrivals(false);
+    const id = setInterval(() => fetchStudentNewArrivals(true), NEW_ARRIVAL_POLL_MS);
+    return () => {
+      clearInterval(id);
+      if (ch) supabase.removeChannel(ch);
+    };
+  }, [user?.id, fetchStudentNewArrivals]);
 
   const unreadNotifCount = useMemo(
     () => notifications.reduce((n, item) => (item.read ? n : n + 1), 0),
@@ -5302,13 +5467,11 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const NOTIF_NEW_WINDOW_MS = 3 * 60 * 60 * 1000;
   const visibleNotifications = useMemo(() => {
-    // Strict opt-in: only types currently enabled in Settings →
-    // Notifications are shown. A type absent from prefs (disabled, or a
-    // retired/legacy type with no toggle at all) is excluded by default.
+
     const prefs = notifPrefsRef.current;
     const enabled = notifications.filter(n => prefs[n.type] === true);
     return notifTab === 'unread' ? enabled.filter(n => !n.read) : enabled;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [notifications, notifTab, prefsVersion]);
   const notifNewGroup = useMemo(
     () => visibleNotifications.filter(n => Date.now() - new Date(n.createdAt).getTime() <= NOTIF_NEW_WINDOW_MS),
@@ -5351,10 +5514,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(clearNotifHistory(user?.id));
   };
 
-  // Deletes a single notification (from the "…" menu, in either the bell
-  // dropdown or the "See all" page). Removes it from both the live bell
-  // list and the persisted history, then shows a brief "Notification
-  // deleted" toast with Undo.
+
   const deleteStudentNotification = (n) => {
     if (!n) return;
     setNotifMenuOpenId(null);
@@ -5368,9 +5528,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     notifUndoTimerRef.current = setTimeout(() => setDeletedNotifToast(null), NOTIF_UNDO_MS);
   };
 
-  // Puts a deleted notification back — restores it to the persisted history
-  // and, if its type is still enabled and it isn't already back in state
-  // some other way, re-inserts it into the live bell list too.
+
   const undoDeleteStudentNotification = () => {
     const n = deletedNotifToast;
     if (!n) return;
@@ -5399,7 +5557,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   };
 
   const handleBellClick = () => {
-    if (historyOpen) return; // history page already shows everything on screen
+    if (historyOpen) return; 
     setNotifOpen(o => {
       const next = !o;
       if (next) setNotifPanelPos(computeNotifPanelPos());
@@ -5486,10 +5644,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   };
 
   const renderStudentNotifHistoryPage = () => {
-    // Read fresh, and filter the persisted history down to currently
-    // enabled types before anything else touches it — this is what hides
-    // old entries whose type has since been disabled or retired, not just
-    // what stops new ones from being added.
+
     const currentPrefs = getNotifPrefs(user?.id);
     const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true);
 
@@ -5532,10 +5687,7 @@ export default function StudentDashboard({ user, onSignOut }) {
           </select>
           <div className="sdb-count">{rows.length} record{rows.length !== 1 ? 's' : ''}</div>
           {notifHistory.length > 0 && (
-            // Gated on the raw store so it stays available even when
-            // everything currently in it is hidden above (disabled/retired
-            // types) — it wipes the whole on-device log, not just what's
-            // currently visible.
+
             <button className="lm-btn lm-btn--danger" onClick={clearStudentNotifHistory}>Clear history</button>
           )}
         </div>
@@ -5609,11 +5761,7 @@ export default function StudentDashboard({ user, onSignOut }) {
                             setNotifRowMenuPos(null);
                             return;
                           }
-                          // Position is computed from the button itself, in
-                          // fixed viewport coordinates, because the menu
-                          // below is portaled straight to document.body —
-                          // this row sits inside a scrolling / overflow:
-                          // hidden panel that would otherwise clip it.
+
                           const r = e.currentTarget.getBoundingClientRect();
                           setNotifRowMenuPos({ top: r.bottom + 6, right: window.innerWidth - r.right });
                           setNotifMenuOpenId(n.id);
@@ -5667,24 +5815,25 @@ export default function StudentDashboard({ user, onSignOut }) {
       .catch(e => console.warn('[Profile fetch]',e?.message));
   }, [user?.id]);
 
+  /* Campus name for the Sign Out dialog ("of the <campus> Library System") */
+  useEffect(() => {
+    let cancelled = false;
+    if (!profile?.campus_id) { setCampusName(''); return; }
+    supabase.from('campuses').select('campus_name').eq('id', profile.campus_id).single()
+      .then(({ data }) => { if (!cancelled) setCampusName(data?.campus_name || ''); })
+      .catch(() => { if (!cancelled) setCampusName(''); });
+    return () => { cancelled = true; };
+  }, [profile?.campus_id]);
+
   const navigate = useCallback((tab, category = '', campus = '') => {
     setActiveTab(tab);
     setMobileOpen(false);
-    // NOTE: a stray `setProfileOpen(false);` used to sit here, but that state
-    // was never declared anywhere in this file (the profile chip goes
-    // straight to Settings on this dashboard — no dropdown of its own — see
-    // the comment above the chip below). Calling an undefined setter threw a
-    // ReferenceError right here, which silently aborted the rest of this
-    // function — so `setHistoryOpen(false)` below never ran, and clicking
-    // any navbar link or the profile chip while on the Notification History
-    // page looked completely unresponsive (activeTab quietly changed
-    // underneath, but the page stayed stuck showing Activity Log).
-    setHistoryOpen(false); // leaving notification history when a real nav tab is picked — otherwise the page stays stuck on Activity Log and the tabs look unresponsive
+
+    setHistoryOpen(false); 
     if (tab === 'catalog') { setCatalogCategory(category); setCatalogCampus(campus); }
     if (window.location.hash !== `#${tab}`) window.location.hash = tab;
   }, []);
 
-  // Keep activeTab in sync with the URL hash (back/forward buttons, direct links, manual edits)
   useEffect(() => {
     const onHashChange = () => setActiveTab(getStudentTabFromHash());
     window.addEventListener('hashchange', onHashChange);
@@ -5924,31 +6073,108 @@ export default function StudentDashboard({ user, onSignOut }) {
         </div>
       </div>
 
-      {/* ═══ LOGOUT CONFIRM ═══ */}
+      {/* ═══ LOGOUT CONFIRM — same design as the Librarian portal's Sign Out dialog ═══ */}
       {showLogout && (
-        <div className="sdb-modal-bg" onClick={()=>setShowLogout(false)}>
-          <div className="sdb-modal" style={{ maxWidth:440 }} onClick={e=>e.stopPropagation()}>
-            <div className="sdb-modal-hdr">
-              <div style={{ display:'flex',alignItems:'center',gap:12 }}>
-                <div style={{ width:34,height:34,borderRadius:'50%',background:'rgba(245,228,168,.10)',border:'1.5px solid rgba(245,228,168,.20)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0 }}>
-                  {Ic.logout}
+        <div style={{
+          position:'fixed', inset:0, zIndex:9999,
+          background:'rgba(0,0,0,0.55)',
+          backdropFilter:'blur(6px)',
+          display:'flex', alignItems:'center', justifyContent:'center',
+          padding:16,
+        }} onClick={() => setShowLogout(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            width:460, maxWidth:'100%',
+            background:'var(--cream)',
+            borderRadius:16,
+            overflow:'hidden',
+            boxShadow:'0 24px 60px rgba(0,0,0,0.40)',
+            animation:'lm-fade-in .22s ease both',
+          }}>
+
+            <div style={{
+              background:'linear-gradient(135deg, var(--maroon), var(--maroon-deep))',
+              padding:'22px 28px',
+              display:'flex', alignItems:'center', gap:14,
+            }}>
+              <div style={{
+                width:38, height:38, borderRadius:'50%',
+                background:'rgba(0,0,0,0.22)',
+                border:'1.5px solid rgba(201,168,76,0.35)',
+                display:'flex', alignItems:'center', justifyContent:'center',
+                flexShrink:0,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(201,168,76,0.90)" strokeWidth="2">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                  <polyline points="16 17 21 12 16 7"/>
+                  <line x1="21" y1="12" x2="9" y2="12"/>
+                </svg>
+              </div>
+              <div style={{ textAlign:'left' }}>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:16, fontWeight:700, color:'var(--gold-pale)', letterSpacing:'.06em' }}>
+                  Sign Out
                 </div>
-                <div>
-                  <div className="sdb-modal-title">Sign Out</div>
-                  <div className="sdb-modal-sub">This will end your current session</div>
+                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'rgba(245,228,168,0.55)', marginTop:2 }}>
+                  This will end your current session
                 </div>
               </div>
-              <button className="sdb-modal-close" onClick={()=>setShowLogout(false)}>{Ic.close}</button>
             </div>
-            <div className="sdb-modal-body">
-              <div style={{ background:'rgba(139,0,0,.08)',border:'1px solid rgba(139,0,0,.18)',borderRadius:10,padding:'16px 20px',textAlign:'center',marginBottom:22 }}>
-                <div style={{ fontFamily:'var(--font-display)',fontSize:14,fontWeight:600,color:'var(--text-primary)',letterSpacing:'.03em' }}>Are you sure you want to sign out?</div>
-                <div style={{ fontFamily:'var(--font-sans)',fontSize:12,color:'var(--text-muted)',marginTop:4 }}>of the PSU Library System</div>
+
+            <div style={{ padding:'24px 28px 28px' }}>
+              <div style={{
+                background:'rgba(139,0,0,0.06)',
+                border:'1px solid rgba(139,0,0,0.14)',
+                borderRadius:10,
+                padding:'14px 18px',
+                textAlign:'center',
+                marginBottom:24,
+              }}>
+                <div style={{ fontFamily:'var(--font-display)', fontSize:14, fontWeight:600, color:'var(--text-primary)', letterSpacing:'.03em' }}>
+                  Are you sure you want to sign out?
+                </div>
+                <div style={{ fontFamily:'var(--font-sans)', fontSize:12, color:'var(--text-muted)', marginTop:5 }}>
+                  {campusName ? `of the ${campusName} Library System` : 'of the Library System'}
+                </div>
               </div>
-            </div>
-            <div className="sdb-modal-foot">
-              <button className="sdb-btn sdb-btn-ghost" onClick={()=>setShowLogout(false)}>Cancel</button>
-              <button className="sdb-btn sdb-btn-primary" onClick={onSignOut}>{Ic.logout}&nbsp; Sign Out</button>
+
+              <div style={{ display:'flex', gap:12 }}>
+                <button
+                  onClick={() => setShowLogout(false)}
+                  style={{
+                    flex:1, padding:'12px',
+                    background:'transparent',
+                    border:'1.5px solid rgba(139,0,0,0.22)',
+                    borderRadius:10,
+                    color:'var(--text-secondary)',
+                    fontFamily:'var(--font-display)',
+                    fontSize:13, fontWeight:600,
+                    letterSpacing:'.05em',
+                    cursor:'pointer', transition:'all .18s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background='rgba(139,0,0,0.06)'; e.currentTarget.style.borderColor='rgba(139,0,0,0.35)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='rgba(139,0,0,0.22)'; }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={onSignOut}
+                  style={{
+                    flex:1, padding:'12px',
+                    background:'linear-gradient(135deg,#8B0000,#6B0000)',
+                    border:'none',
+                    borderRadius:10,
+                    color:'#F5E4A8',
+                    fontFamily:'var(--font-display)',
+                    fontSize:13, fontWeight:700,
+                    letterSpacing:'.05em',
+                    cursor:'pointer', transition:'all .18s',
+                    boxShadow:'0 4px 14px rgba(90,0,0,0.35)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background='linear-gradient(135deg,#6B0000,#4A0000)'; e.currentTarget.style.boxShadow='0 6px 20px rgba(80,0,0,.50)'; e.currentTarget.style.transform='translateY(-1px)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='linear-gradient(135deg,#8B0000,#6B0000)'; e.currentTarget.style.boxShadow='0 4px 14px rgba(90,0,0,0.35)'; e.currentTarget.style.transform='none'; }}
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
           </div>
         </div>

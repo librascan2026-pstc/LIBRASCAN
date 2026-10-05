@@ -407,25 +407,15 @@ function Step2({ email, onNext, onGoLogin }) {
       <StepIndicator current={2} />
       <Divider />
 
-      <div style={{
-        background: C.goldLight, border: `1px solid ${C.goldBorder}`,
-        borderRadius: 10, padding: '10px 14px',
-        marginBottom: 14, fontFamily: FONT_BODY,
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-      }}>
-        <div style={{
-          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-          background: 'rgba(201,168,76,0.20)', border: `1.5px solid ${C.goldBorder}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1,
-        }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke={C.inkMid} strokeWidth="2" strokeLinecap="round">
-            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-            <polyline points="22,6 12,13 2,6"/>
-          </svg>
+      {/* Plain text (no box / border / icon) */}
+      <div style={{ textAlign: 'center', marginBottom: 18, fontFamily: FONT_BODY }}>
+        <div style={{ fontSize: 13.5, color: C.inkMid, lineHeight: 1.6 }}>
+          A <strong style={{ color: C.maroon }}>6-digit code</strong> was sent to
         </div>
-        <div style={{ fontSize: 12.5, color: C.inkMid, lineHeight: 1.7 }}>
-          A <strong style={{ color: C.maroon }}>6-digit code</strong> was sent to{' '}
-          <strong style={{ color: C.inkDark }}>{email}</strong>.{' '}
+        <div style={{ fontSize: 15.5, fontWeight: 700, color: C.inkDark, lineHeight: 1.5, margin: '2px 0', wordBreak: 'break-all' }}>
+          {email}<span style={{ fontWeight: 400 }}>.</span>
+        </div>
+        <div style={{ fontSize: 12.5, fontStyle: 'italic', color: C.inkLight, lineHeight: 1.6 }}>
           Check your inbox and spam folder.
         </div>
       </div>
@@ -486,29 +476,19 @@ function Step2({ email, onNext, onGoLogin }) {
         </AnimatePresence>
       </div>
 
-      <div style={{
-        background: C.blueLight, border: `1px solid ${C.blueBorder}`,
-        borderRadius: 10, padding: '10px 14px',
-        fontSize: 12, fontFamily: FONT_BODY, color: C.blue,
-        marginBottom: 12, lineHeight: 1.7,
-        display: 'flex', alignItems: 'flex-start', gap: 10,
-      }}>
-        <div style={{
-          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-          background: 'rgba(26,82,118,0.10)', border: `1.5px solid ${C.blueBorder}`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', marginTop: 1,
-        }}>
-          <InfoIcon size={13} color={C.blue} />
+      {/* Plain text (no box / border / icon) */}
+      <div style={{ textAlign: 'center', marginBottom: 14, fontFamily: FONT_BODY, fontSize: 12.5, color: C.inkLight, lineHeight: 1.7 }}>
+        <div>
+          <strong style={{ color: C.inkMid }}>Code expires in 10 minutes.</strong>
         </div>
         <div>
-          <strong>Code expires in 10 minutes.</strong>{' '}
           Didn't receive it? Check spam or{' '}
           <button
             type="button"
             onClick={handleResend}
             disabled={resending || resendIn > 0}
             style={{
-              background: 'none', border: 'none', color: C.blue,
+              background: 'none', border: 'none', color: C.maroon,
               cursor: (resending || resendIn > 0) ? 'not-allowed' : 'pointer',
               opacity: resendIn > 0 ? 0.6 : 1,
               fontWeight: 700, padding: 0, fontSize: 'inherit',

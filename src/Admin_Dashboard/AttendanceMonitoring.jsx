@@ -28,6 +28,71 @@ function parseQR(raw) {
   return { id_no, full_name, program };
 }
 
+// Local (not UTC) calendar-day string for any ISO timestamp, used by the
+// date picker so "Oct 1" matches what the table shows in the PH timezone.
+const localDay = (v) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+// "2026-10-01" -> "Oct 1, 2026" (parsed as local, not UTC)
+const prettyDay = (s) => {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Calendar-icon date filter. Click the icon to open the calendar; picking a
+// day filters the table to that day only (Download / Print follow the table).
+function DateFilterButton({ value, onChange, onFocus, onBlur }) {
+  const inputRef = useRef(null);
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    onFocus?.();
+    try {
+      if (typeof el.showPicker === 'function') { el.showPicker(); return; }
+    } catch { /* fall through to focus/click */ }
+    el.focus();
+    el.click();
+  };
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+      <button
+        type="button" onClick={openPicker}
+        title={value ? `Showing ${prettyDay(value)} — click to change` : 'Filter by date'}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          height: 35, padding: '0 12px', borderRadius: 9, cursor: 'pointer',
+          border: value ? '1.5px solid #C9A84C' : '1.5px solid rgba(139,0,0,0.18)',
+          background: 'var(--cream-light)',
+          boxShadow: value ? '0 0 0 2px rgba(201,168,76,0.35)' : 'none',
+          fontSize: 12.5, fontWeight: 600, color: '#8B0000', fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        {value && <span>{prettyDay(value)}</span>}
+      </button>
+      {value && (
+        <button
+          type="button" onClick={() => { onChange(''); onBlur?.(); }} title="Clear date"
+          style={{
+            height: 35, width: 30, borderRadius: 9, cursor: 'pointer',
+            border: '1.5px solid rgba(139,0,0,0.18)', background: 'var(--cream-light)',
+            fontSize: 15, fontWeight: 700, color: '#8B0000', fontFamily: 'var(--font-sans)', lineHeight: 1,
+          }}
+        >×</button>
+      )}
+      <input
+        ref={inputRef} type="date" value={value} tabIndex={-1} aria-hidden="true"
+        onChange={e => { onChange(e.target.value); onBlur?.(); }}
+        onBlur={() => onBlur?.()}
+        style={{ position: 'absolute', left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', border: 0, padding: 0 }}
+      />
+    </div>
+  );
+}
+
 const MAR  = '#8B0000';
 const MAR2 = '#6B0000';
 const G    = '#C9A84C';
@@ -587,6 +652,7 @@ function VisitorHistoryTable({ onFocusChange }) {
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState('');
   const [filter,   setFilter]   = useState('all');
+  const [dateFilter, setDateFilter] = useState('');
   const [hovRow,   setHovRow]   = useState(null);
   const [delHov,   setDelHov]   = useState(null);
   const [delConfirm, setDelConfirm] = useState(null);
@@ -637,13 +703,16 @@ function VisitorHistoryTable({ onFocusChange }) {
     const q = search.toLowerCase();
     const matchQ = !q || r.full_name?.toLowerCase().includes(q) || r.id_no?.toLowerCase().includes(q) || r.program?.toLowerCase().includes(q);
     const matchF = filter === 'all' || r.status === filter;
-    return matchQ && matchF;
+    const matchD = !dateFilter || localDay(r.time_in) === dateFilter;
+    return matchQ && matchF && matchD;
   });
 
   // Export / Print — Visitor History.
   // Both always operate on `filtered`, which already honors the status
   // dropdown: "All Status" includes time-in + time-out, "Time In" and
   // "Time Out" each limit to their own record type.
+  // The date picker is part of `filtered`, so Download / Print only include
+  // the picked day when one is selected.
   const vhExportRows = useCallback(() => filtered.map(r => ({
     'Student ID': r.id_no || '',
     'Full Name':  r.full_name || '',
@@ -655,23 +724,23 @@ function VisitorHistoryTable({ onFocusChange }) {
 
   const exportVhExcel = useCallback(() => {
     const rows = vhExportRows();
-    if (!rows.length) return;
+    if (!rows.length) { if (dateFilter) window.alert(`No visitor records for ${prettyDay(dateFilter)}.`); return; }
     const cols = Object.keys(rows[0]);
     const esc = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
     const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
     const label = filter === 'all' ? 'all' : filter;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
-    a.download = `visitor-history-${label}-${today()}.csv`;
+    a.download = `visitor-history-${label}-${dateFilter || today()}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
-  }, [vhExportRows, filter]);
+  }, [vhExportRows, filter, dateFilter]);
 
   const printVhHistory = useCallback(() => {
     const rows = vhExportRows();
-    if (!rows.length) return;
+    if (!rows.length) { if (dateFilter) window.alert(`No visitor records for ${prettyDay(dateFilter)}.`); return; }
     const cols = Object.keys(rows[0]);
-    const label = filter === 'all' ? 'All Status' : (filter === 'time-in' ? 'Time In' : 'Time Out');
+    const label = (filter === 'all' ? 'All Status' : (filter === 'time-in' ? 'Time In' : 'Time Out')) + (dateFilter ? ` · ${prettyDay(dateFilter)}` : '');
     const win = window.open('', '_blank');
     if (!win) return;
     const thead = cols.map(c => `<th>${c}</th>`).join('');
@@ -680,7 +749,7 @@ function VisitorHistoryTable({ onFocusChange }) {
     win.document.close();
     win.focus();
     win.print();
-  }, [vhExportRows, filter]);
+  }, [vhExportRows, filter, dateFilter]);
 
   return (
     <>
@@ -728,6 +797,8 @@ function VisitorHistoryTable({ onFocusChange }) {
               <option value="time-out">Time Out</option>
             </select>
 
+            <DateFilterButton value={dateFilter} onChange={setDateFilter} onFocus={() => onFocusChange?.(false)} onBlur={() => onFocusChange?.(true)} />
+
             <button
               onClick={exportVhExcel}
               title="Export current view to Excel (CSV)"
@@ -762,7 +833,7 @@ function VisitorHistoryTable({ onFocusChange }) {
             <div style={{ fontSize: 36, marginBottom: 10 }}>📋</div>
             <div style={{ fontFamily: "var(--font-display)", fontSize: 14, color: 'var(--text-primary)', marginBottom: 6 }}>No visitor records found</div>
             <div style={{ fontSize: 12.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>
-              {search ? 'Try a different search term.' : 'Attendance logs will appear here.'}
+              {search ? 'Try a different search term.' : dateFilter ? `No attendance logs on ${prettyDay(dateFilter)}.` : 'Attendance logs will appear here.'}
             </div>
           </div>
         ) : (
