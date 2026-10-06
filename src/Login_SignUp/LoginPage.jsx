@@ -85,6 +85,41 @@ function PrimaryButton({ loading, children, onClick, disabled, style = {} }) {
   );
 }
 
+function GoogleButton({ loading, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <motion.button
+      type="button"
+      onClick={onClick}
+      disabled={loading}
+      whileTap={!loading ? { scale: 0.97 } : {}}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        width: '100%', padding: '10px 0', marginTop: 2,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+        background: '#FFFFFF',
+        border: `1.5px solid ${hov ? 'rgba(139,0,0,0.30)' : 'rgba(139,0,0,0.16)'}`,
+        borderRadius: 22,
+        color: '#3c2a1e',
+        fontFamily: FONT_SANS, fontSize: 12, fontWeight: 700,
+        letterSpacing: '0.04em',
+        cursor: loading ? 'not-allowed' : 'pointer',
+        opacity: loading ? 0.6 : 1,
+        transition: 'all 0.2s',
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 48 48">
+        <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.8 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 2.9l6-6C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.2-2.7-.4-3.5z"/>
+        <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3.1 0 5.8 1.1 8 2.9l6-6C34.6 5.1 29.6 3 24 3c-7.5 0-14 4.2-17.7 10.4z"/>
+        <path fill="#4CAF50" d="M24 45c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.4 36.2 26.8 37 24 37c-5.2 0-9.6-3.5-11.2-8.3l-6.6 5.1C9.9 40.6 16.4 45 24 45z"/>
+        <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.9 2.6-2.7 4.8-5 6.3l6.3 5.3C39.5 37.1 43 31.3 43 24c0-1.4-.2-2.7-.4-3.5z"/>
+      </svg>
+      {loading ? 'Redirecting…' : 'Continue with Google'}
+    </motion.button>
+  );
+}
+
 const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 function LinkBtn({ onClick, children, style = {} }) {
@@ -293,13 +328,14 @@ function RememberMe({ checked, onChange }) {
 }
 
 export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGoLanding }) {
-  const { signIn, commitUser, signOut } = useAuth();
+  const { signIn, signInWithGoogle, commitUser, signOut } = useAuth();
 
-  const [screen,      setScreen]      = useState('login');
-  const [email,       setEmail]       = useState('');
-  const [password,    setPassword]    = useState('');
-  const [rememberMe,  setRememberMe]  = useState(false);
-  const [loading,     setLoading]     = useState(false);
+  const [screen,        setScreen]        = useState('login');
+  const [email,         setEmail]         = useState('');
+  const [password,      setPassword]      = useState('');
+  const [rememberMe,    setRememberMe]    = useState(false);
+  const [loading,       setLoading]       = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error,       setError]       = useState('');
   const [unverified,  setUnverified]  = useState(null);   // email awaiting confirmation
   const [resendNote,  setResendNote]  = useState('');
@@ -578,6 +614,20 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setError('');
+    setGoogleLoading(true);
+    const { error: oauthErr } = await signInWithGoogle();
+    if (oauthErr) {
+      // Only reached if Supabase refused to even START the redirect (e.g.
+      // the Google provider isn't enabled). On success the browser is
+      // already navigating away to Google's consent screen, so there's
+      // nothing further to do in this component.
+      setGoogleLoading(false);
+      setError(oauthErr.message || 'Could not start Google sign-in. Please try again.');
+    }
+  };
+
   const handleSubmit = async (ev) => {
     ev?.preventDefault();
     clearTimeout(autoTimer.current);
@@ -813,6 +863,22 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
             </AnimatePresence>
 
             <PrimaryButton loading={loading}>Sign In</PrimaryButton>
+
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 12,
+              margin: '16px 0',
+            }}>
+              <div style={{ flex: 1, height: 1, background: 'rgba(139,0,0,0.14)' }} />
+              <span style={{
+                fontSize: 11.5, fontFamily: FONT_BODY, color: '#9a7a5a',
+                letterSpacing: 0.4, textTransform: 'uppercase',
+              }}>
+                or
+              </span>
+              <div style={{ flex: 1, height: 1, background: 'rgba(139,0,0,0.14)' }} />
+            </div>
+
+            <GoogleButton loading={googleLoading} onClick={handleGoogleSignIn} />
 
             <p style={{
               textAlign: 'center', marginTop: 16,

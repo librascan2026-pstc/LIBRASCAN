@@ -145,6 +145,28 @@ export function AuthProvider({ children }) {
     return { data, error };
   };
 
+  // Redirects the whole page to Google's consent screen, then back to
+  // redirectTo. Supabase reads the resulting session out of the URL on
+  // the next page load (detectSessionInUrl is on by default), which is
+  // why this doesn't return a session directly the way signIn() does —
+  // the getSession() call in the effect above picks it up after redirect,
+  // same as any other returning-session case.
+  //
+  // NOTE: this intentionally does NOT go through the 2FA / device-trust /
+  // "Yes, it's me" email-confirmation flow that password login uses —
+  // Google's own sign-in is a separate strong identity check. If you want
+  // Google sign-ins to also require that flow for untrusted devices,
+  // that needs to be wired in separately (ask me if you want this).
+  const signInWithGoogle = async () => {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/login`,
+      },
+    });
+    return { data, error };
+  };
+
   const commitUser = async (sessionUser) => {
     // This is the one place a login is actually considered finished — no
     // 2FA required, OTP verified, or the "Yes, it's me" email confirmed.
@@ -211,7 +233,7 @@ export function AuthProvider({ children }) {
   }, [user?.id]);
 
   return (
-    <AuthContext.Provider value={{ user, role, profile, loading, roleResolving, signOut, signIn, commitUser, refreshProfile }}>
+    <AuthContext.Provider value={{ user, role, profile, loading, roleResolving, signOut, signIn, signInWithGoogle, commitUser, refreshProfile }}>
       {children}
     </AuthContext.Provider>
   );
