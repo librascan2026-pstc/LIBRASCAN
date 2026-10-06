@@ -7,9 +7,12 @@ import AuthCaptcha from './AuthCaptcha';
 import {
   checkMfaRequired, sendOtp, verifyOtp, forgetThisDevice,
   sendLoginConfirmation, getLoginConfirmationStatus, markMfaPending,
-  onLoginConfirmationPing, recordSession,
+  onLoginConfirmationPing, recordSession, clearMfaPending,
 } from '../utils/mfaClient';
 import { recordUntrustedLoginAlert } from '../utils/securityAlerts';
+import GoogleSignInButton from './GoogleSignInButton';
+import GoogleProfileSetup from './GoogleProfileSetup';
+import { checkGoogleAccount } from '../utils/googleAuthClient';
 
 const FONT_DISPLAY = "'Playfair Display', Georgia, serif";
 const FONT_BODY    = "'Crimson Pro', Georgia, serif";
@@ -81,41 +84,6 @@ function PrimaryButton({ loading, children, onClick, disabled, style = {} }) {
       }}
     >
       {loading ? 'Signing in…' : children}
-    </motion.button>
-  );
-}
-
-function GoogleButton({ loading, onClick }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <motion.button
-      type="button"
-      onClick={onClick}
-      disabled={loading}
-      whileTap={!loading ? { scale: 0.97 } : {}}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      style={{
-        width: '100%', padding: '10px 0', marginTop: 2,
-        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-        background: '#FFFFFF',
-        border: `1.5px solid ${hov ? 'rgba(139,0,0,0.30)' : 'rgba(139,0,0,0.16)'}`,
-        borderRadius: 22,
-        color: '#3c2a1e',
-        fontFamily: FONT_SANS, fontSize: 12, fontWeight: 700,
-        letterSpacing: '0.04em',
-        cursor: loading ? 'not-allowed' : 'pointer',
-        opacity: loading ? 0.6 : 1,
-        transition: 'all 0.2s',
-      }}
-    >
-      <svg width="16" height="16" viewBox="0 0 48 48">
-        <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.8 32.9 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.1 8 2.9l6-6C34.6 5.1 29.6 3 24 3 12.4 3 3 12.4 3 24s9.4 21 21 21 21-9.4 21-21c0-1.4-.2-2.7-.4-3.5z"/>
-        <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 16 19 13 24 13c3.1 0 5.8 1.1 8 2.9l6-6C34.6 5.1 29.6 3 24 3c-7.5 0-14 4.2-17.7 10.4z"/>
-        <path fill="#4CAF50" d="M24 45c5.2 0 10-2 13.6-5.2l-6.3-5.3C29.4 36.2 26.8 37 24 37c-5.2 0-9.6-3.5-11.2-8.3l-6.6 5.1C9.9 40.6 16.4 45 24 45z"/>
-        <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.9 2.6-2.7 4.8-5 6.3l6.3 5.3C39.5 37.1 43 31.3 43 24c0-1.4-.2-2.7-.4-3.5z"/>
-      </svg>
-      {loading ? 'Redirecting…' : 'Continue with Google'}
     </motion.button>
   );
 }
@@ -328,7 +296,7 @@ function RememberMe({ checked, onChange }) {
 }
 
 export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGoLanding }) {
-  const { signIn, signInWithGoogle, commitUser, signOut } = useAuth();
+  const { signIn, signInWithGoogleIdToken, commitUser, signOut } = useAuth();
 
   const [screen,        setScreen]        = useState('login');
   const [email,         setEmail]         = useState('');
@@ -336,6 +304,7 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
   const [rememberMe,    setRememberMe]    = useState(false);
   const [loading,       setLoading]       = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [googleSetup,   setGoogleSetup]   = useState(null); // first-time Google profile completion
   const [error,       setError]       = useState('');
   const [unverified,  setUnverified]  = useState(null);   // email awaiting confirmation
   const [resendNote,  setResendNote]  = useState('');
@@ -614,17 +583,50 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  // Google sign-in. The browser only gets a session from Supabase; the SERVER
+  // (/api/auth/google/status) then re-verifies the token, enforces the
+  // @pampangastateu.edu.ph domain and tells us whether this is an existing
+  // account (-> straight to its role-based portal) or a first login
+  // (-> profile completion form). Until that check passes the session is held
+  // "pending" so AuthContext never treats this tab as signed in.
+  const abortGoogle = async (userId, message) => {
+    if (userId) clearMfaPending(userId);
+    await signOut();
+    setGoogleSetup(null);
+    setScreen('login');
+    setError(message);
+  };
+
+  const handleGoogleCredential = async (credential, nonce) => {
     setError('');
     setGoogleLoading(true);
-    const { error: oauthErr } = await signInWithGoogle();
-    if (oauthErr) {
-      // Only reached if Supabase refused to even START the redirect (e.g.
-      // the Google provider isn't enabled). On success the browser is
-      // already navigating away to Google's consent screen, so there's
-      // nothing further to do in this component.
+    const { data, error: idErr } = await signInWithGoogleIdToken(credential, nonce);
+    if (idErr || !data?.user || !data?.session) {
       setGoogleLoading(false);
-      setError(oauthErr.message || 'Could not start Google sign-in. Please try again.');
+      setError(
+        /database error|not allowed|domain/i.test(idErr?.message || '')
+          ? 'Only @pampangastateu.edu.ph Google accounts can sign in.'
+          : (idErr?.message || 'Google sign-in failed. Please try again.')
+      );
+      return;
+    }
+
+    const gUser = data.user;
+    const accessToken = data.session.access_token;
+    markMfaPending(gUser.id);
+
+    try {
+      const result = await checkGoogleAccount(accessToken);
+      if (result.status === 'existing') {
+        await finishLogin(gUser);              // role comes from profiles.role
+      } else {
+        setGoogleSetup({ user: gUser, accessToken, accountType: result.accountType, prefill: result.prefill });
+        setScreen('google-profile');
+      }
+    } catch (err) {
+      await abortGoogle(gUser.id, err.message);
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -758,7 +760,8 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
     return () => window.removeEventListener('keydown', handler);
   }, [screen, otpValue, otpBusy]);
 
-  const title    = screen === 'captcha' ? '' // rendered left-aligned inside the pane below
+  const title    = screen === 'google-profile' ? 'Complete Your Profile'
+                 : screen === 'captcha' ? '' // rendered left-aligned inside the pane below
                  : screen === 'otp'     ? '' // rendered left-aligned inside the pane below
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'Sign-In Blocked'
@@ -770,7 +773,8 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
                    : ''
                    )
                  : 'Welcome Back';
-  const subtitle = screen === 'captcha' ? '' // same — description lives inside the pane
+  const subtitle = screen === 'google-profile' ? 'One-time setup for your Google account'
+                 : screen === 'captcha' ? '' // same — description lives inside the pane
                  : screen === 'otp'     ? '' // same — description lives inside the pane
                  : screen === 'confirm' ? (
                      confirmStatus === 'denied'  ? 'We stopped that sign-in'
@@ -878,7 +882,12 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
               <div style={{ flex: 1, height: 1, background: 'rgba(139,0,0,0.14)' }} />
             </div>
 
-            <GoogleButton loading={googleLoading} onClick={handleGoogleSignIn} />
+            <GoogleSignInButton
+              onCredential={handleGoogleCredential}
+              onError={setError}
+              disabled={googleLoading}
+              loading={googleLoading}
+            />
 
             <p style={{
               textAlign: 'center', marginTop: 16,
@@ -1279,6 +1288,17 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
               </>
             )}
           </motion.div>
+        )}
+
+        {screen === 'google-profile' && googleSetup && (
+          <GoogleProfileSetup
+            key="google-profile"
+            accessToken={googleSetup.accessToken}
+            accountType={googleSetup.accountType}
+            prefill={googleSetup.prefill}
+            onComplete={() => finishLogin(googleSetup.user)}
+            onCancel={() => abortGoogle(googleSetup.user.id, '')}
+          />
         )}
 
       </AnimatePresence>

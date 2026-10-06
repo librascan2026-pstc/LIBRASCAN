@@ -8,6 +8,7 @@ import cors from 'cors';
 import { supabaseAdmin } from './lib/supabaseAdmin.js';
 import { sendOtpEmail, sendLoginConfirmationEmail, sendVerificationEmail, sendPasswordResetEmail } from './lib/mailer.js';
 import { locateIp, describeDevice, formatLocation } from './lib/geo.js';
+import googleAuthRouter from './routes/googleAuth.js';
 import {
   generateOtp, hashOtp, generateDeviceToken, hashDeviceToken, safeEqual,
   // Same random-token + HMAC/SHA-256 helpers, reused for the email
@@ -948,6 +949,9 @@ app.get('/verify-email', async (req, res) => {
 
   res.send(verifyPage({ tone: 'ok', title: 'Email confirmed!', body: 'Thanks \u2014 your LibraScan account is now active. You can log in.', href: loginUrl, label: 'Go to login' }));
 });
+
+// Google sign-in: server-side domain check, first-login detection, profile setup.
+app.use('/api/auth/google', googleAuthRouter);
 
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
