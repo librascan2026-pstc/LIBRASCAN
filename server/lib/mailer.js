@@ -305,3 +305,75 @@ export async function sendPasswordResetEmail({ to, name, code }) {
     text: `Your LibraScan password reset code is ${code}. It expires in 10 minutes. If you didn't ask for this, ignore this email.`,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Due-date reminder / due-today / overdue notice for a borrowed book.
+// stage: 'reminder' (3 days or fewer left) | 'due_today' | 'overdue'
+// Same look as the other LibraScan emails; wording matches the in-app
+// notifications in StudentDashboard.jsx.
+// ---------------------------------------------------------------------------
+export async function sendDueDateReminderEmail({ to, name, bookTitle, dueDateLabel, daysLeft, stage }) {
+  const logoBase = (process.env.FRONTEND_ORIGIN || process.env.FRONTEND_URL || '').split(',')[0].trim().replace(/\/$/, '');
+  const logoUrl  = process.env.EMAIL_LOGO_URL || (logoBase ? `${logoBase}/LibraryLogo.png` : '');
+  const glyph = (c) => `<span style="font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">${c}&#xFE0E;</span>`;
+
+  const title = String(bookTitle || 'A borrowed book').replace(/[\r\n]+/g, ' ').trim();
+  const when  = daysLeft === 0 ? 'today' : daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
+
+  let heading, intro, icon, iconBg, badge, subject, preheader, text;
+  if (stage === 'overdue') {
+    heading   = 'Your book is overdue';
+    intro     = `&ldquo;${escHtml(title)}&rdquo; was due on ${escHtml(dueDateLabel)} and is now overdue. Please return it to the library as soon as possible.`;
+    icon      = '&#9888;'; iconBg = '#FBEAEA'; badge = 'Overdue since ' + escHtml(dueDateLabel);
+    subject   = `Overdue: "${title}" \u2014 LibraScan`;
+    preheader = `"${title}" was due on ${dueDateLabel} and is now overdue.`;
+    text      = `Hi ${name || 'there'}, "${title}" was due on ${dueDateLabel} and is now overdue. Please return it to the library as soon as possible.`;
+  } else if (stage === 'due_today') {
+    heading   = 'Your book is due today';
+    intro     = `&ldquo;${escHtml(title)}&rdquo; is due today (${escHtml(dueDateLabel)}). Please return it to the library on time.`;
+    icon      = '&#128339;'; iconBg = '#FFF0D6'; badge = 'Due today &middot; ' + escHtml(dueDateLabel);
+    subject   = `Due today: "${title}" \u2014 LibraScan`;
+    preheader = `"${title}" is due today (${dueDateLabel}).`;
+    text      = `Hi ${name || 'there'}, "${title}" is due today (${dueDateLabel}). Please return it to the library on time.`;
+  } else {
+    heading   = daysLeft === 1 ? 'Your book is due tomorrow' : `Your book is due in ${daysLeft} days`;
+    intro     = `&ldquo;${escHtml(title)}&rdquo; is due ${when} (${escHtml(dueDateLabel)}). Please return it to the library on time.`;
+    icon      = '&#128214;'; iconBg = '#F3E1DC'; badge = 'Due ' + escHtml(dueDateLabel);
+    subject   = `Due ${when}: "${title}" \u2014 LibraScan`;
+    preheader = `"${title}" is due ${when} (${dueDateLabel}).`;
+    text      = `Hi ${name || 'there'}, "${title}" is due ${when} (${dueDateLabel}). Please return it to the library on time.`;
+  }
+
+  const html = `
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escHtml(preheader)}</div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="480" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="width:100%;max-width:480px;background:#FFFFFF;border:1px solid #EADFC8;border-radius:26px;overflow:hidden;">
+        <tr><td bgcolor="#6E1620" style="background:#6E1620;padding:26px 30px;border-bottom:2px solid #C9A84C;">
+          ${logoUrl ? `<img src="${logoUrl}" height="32" alt="" style="height:32px;width:auto;border:0;vertical-align:middle;" />` : ''}
+          <span style="color:#C9A84C;font-size:24px;vertical-align:middle;padding:0 10px;">|</span>
+          <span style="font:600 15px Georgia,serif;letter-spacing:0.24em;color:#F3E6CF;vertical-align:middle;">LIBRASCAN</span>
+        </td></tr>
+        <tr><td align="center" style="padding:28px 30px 0;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr><td width="80" height="80" align="center" bgcolor="${iconBg}" style="width:80px;height:80px;background:${iconBg};border-radius:40px;font-size:32px;line-height:80px;font-family:'Segoe UI Symbol',Arial,sans-serif;color:#7A1A24;">${icon}&#xFE0E;</td></tr></table>
+          <h1 style="margin:16px 0 10px;font:600 26px Georgia,serif;color:#4A1A1E;">${heading}</h1>
+          <p style="margin:0;font:400 15px/1.6 Arial,sans-serif;color:#6B6460;">Hi ${escHtml(name) || 'there'}, ${intro}</p>
+        </td></tr>
+        <tr><td style="padding:22px 30px 0;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #7A1A24;border-radius:16px;">
+            <tr><td align="center" style="padding:18px 16px 4px;font:700 20px Georgia,serif;color:#7A1A24;">${escHtml(title)}</td></tr>
+            <tr><td align="center" style="padding:0 16px 18px;font:400 13px Arial,sans-serif;color:#7A726C;">${glyph('&#128339;')}&nbsp; ${badge}</td></tr>
+          </table>
+        </td></tr>
+        <tr><td style="padding:22px 30px 28px;">
+          <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+            <td valign="top" width="30">${glyph('&#128214;')}</td>
+            <td style="font:400 12.5px/1.6 Arial,sans-serif;color:#8C837C;">Already returned this book? You can safely ignore this email. You can also check your borrowed books anytime in your LibraScan dashboard.</td>
+          </tr></table>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+
+  await sendViaBrevo({ to, subject, html, text });
+}

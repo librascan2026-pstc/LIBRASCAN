@@ -2515,7 +2515,7 @@ export default function BookManagement({ initialTab }) {
                     </div>
 
                     
-                    <div style={{ flex: '1 1 160px', minWidth: 0 }}>
+                    <div style={{ flex: '1 1 160px', minWidth: 0, textAlign: 'left' }}>
                       <div style={{
                         fontFamily: "'Cinzel', serif", fontSize: 13.5, fontWeight: 700,
                         color: 'var(--maroon-deep)', letterSpacing: '0.03em',
@@ -2534,7 +2534,7 @@ export default function BookManagement({ initialTab }) {
                     <div style={{ width: 1, height: 36, background: 'rgba(139,0,0,0.12)', flexShrink: 0, display: 'none' }} className="pr-divider"/>
 
                    
-                    <div style={{ flex: '2 1 200px', minWidth: 0 }}>
+                    <div style={{ flex: '2 1 200px', minWidth: 0, textAlign: 'left' }}>
                       <div style={{
                         fontSize: 12, fontWeight: 700, color: 'var(--text-primary)',
                         fontFamily: 'var(--font-sans)',

@@ -2481,7 +2481,7 @@ function buildStudentNotification({ id, type, title, message, createdAt, extra =
 // `due_date: null`), so a book's due date = borrowed_at + this many days.
 // Change this if your library's loan period is different.
 const STUDENT_LOAN_PERIOD_DAYS = 7;
-const DUE_REMINDER_DAYS_BEFORE = 2;          // remind when this many days (or fewer) remain
+const DUE_REMINDER_DAYS_BEFORE = 3;          // remind when this many days (or fewer) remain
 const DUE_REMINDER_POLL_MS     = 5 * 60 * 1000;
 const NEW_ARRIVAL_POLL_MS      = 30 * 1000;
 const NEW_ARRIVAL_FETCH_LIMIT  = 300;
@@ -2502,7 +2502,7 @@ function getStudentDueInfo(borrowedAtIso, now = new Date()) {
 
 /**
  * Notifications per active (unreturned) borrowing:
- *  - 2 days / 1 day / due today  → "Due Date Reminder" (one distinct notification per stage,
+ *  - 3 days / 2 days / 1 day / due today  → "Due Date Reminder" (one distinct notification per stage,
  *    so the wording is always correct for the day it was raised)
  *  - past the due date           → one "Overdue Notice" (no day count, so it never goes stale)
  * All use the DUE_DATE_REMINDER type, so the Settings toggle controls them together.
@@ -5359,7 +5359,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     setNotifHistory(addNotifHistory(uid, allowed));
   }, [playStudentNotifSound, user?.id]);
 
-  // Due Date Reminders — a book 0–2 days from its due date. Skips the query
+  // Due Date Reminders — a book 0–3 days from its due date. Skips the query
   // entirely while the preference is off.
   const isFirstDueReminderRun = useRef(true);
   const dueReminderRunRef = useRef(null);

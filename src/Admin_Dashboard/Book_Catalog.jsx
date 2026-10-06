@@ -1452,6 +1452,7 @@ export default function Book_Catalog() {
   const [generatingMissing, setGeneratingMissing] = useState(false);
   const [copyActionId, setCopyActionId]           = useState(null); // copy_id currently being fixed/deleted
   const [qrPreviewCopy, setQrPreviewCopy]         = useState(null);
+  const [invSort, setInvSort]                   = useState({ key: 'title', dir: 'asc' }); // Inventory tab sorting
 
   const [toast, setToast]   = useState({ msg: '', type: 'success' });
   const toastRef = useRef();
@@ -1784,6 +1785,23 @@ export default function Book_Catalog() {
     return matchSearch && matchGenre && matchStatus && matchShelf;
   });
 
+  // Inventory sorting — applied on top of the filters above. The default
+  // (Book Title A–Z, then copy number) is the same order the list had before.
+  const invSorted = [...invFiltered].sort((a, b) => {
+    const getVal = INV_SORT_FIELDS[invSort.key] || INV_SORT_FIELDS.title;
+    const dir = invSort.dir === 'desc' ? -1 : 1;
+    const cmp = (x, y) => (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y)));
+    const primary = cmp(getVal(a), getVal(b)) * dir;
+    if (primary) return primary;
+    // Ties: keep copies of the same book together, in copy order.
+    return cmp(a.book?.title || '', b.book?.title || '') || (a.copy_number - b.copy_number);
+  });
+
+  const handleInvSort = (key) =>
+    setInvSort(prev => (prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: 'asc' }));
+
   const actionBtn = (variant) => {
     const variants = {
       view:   { color: '#5a7eb5', bg: 'rgba(90,126,181,0.10)', border: 'rgba(90,126,181,0.22)', hover: 'rgba(90,126,181,0.18)' },
@@ -1924,6 +1942,25 @@ export default function Book_Catalog() {
             </select>
           </>
         )}
+        {activeTab === 'inventory' && (
+          <select
+            style={selectStyle}
+            value={`${invSort.key}:${invSort.dir}`}
+            onChange={e => { const [key, dir] = e.target.value.split(':'); setInvSort({ key, dir }); }}
+            aria-label="Sort inventory"
+          >
+            <option value="title:asc">Sort: Book Title (A–Z)</option>
+            <option value="title:desc">Sort: Book Title (Z–A)</option>
+            <option value="copy:asc">Sort: Copy No. (Low–High)</option>
+            <option value="copy:desc">Sort: Copy No. (High–Low)</option>
+            <option value="copyid:asc">Sort: Copy ID (A–Z)</option>
+            <option value="copyid:desc">Sort: Copy ID (Z–A)</option>
+            <option value="shelf:asc">Sort: Shelf Location (A–Z)</option>
+            <option value="shelf:desc">Sort: Shelf Location (Z–A)</option>
+            <option value="status:asc">Sort: Status (Available first)</option>
+            <option value="status:desc">Sort: Status (Borrowed first)</option>
+          </select>
+        )}
         <span style={{
           marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',
           fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
@@ -1969,7 +2006,9 @@ export default function Book_Catalog() {
       {activeTab === 'inventory' ? (
         <InventoryPanel
           loading={copiesLoading}
-          rows={invFiltered}
+          rows={invSorted}
+          sort={invSort}
+          onSort={handleInvSort}
           hasAny={copies.length > 0}
           search={search}
           shortfalls={copiesToGenerate}
@@ -2328,9 +2367,18 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
 // remove a single copy without touching the rest of that book's stock.
 // ============================================================================
 
+// Column -> value used by the Inventory sorting (toolbar dropdown + clickable headers).
+const INV_SORT_FIELDS = {
+  title:  c => c.book?.title || '',
+  copy:   c => c.copy_number ?? 0,
+  copyid: c => c.copy_id || '',
+  shelf:  c => c.book?.shelf_location || '',
+  status: c => c.status || '',
+};
+
 function InventoryPanel({
   loading, rows, hasAny, search, shortfalls, onGenerateMissing, generating,
-  onFix, onDelete, onViewQr, actionId, ActionBtn, Ic,
+  onFix, onDelete, onViewQr, actionId, ActionBtn, Ic, sort, onSort,
 }) {
   if (loading) {
     return (
@@ -2384,13 +2432,32 @@ function InventoryPanel({
                 background: 'linear-gradient(135deg, #8B0000, #6B0000)',
                 borderBottom: '2px solid rgba(201,168,76,0.35)',
               }}>
-                {['Book Title', 'Copy', 'Copy ID', 'Shelf Location', 'Status', 'Action'].map(h => (
-                  <th key={h} style={{
-                    padding: '13px 16px', textAlign: 'left',
-                    fontFamily: 'var(--font-sans)', fontSize: 11,
-                    fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
-                    color: '#F5E4A8', whiteSpace: 'nowrap',
-                  }}>{h}</th>
+                {[
+                  { label: 'Book Title',     key: 'title'  },
+                  { label: 'Copy',           key: 'copy'   },
+                  { label: 'Copy ID',        key: 'copyid' },
+                  { label: 'Shelf Location', key: 'shelf'  },
+                  { label: 'Status',         key: 'status' },
+                  { label: 'Action',         key: null     },
+                ].map(h => (
+                  <th key={h.label}
+                    onClick={h.key ? () => onSort(h.key) : undefined}
+                    aria-sort={h.key && sort?.key === h.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                    title={h.key ? `Sort by ${h.label}` : undefined}
+                    style={{
+                      padding: '13px 16px', textAlign: 'left',
+                      fontFamily: 'var(--font-sans)', fontSize: 11,
+                      fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                      color: '#F5E4A8', whiteSpace: 'nowrap',
+                      cursor: h.key ? 'pointer' : 'default', userSelect: 'none',
+                    }}>
+                    {h.label}
+                    {h.key && (
+                      <span style={{ marginLeft: 6, fontSize: 9, opacity: sort?.key === h.key ? 1 : 0.45 }}>
+                        {sort?.key === h.key ? (sort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>

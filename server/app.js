@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import { supabaseAdmin } from './lib/supabaseAdmin.js';
 import { sendOtpEmail, sendLoginConfirmationEmail, sendVerificationEmail, sendPasswordResetEmail } from './lib/mailer.js';
+import { sendDueDateReminderEmail } from './lib/mailer.js';
 import { locateIp, describeDevice, formatLocation } from './lib/geo.js';
 import googleAuthRouter from './routes/googleAuth.js';
 import {
@@ -380,13 +381,7 @@ app.post('/api/mfa/send-login-confirmation', requireUser, async (req, res) => {
   res.json({ requestId, expiresInSeconds: CONFIRM_TTL_MS / 1000 });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/mfa/login-confirmation-status { requestId }
-// Polled from the ORIGINAL device/tab while it waits for the email link to
-// be tapped. Only ever reads a row by (requestId, req.authUser.id) — the
-// requestId is safe to hand back to the browser precisely because it can't
-// be used to confirm or deny anything by itself (only the emailed token can).
-// ---------------------------------------------------------------------------
+
 app.post('/api/mfa/login-confirmation-status', requireUser, async (req, res) => {
   const { requestId } = req.body || {};
   if (!requestId) return res.status(400).json({ error: 'Missing requestId.' });
@@ -435,13 +430,7 @@ app.post('/api/mfa/login-confirmation-status', requireUser, async (req, res) => 
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/mfa/confirm-login-device { token, action: 'yes' | 'no' }
-// Hit by the PUBLIC /confirm-login page when someone taps a button in the
-// email — deliberately NOT behind requireUser, since that click may well
-// happen on a completely different, unauthenticated device/browser than the
-// one that's actually waiting to sign in.
-// ---------------------------------------------------------------------------
+
 app.post('/api/mfa/confirm-login-device', async (req, res) => {
   const { token, action } = req.body || {};
   if (!token || (action !== 'yes' && action !== 'no')) {
@@ -471,9 +460,7 @@ app.post('/api/mfa/confirm-login-device', async (req, res) => {
     .update({ status: nextStatus, resolved_at: new Date().toISOString() })
     .eq('id', row.id);
 
-  // "No, that wasn't me" is a real account-security signal: drop every
-  // trusted-device token on file so nothing else can skip straight past the
-  // email/OTP check either, on top of the advice shown on the confirm page.
+
   if (nextStatus === 'denied') {
     await supabaseAdmin.from('mfa_trusted_devices').delete().eq('user_id', row.user_id);
   }
@@ -487,15 +474,7 @@ app.post('/api/mfa/confirm-login-device', async (req, res) => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/mfa/record-session { deviceId? }
-// Called exactly once per login, right after the frontend's finishLogin()
-// (i.e. after any 2FA step has genuinely finished) — never on every page
-// load. Upserts a row in login_sessions so it shows up in "View Logins".
-// deviceId, when present, is the mfa_trusted_devices row this browser was
-// just linked to (from verify-otp / login-confirmation-status / a matched
-// check-device) — it's what lets Logout also drop the trusted-device entry.
-// ---------------------------------------------------------------------------
+
 app.post('/api/mfa/record-session', requireUser, async (req, res) => {
   const sessionId = sessionIdFromToken(req.authToken);
   if (!sessionId) return res.status(400).json({ error: 'Could not identify this session.' });
@@ -522,10 +501,7 @@ app.post('/api/mfa/record-session', requireUser, async (req, res) => {
   res.json({ recorded: true });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/mfa/sessions — list this account's signed-in devices for the
-// "View Logins" panel in Settings, newest-active first.
-// ---------------------------------------------------------------------------
+
 app.post('/api/mfa/sessions', requireUser, async (req, res) => {
   const currentSessionId = sessionIdFromToken(req.authToken);
 
@@ -550,18 +526,7 @@ app.post('/api/mfa/sessions', requireUser, async (req, res) => {
   res.json({ sessions });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/mfa/sessions/revoke { sessionId }
-// The "Logout" button next to a device in "View Logins". This does two
-// things, both required for the device to actually be logged out rather
-// than just hidden from the list:
-//   1. Deletes the matching row from Supabase Auth's own auth.sessions table
-//      (via the admin_revoke_gotrue_session RPC), which invalidates that
-//      device's refresh token immediately — its next request/token refresh
-//      fails and it's kicked back to the login screen for real.
-//   2. Removes the matching mfa_trusted_devices row, if any, so that device
-//      also loses "skip 2FA" trust and can't just log back in unchecked.
-// ---------------------------------------------------------------------------
+
 app.post('/api/mfa/sessions/revoke', requireUser, async (req, res) => {
   const { sessionId } = req.body || {};
   if (!sessionId) return res.status(400).json({ error: 'Missing sessionId.' });
@@ -596,29 +561,14 @@ app.post('/api/mfa/sessions/revoke', requireUser, async (req, res) => {
   res.json({ revoked: true });
 });
 
-// ===========================================================================
-// EMAIL VERIFICATION AT SIGN-UP
-//
-// Flow: the signup form POSTs to /api/auth/signup -> we create the auth user
-// as UNCONFIRMED (Supabase sends nothing itself) -> we email a one-time link
-// through Brevo -> the link hits GET /verify-email, which marks the user's
-// email as confirmed. Until then Supabase refuses password sign-in with
-// "Email not confirmed" (requires Auth -> Providers -> Email -> "Confirm
-// email" to stay ON in the Supabase dashboard).
-// ===========================================================================
+
 const PSU_DOMAIN        = '@pampangastateu.edu.ph';
 const VERIFY_TTL_MS     = 24 * 60 * 60 * 1000; // link valid for 24 hours
 const VERIFY_RESEND_MS  = 60 * 1000;           // min gap between verification emails
 
 const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-/**
- * Creates a fresh verification token for the user and emails it.
- * Returns { sent: true } or { sent: false, throttled: true } when a link was
- * already sent less than VERIFY_RESEND_MS ago. The throttle lives in the DB
- * (not an in-memory Map) so it also works on serverless/Vercel.
- * Throws if the email itself fails to send.
- */
+
 async function issueVerificationEmail(req, { userId, email, name }) {
   const { data: last } = await supabaseAdmin
     .from('email_verifications')
@@ -735,9 +685,7 @@ app.post('/api/auth/signup', async (req, res) => {
   res.status(201).json({ needsVerification: true, emailSent: true });
 });
 
-// POST /api/auth/resend-verification { email } — public. Always answers the
-// same way whether or not the address exists, so it can't be used to probe
-// which emails are registered.
+
 app.post('/api/auth/resend-verification', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'Missing email.' });
@@ -760,17 +708,7 @@ app.post('/api/auth/resend-verification', async (req, res) => {
 });
 
 
-// ===========================================================================
-// FORGOT PASSWORD — 6-digit code emailed through Brevo (not Supabase).
-//
-//   1. POST /api/auth/forgot-password   { email }                -> emails a code
-//   2. POST /api/auth/verify-reset-code { email, code }          -> { resetToken }
-//   3. POST /api/auth/reset-password    { email, resetToken, password }
-//
-// Needs the `password_reset_codes` table (see password_reset_codes.sql).
-// Nothing here creates a Supabase session — the browser never gets signed in
-// by the reset flow; the password is changed server-side with the service key.
-// ===========================================================================
+
 const RESET_CODE_TTL_MS   = 10 * 60 * 1000; // code valid for 10 minutes
 const RESET_TOKEN_TTL_MS  = 10 * 60 * 1000; // after the code is accepted, 10 min to set the password
 const RESET_RESEND_MS     = 60 * 1000;      // min gap between codes (stored in DB -> works on Vercel)
@@ -953,16 +891,115 @@ app.get('/verify-email', async (req, res) => {
 // Google sign-in: server-side domain check, first-login detection, profile setup.
 app.use('/api/auth/google', googleAuthRouter);
 
+
+const DUE_EMAIL_LOAN_PERIOD_DAYS     = 7;
+const DUE_EMAIL_REMINDER_DAYS_BEFORE = 3;
+const PH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;   // Asia/Manila is UTC+8, no DST
+const DAY_MS           = 24 * 60 * 60 * 1000;
+
+
+function phDayNumber(date) {
+  const s = new Date(date.getTime() + PH_UTC_OFFSET_MS);
+  return Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate());
+}
+
+function getDueEmailInfo(borrowedAtIso, now = new Date()) {
+  const borrowedAt = new Date(borrowedAtIso);
+  if (!borrowedAtIso || Number.isNaN(borrowedAt.getTime())) return null;
+  const dueDayNum = phDayNumber(borrowedAt) + DUE_EMAIL_LOAN_PERIOD_DAYS * DAY_MS;
+  const daysLeft  = Math.round((dueDayNum - phDayNumber(now)) / DAY_MS);
+  const dueDateLabel = new Date(dueDayNum)
+    .toLocaleDateString('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  return { daysLeft, dueDateLabel };
+}
+
+app.get('/api/cron/due-reminders', async (req, res) => {
+  const secret = process.env.CRON_SECRET;
+  const given  = Buffer.from(req.headers.authorization || '');
+  const wanted = Buffer.from(`Bearer ${secret || ''}`);
+  if (!secret || given.length !== wanted.length || !crypto.timingSafeEqual(given, wanted)) {
+    return res.status(401).json({ error: 'Unauthorized.' });
+  }
+
+  const summary = { checked: 0, sent: 0, skippedNoEmail: 0, alreadySent: 0, failed: 0 };
+  try {
+    // All unreturned borrowings (paged — Supabase returns at most 1000 rows per request).
+    const rows = [];
+    for (let from = 0; ; from += 1000) {
+      const { data, error } = await supabaseAdmin
+        .from('borrowings')
+        .select('id, student_id, student_name, student_email, book_title, status, borrowed_at, returned_at')
+        .is('returned_at', null)
+        .not('borrowed_at', 'is', null)
+        .order('id', { ascending: true })
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      rows.push(...(data || []));
+      if (!data || data.length < 1000) break;
+    }
+
+    const now = new Date();
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    for (const b of rows) {
+      if (String(b.status || '').toLowerCase() === 'returned') continue;
+      const info = getDueEmailInfo(b.borrowed_at, now);
+      if (!info) continue;
+
+      let stage = null;
+      if (info.daysLeft < 0) stage = 'overdue';
+      else if (info.daysLeft === 0) stage = 'due_today';
+      else if (info.daysLeft <= DUE_EMAIL_REMINDER_DAYS_BEFORE) stage = 'reminder';
+      if (!stage) continue;
+      summary.checked++;
+
+      // Recipient: the email saved on the borrowing, else the student's profile.
+      let to = (b.student_email || '').trim();
+      let name = (b.student_name || '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
+      if ((!to || !name) && b.student_id && uuidRe.test(String(b.student_id))) {
+        const { data: prof } = await supabaseAdmin
+          .from('profiles').select('email, first_name').eq('id', b.student_id).maybeSingle();
+        if (!to) to = (prof?.email || '').trim();
+        if (prof?.first_name) name = prof.first_name;
+      }
+      if (!to) { summary.skippedNoEmail++; continue; }
+
+      // Claim this (borrowing, stage) first so overlapping runs can never double-send.
+      const borrowingKey = String(b.id);
+      const { error: claimErr } = await supabaseAdmin
+        .from('due_email_log').insert({ borrowing_id: borrowingKey, stage });
+      if (claimErr) {
+        if (claimErr.code === '23505') { summary.alreadySent++; continue; }
+        console.error('[due-reminders] could not record send:', claimErr.message);
+        summary.failed++;
+        continue;
+      }
+
+      try {
+        await sendDueDateReminderEmail({
+          to, name,
+          bookTitle: b.book_title || 'A borrowed book',
+          dueDateLabel: info.dueDateLabel,
+          daysLeft: info.daysLeft,
+          stage,
+        });
+        summary.sent++;
+      } catch (err) {
+        console.error('[due-reminders] email failed:', err.message);
+        // Release the claim so tomorrow's run retries this one.
+        await supabaseAdmin.from('due_email_log')
+          .delete().eq('borrowing_id', borrowingKey).eq('stage', stage);
+        summary.failed++;
+      }
+    }
+    return res.json({ ok: true, ...summary });
+  } catch (err) {
+    console.error('[due-reminders] run failed:', err.message);
+    return res.status(500).json({ error: 'Due-reminder run failed.', ...summary });
+  }
+});
+
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
-// NOTE ON SERVERLESS STATELESSNESS — the two in-memory throttle maps below
-// (lastSendAt, lastConfirmSendAt) work fine here on a traditional server,
-// but on Vercel each request may hit a fresh, isolated function instance —
-// there's no guarantee they share memory between calls the way they did on
-// Railway. In practice this only weakens the "wait 45s before resending" 
-// anti-spam check (it may occasionally allow an early resend); it does NOT
-// break login, OTP verification, or email sending. Fine for now — if this
-// becomes a real problem later, move that throttle into a Supabase table
-// (a timestamp column checked/updated per request) instead of the Map.
 
 export default app;

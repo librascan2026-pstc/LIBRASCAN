@@ -1576,7 +1576,17 @@ function TabStudents({ data, loading, period, setPeriod, onRefresh }) {
                         <span className={`ra-leader-rank${i===0?' top1':i===1?' top2':i===2?' top3':''}`}>
                           {i<3?['🥇','🥈','🥉'][i]:`#${i+1}`}
                         </span>
-                        <div className="ra-leader-avatar">{initials(s.student_name)}</div>
+                        <div className="ra-leader-avatar">
+                          {s.avatar_url && (
+                            <img
+                              src={s.avatar_url}
+                              alt=""
+                              onError={(e)=>{ e.currentTarget.style.display='none'; if(e.currentTarget.nextSibling) e.currentTarget.nextSibling.style.display=''; }}
+                              style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'50%',display:'block'}}
+                            />
+                          )}
+                          <span style={s.avatar_url ? {display:'none'} : undefined}>{initials(s.student_name)}</span>
+                        </div>
                         <div style={{flex:1,minWidth:0}}>
                           <div className="ra-leader-name">{s.student_name||'Unknown'}</div>
                           <div className="ra-leader-sub">{s.program||''}</div>
@@ -3047,6 +3057,41 @@ export default function ReportsAnalytics() {
           };
         }
       });
+      // Profile pictures for the leaderboard. Each student is matched by
+      // student number to profiles.student_number (display-only — nothing is
+      // written back). If a profile has no avatar_url but the photo is still
+      // in the 'avatars' bucket (<user-id>/avatar.<ext>), rebuild its URL.
+      const avatarByNumber = {};
+      try {
+        const topNums = [...new Set(
+          Object.entries(stuBorrows).sort((a,b)=>b[1]-a[1]).slice(0,50)
+            .map(([key]) => stuMeta[key]?.student_number)
+            .filter(Boolean)
+        )];
+        if (topNums.length) {
+          const { data: avatarRows } = await supabaseAdmin
+            .from('profiles')
+            .select('id, student_number, avatar_url')
+            .in('student_number', topNums);
+          await Promise.all((avatarRows||[]).map(async (p) => {
+            let url = p.avatar_url || null;
+            if (!url) {
+              try {
+                const { data: files } = await supabaseAdmin.storage.from('avatars')
+                  .list(p.id, { limit: 5, sortBy: { column: 'updated_at', order: 'desc' } });
+                const f = (files || []).find(x => x.id && /^avatar\./i.test(x.name));
+                if (f) {
+                  const { data: pub } = supabaseAdmin.storage.from('avatars').getPublicUrl(`${p.id}/${f.name}`);
+                  url = pub?.publicUrl ? `${pub.publicUrl}?t=${new Date(f.updated_at || Date.now()).getTime()}` : null;
+                }
+              } catch { /* no stored photo — initials will be shown */ }
+            }
+            if (p.student_number && url) avatarByNumber[String(p.student_number).trim()] = url;
+          }));
+        }
+      } catch (err) {
+        console.warn('[Reports_Analytics] Could not load leaderboard profile pictures:', err);
+      }
       const topStudents = Object.entries(stuBorrows)
         .sort((a,b)=>b[1]-a[1]).slice(0,50)
         .map(([key,borrows],i)=>({
@@ -3055,6 +3100,7 @@ export default function ReportsAnalytics() {
           returned: stuReturned[key]||0,
           student_number: stuMeta[key]?.student_number||'',
           program: stuMeta[key]?.program||'',
+          avatar_url: avatarByNumber[String(stuMeta[key]?.student_number||'').trim()] || null,
           rank: i+1,
         }));
       const progCount = {};
