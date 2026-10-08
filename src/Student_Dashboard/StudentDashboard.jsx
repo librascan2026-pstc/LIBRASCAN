@@ -4693,7 +4693,8 @@ function PageProfile({ user, profile, onProfileUpdate }) {
     fontFamily: 'var(--font-sans)',
     fontSize: '12.5px',
     color: '#7A3030',
-    marginTop: '3px'
+    marginTop: '3px',
+    textAlign: 'left',
   }}
 >
               {[form.student_id?`ID: ${form.student_id}`:null,form.course,form.campus].filter(Boolean).join(' • ')}
