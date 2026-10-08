@@ -3283,6 +3283,38 @@ export default function ReportsAnalytics() {
     return ()=>{ supabase.removeChannel(ch); };
   },[fetchStats,fetchData]);
 
+  // Tab bar: drag with the mouse to scroll left/right (touch swipe already works natively).
+  const navDragRef = useRef(null);
+  useEffect(()=>{
+    const el = navDragRef.current;
+    if (!el) return;
+    let down=false, moved=false, startX=0, startLeft=0;
+    const onDown = e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      down=true; moved=false; startX=e.clientX; startLeft=el.scrollLeft;
+    };
+    const onMove = e => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) > 5) { moved=true; el.classList.add('ra-dragging'); }
+      if (moved) el.scrollLeft = startLeft - dx;
+    };
+    const onEnd = () => { if (!down) return; down=false; el.classList.remove('ra-dragging'); };
+    const onClickCapture = e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved=false; } };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('click', onClickCapture, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    return ()=>{
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+    };
+  },[]);
+
   const TABS=[
     {id:'books',       label:'Book Popularity',  icon:Ic.books   },
     {id:'students',    label:'Student Activity', icon:Ic.users   },
@@ -3322,7 +3354,7 @@ export default function ReportsAnalytics() {
         </div>
 
         {/* Tab navigation */}
-        <div className="ra-nav-tabs">
+        <div className="ra-nav-tabs" ref={navDragRef}>
           {TABS.map(t=>(
             <button key={t.id} className={`ra-nav-tab${tab===t.id?' active':''}`} onClick={()=>setTab(t.id)}>
               {t.icon(14)}{t.label}

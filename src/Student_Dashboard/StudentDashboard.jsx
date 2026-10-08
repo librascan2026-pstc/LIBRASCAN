@@ -10,6 +10,7 @@ import {
   getNotifSoundEnabled,
   setNotifSoundEnabled,
   NOTIF_PREFS_EVENT,
+  isNotifSilenced,
 } from '../Admin_Dashboard/notificationPrefs';
 import {
   getNotifHistory,
@@ -1025,8 +1026,10 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
 .sdb-loading { display:flex; align-items:center; justify-content:center; gap:12px; padding:60px 20px; }
 .sdb-skeleton {
   background:linear-gradient(90deg,rgba(201,168,76,.08) 25%,rgba(201,168,76,.04) 50%,rgba(201,168,76,.08) 75%);
-  background-size:200% 100%; animation:lm-fade-in 1.4s ease infinite; border-radius:6px;
+  background-size:200% 100%; border-radius:6px;
+  animation:sdb-skeleton-pulse 1.4s ease-in-out infinite; /* was lm-fade-in (slide+fade) looping = flicker */
 }
+@keyframes sdb-skeleton-pulse { 0%,100%{opacity:.55} 50%{opacity:1} }
 .sdb-empty { text-align:center; padding:60px 20px; }
 .sdb-empty-icon { font-size:38px; margin-bottom:12px; opacity:.50; }
 .sdb-empty-text { font-family:var(--font-display); font-size:15px; color:var(--maroon-mid); }
@@ -2160,6 +2163,27 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
   outline-offset: 2px;
 }
 
+/* Notification History — keep the row content (type, message) left-aligned. */
+.lm-notif-hist-list .lm-notif-body,
+.lm-notif-hist-list .lm-notif-msg { text-align: left; }
+
+/* Soft highlight on the record a clicked notification points to. The colour
+   (--lm-hit) is set from the notification's own type colour. */
+.lm-notif-hit { --lm-hit: #C9A84C; }
+tr.lm-notif-hit > td {
+  background-color: color-mix(in srgb, var(--lm-hit) 18%, transparent) !important;
+  transition: background-color 0.8s ease, box-shadow 0.8s ease;
+}
+tr.lm-notif-hit > td:first-child { box-shadow: inset 4px 0 0 var(--lm-hit); }
+tr.lm-notif-hit.lm-notif-hit-out > td { background-color: transparent !important; }
+tr.lm-notif-hit.lm-notif-hit-out > td:first-child { box-shadow: inset 4px 0 0 transparent; }
+.lm-notif-hit:not(tr) {
+  outline: 3px solid color-mix(in srgb, var(--lm-hit) 55%, transparent);
+  outline-offset: 2px;
+  transition: outline-color 0.8s ease;
+}
+.lm-notif-hit.lm-notif-hit-out:not(tr) { outline-color: transparent; }
+
 @media (max-width: 560px) {
   .lm-notif-hist-list { max-height: none; }
 }
@@ -2447,6 +2471,154 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
 }
 .lm-select--sm { padding: 8px 12px; font-size: 12px; }
 
+/* ════════════════════════════════════════════════════════════════════════
+   SETTINGS — RESPONSIVE (phone · tablet · laptop/PC)
+   Appended last so it only refines the Settings page (Profile / Security /
+   Notifications tabs + floating logout). Nothing above is modified.
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ── all sizes: nothing may overflow its card ── */
+.sdb-settings-panel { min-width:0; }
+.sdb-settings-panel .sdb-stabs { overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.sdb-settings-panel .sdb-stabs::-webkit-scrollbar { display:none; }
+.sdb-settings-panel .sdb-panel-hdr { flex-wrap:wrap; row-gap:10px; }
+.sdb-settings-panel .sdb-panel-hdr > span { min-width:0; }
+.sdb-settings-panel .sdb-panel-hdr > div { flex-wrap:wrap; justify-content:flex-end; }
+.sdb-settings-panel .sdb-panel-hdr .sdb-tbl-btn,
+.sdb-settings-panel .sdb-panel-hdr .sdb-btn { white-space:nowrap; flex-shrink:0; }
+.sdb-settings-panel .sdb-toggle-row { gap:14px; }
+.sdb-settings-panel .sdb-toggle-row > div:first-child { min-width:0; flex:1 1 auto; }
+.sdb-profile-info { min-width:0; }
+.sdb-profile-text { min-width:0; flex:1 1 auto; }
+.sdb-profile-field-grid > .sdb-form-group { min-width:0; }
+.sdb-profile-field-grid > .sdb-form-group > div { overflow-wrap:anywhere; word-break:break-word; }
+.sdb-profile-meta, .sdb-profile-email { overflow-wrap:anywhere; }
+
+/* ── tablet / small laptop (≤1024): name scales and may wrap instead of overflowing ── */
+@media (max-width:1024px) {
+  .sdb-profile-title {
+    font-size:clamp(24px,3.6vw,38px) !important;
+    line-height:1.15 !important; min-height:0 !important;
+    white-space:normal; overflow-wrap:anywhere;
+  }
+  .sdb-profile-info { gap:18px; padding:0 22px 20px; }
+}
+
+/* ── phones (≤640): centred profile card, compact panels, app-style tabs ── */
+@media (max-width:640px) {
+  .sdb-settings-panel { padding:14px 12px 18px; border-radius:16px; margin-bottom:56px; }
+  .sdb-settings-panel > .sdb-stabs { margin-bottom:16px; }
+  .sdb-settings-panel .sdb-stab { flex:1 1 0; min-width:0; justify-content:center; padding:10px 6px; font-size:12.5px; gap:5px; }
+  .sdb-settings-panel .sdb-panel { padding:16px 14px; }
+  .sdb-settings-panel .sdb-panel-hdr { margin-bottom:12px; }
+
+  .sdb-profile-banner { margin-bottom:14px; }
+  .sdb-profile-cover { height:76px; }
+  .sdb-profile-info {
+    flex-direction:column; align-items:center; gap:12px;
+    padding:0 16px 20px; margin-top:-42px; text-align:center;
+  }
+  .sdb-profile-av-wrap { width:84px; height:84px; }
+  .sdb-profile-upload-btn { width:32px; height:32px; }
+  .sdb-profile-text { width:100%; flex:0 0 auto; padding-bottom:0 !important; text-align:center; }
+  /* name sits on the cream card here (not the maroon cover), so it switches to maroon */
+  .sdb-profile-title {
+    font-size:clamp(20px,6.2vw,26px) !important; line-height:1.2 !important; min-height:0 !important;
+    letter-spacing:.06em !important; text-align:center !important;
+    color:var(--maroon-deep,#5A0000) !important; -webkit-text-fill-color:var(--maroon-deep,#5A0000) !important;
+    text-shadow:none !important; white-space:normal; overflow-wrap:anywhere;
+  }
+  .sdb-profile-meta  { font-size:12.5px !important; line-height:1.5; margin-top:6px !important; text-align:center; }
+  .sdb-profile-email { font-size:12px !important; margin-top:3px !important; text-align:center !important; }
+
+  .sdb-profile-field-grid {
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr)) !important;
+    gap:0 16px !important;
+  }
+  .sdb-profile-field-grid .sdb-form-group { margin-bottom:10px; }
+
+  /* floating logout: smaller, tucked into the corner, respects the iPhone home bar */
+  .sdb-fab { right:14px; bottom:calc(16px + env(safe-area-inset-bottom,0px)); height:48px; width:48px; border-radius:24px; }
+  .sdb-fab-icon { width:48px; height:48px; }
+}
+
+/* ── small phones (≤480): icon-over-label tabs so all three always fit ── */
+@media (max-width:480px) {
+  .sdb-settings-panel .sdb-stab { flex-direction:column; gap:3px; font-size:11.5px; padding:9px 4px 8px; }
+  .sdb-settings-panel .sdb-stab svg { width:16px; height:16px; }
+  .sdb-settings-panel .sdb-panel-hdr { font-size:11.5px; letter-spacing:.07em; }
+  .sdb-toast { left:14px; right:14px; bottom:20px; max-width:none; }
+}
+
+/* ── very small phones (≤360) ── */
+@media (max-width:360px) {
+  .sdb-settings-panel { padding:12px 10px 16px; }
+  .sdb-settings-panel .sdb-panel { padding:14px 12px; }
+  .sdb-profile-av-wrap { width:76px; height:76px; }
+  .sdb-profile-field-grid { grid-template-columns:1fr !important; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   HOME — PROMO BANNER ("Read something unforgettable") + SITE FOOTER
+   RESPONSIVE (phone · tablet · laptop · large screens). Appended last;
+   desktop (>900px) layout and look are unchanged except the ≥1600 boost.
+   ════════════════════════════════════════════════════════════════════════ */
+.sdb-home-footer-eyebrow-row > .sdb-home-footer-title { min-width:0; }
+.sdb-home-footer-title { overflow-wrap:anywhere; }
+
+/* large screens: a little more presence so it doesn't look small */
+@media (min-width:1600px) {
+  .sdb-home-footer-banner { height:260px; }
+  .sdb-home-footer-content { width:min(52%,560px); padding:0 36px 0 48px; }
+  .sdb-home-footer-title { font-size:12px; }
+  .sdb-home-footer-sub { font-size:clamp(26px,1.7vw,32px); }
+  .sdb-home-footer-btn { padding:14px 26px; font-size:12px; }
+}
+
+/* tablet + phone (stacked: photo on top, text below) */
+@media (max-width:900px) {
+  .sdb-home-footer-media { height:clamp(150px,32vw,260px); }
+  .sdb-home-footer-media img { object-position:center 38%; }
+  /* the desktop side-wash makes no sense when stacked → fade the photo into the maroon panel */
+  .sdb-home-footer-media::before {
+    background:linear-gradient(180deg,rgba(74,0,0,0) 52%,rgba(74,0,0,.55) 80%,#4A0000 100%);
+  }
+  .sdb-home-footer-content { padding:22px 26px 28px; }
+  .sdb-home-footer-sub { font-size:clamp(20px,3.4vw,28px); margin-bottom:18px; }
+}
+
+/* phones */
+@media (max-width:640px) {
+  .sdb-home-footer-media { height:clamp(140px,40vw,200px); }
+  .sdb-home-footer-content { padding:20px 18px 24px; }
+  .sdb-home-footer-eyebrow-row { gap:8px; margin-bottom:10px; }
+  .sdb-home-footer-eyebrow-line { width:20px; }
+  .sdb-home-footer-title { font-size:10.5px; letter-spacing:.1em; line-height:1.45; }
+  .sdb-home-footer-sub { font-size:clamp(19px,5.6vw,24px); margin-bottom:18px; }
+  /* two equal, thumb-sized buttons that fill the width */
+  .sdb-home-footer-actions { display:grid; grid-template-columns:1fr 1fr; gap:10px; width:100%; }
+  .sdb-home-footer-btn { justify-content:center; min-height:44px; padding:12px 10px; font-size:11px; letter-spacing:.04em; }
+}
+
+/* very small phones: stack the buttons */
+@media (max-width:340px) {
+  .sdb-home-footer-actions { grid-template-columns:1fr; }
+  .sdb-home-footer-title { font-size:10px; letter-spacing:.08em; }
+}
+
+/* landscape phones: keep the photo short so the text stays in view */
+@media (max-height:480px) and (orientation:landscape) and (max-width:900px) {
+  .sdb-home-footer-media { height:110px; }
+  .sdb-home-footer-content { padding:16px 22px 20px; }
+}
+
+/* site footer: tidy, balanced lines; clear of the iPhone home bar */
+.sdb-sitefoot { padding-bottom:max(8px,env(safe-area-inset-bottom,0px)); }
+.sdb-sitefoot-text { text-wrap:balance; }
+@media (max-width:640px) {
+  .sdb-sitefoot-text { font-size:clamp(9.5px,2.8vw,11px); letter-spacing:.06em; }
+  .sdb-sitefoot-dot { margin:0 .4em; }
+}
 
 `;
 
@@ -2480,8 +2652,12 @@ function buildStudentNotification({ id, type, title, message, createdAt, extra =
 // The `borrowings` table has no due-date column (the History page sets
 // `due_date: null`), so a book's due date = borrowed_at + this many days.
 // Change this if your library's loan period is different.
-const STUDENT_LOAN_PERIOD_DAYS = 7;
-const DUE_REMINDER_DAYS_BEFORE = 3;          // remind when this many days (or fewer) remain
+const STUDENT_LOAN_PERIOD_DAYS = 3;
+const DUE_REMINDER_DAYS_BEFORE = 3;          // remind when this many days (or fewer) remain (History page "Due Soon" badge)
+// Notifications only start the day BEFORE the due date: due tomorrow (1), due today (0), then overdue (<0).
+const DUE_NOTIF_DAYS_BEFORE    = 1;
+// Old per-day reminders (3 days / 2 days left) that may still be saved in history — never shown anymore.
+const isStaleDueStageNotif = (n) => /^due_reminder_.+_d(?:[2-9]|\d{2,})$/.test(String(n?.id || ''));
 const DUE_REMINDER_POLL_MS     = 5 * 60 * 1000;
 const NEW_ARRIVAL_POLL_MS      = 30 * 1000;
 const NEW_ARRIVAL_FETCH_LIMIT  = 300;
@@ -2502,7 +2678,7 @@ function getStudentDueInfo(borrowedAtIso, now = new Date()) {
 
 /**
  * Notifications per active (unreturned) borrowing:
- *  - 3 days / 2 days / 1 day / due today  → "Due Date Reminder" (one distinct notification per stage,
+ *  - 1 day left (due tomorrow) / due today → "Due Date Reminder" (one distinct notification per stage,
  *    so the wording is always correct for the day it was raised)
  *  - past the due date           → one "Overdue Notice" (no day count, so it never goes stale)
  * All use the DUE_DATE_REMINDER type, so the Settings toggle controls them together.
@@ -2531,7 +2707,7 @@ function buildDueReminderNotifications(borrowings, now = new Date()) {
       }));
       return;
     }
-    if (daysLeft > DUE_REMINDER_DAYS_BEFORE) return;             // not within the reminder window yet
+    if (daysLeft > DUE_NOTIF_DAYS_BEFORE) return;                // not within the reminder window yet (only due tomorrow / today)
 
     const when = daysLeft === 0 ? 'today' : daysLeft === 1 ? 'tomorrow' : `in ${daysLeft} days`;
     out.push(buildStudentNotification({
@@ -2586,6 +2762,33 @@ function getStudentNotifTarget(n) {
     default:
       return { kind: 'area', tab: 'home' }; // SYSTEM_ALERT and anything unrecognized
   }
+}
+
+// Finds the record a clicked notification points at (rows/cards carry a
+// data-notif-target token), scrolls to it and gives it a short, soft highlight
+// in the notification's own colour. Rows mount after their data loads, so it
+// retries briefly instead of giving up on the first miss.
+function flashNotifTarget(key, color) {
+  if (!key || typeof document === 'undefined') return;
+  const selector = `[data-notif-target~="${String(key).replace(/"/g, '')}"]`;
+  const started  = Date.now();
+  const tryFlash = () => {
+    const el = document.querySelector(selector);
+    if (!el) return Date.now() - started > 5000;      // give up after 5s
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (color) el.style.setProperty('--lm-hit', color);
+    el.classList.remove('lm-notif-hit', 'lm-notif-hit-out');
+    void el.offsetWidth;
+    el.classList.add('lm-notif-hit');
+    setTimeout(() => el.classList.add('lm-notif-hit-out'), 1800);
+    setTimeout(() => {
+      el.classList.remove('lm-notif-hit', 'lm-notif-hit-out');
+      el.style.removeProperty('--lm-hit');
+    }, 2700);
+    return true;
+  };
+  if (tryFlash()) return;
+  const timer = setInterval(() => { if (tryFlash()) clearInterval(timer); }, 150);
 }
 
 function fmtNotifAgo(iso) {
@@ -3679,7 +3882,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
           {filtered.map(book=>{
             const isFav = favIds.has(book.id);
             return (
-              <div key={book.id} className="sdb-bk-card" onClick={()=>setSelected(book)}>
+              <div key={book.id} data-notif-target={`book:${book.id}`} className="sdb-bk-card" onClick={()=>setSelected(book)}>
                 <button type="button" className="sdb-bk-bookmark" onClick={e=>toggleFav(e,book.id)} title={isFav?'Saved':'Save'} aria-label={isFav?'Remove from saved':'Save book'}>
                   <svg viewBox="0 0 24 24" fill={isFav?'currentColor':'none'} stroke="currentColor" strokeWidth="2.4" strokeLinejoin="round"><path d="M6 2a2 2 0 0 0-2 2v18l8-5.2L20 22V4a2 2 0 0 0-2-2H6z"/></svg>
                 </button>
@@ -4124,6 +4327,7 @@ function PageHistory({ user }) {
             // No due-date column in the schema: due = borrowed_at + loan period.
             due_date: !match?.returned_at ? (getStudentDueInfo(match?.borrowed_at)?.dueDay.toISOString() || null) : null,
             _borrowed_at: match?.borrowed_at || null,
+            _borrowing_id: match?.id ?? null,
           };
         });
 
@@ -4148,6 +4352,7 @@ function PageHistory({ user }) {
             return_date: b.returned_at || null,
             due_date: !b.returned_at ? (getStudentDueInfo(b.borrowed_at)?.dueDay.toISOString() || null) : null,
             _borrowed_at: b.borrowed_at || null,
+            _borrowing_id: b.id ?? null,
           }));
         }
 
@@ -4214,7 +4419,7 @@ function PageHistory({ user }) {
                 {rows.length===0?'No borrowing history yet.':'No records match your filters.'}
               </td></tr>
             ) : filtered.map(r=>(
-              <tr key={r.id}>
+              <tr key={r.id} data-notif-target={`request:${r.id}${r._borrowing_id != null ? ` borrowing:${r._borrowing_id}` : ''}`}>
                 <td>
                   <div className="sdb-rtbl-book">
                     <BookCover src={r.cover_image_url} title={r.book_title} width={40} height={56} />
@@ -4458,9 +4663,9 @@ function PageProfile({ user, profile, onProfileUpdate }) {
             </button>
             <input ref={fileRef} type="file" accept="image/*" style={{ display:'none' }} onChange={handleAvatarUpload} />
           </div>
-          <div style={{ paddingBottom:6 }}>
+          <div className="sdb-profile-text" style={{ paddingBottom:6 }}>
           <div
-  className="sdb-hero-name sdb-hero-name--onbanner"
+  className="sdb-hero-name sdb-hero-name--onbanner sdb-profile-title"
   style={{
     fontFamily: 'var(--font-display)',
     textAlign: 'left',
@@ -4483,6 +4688,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
 </div>
 
 <div
+  className="sdb-profile-meta"
   style={{
     fontFamily: 'var(--font-sans)',
     fontSize: '12.5px',
@@ -4492,7 +4698,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
 >
               {[form.student_id?`ID: ${form.student_id}`:null,form.course,form.campus].filter(Boolean).join(' • ')}
             </div>
-            <div style={{ fontFamily:'var(--font-sans)',fontSize:11.5,color:'var(--text-dim)',marginTop:2, textAlign:'left' }}>{form.email}</div>
+            <div className="sdb-profile-email" style={{ fontFamily:'var(--font-sans)',fontSize:11.5,color:'var(--text-dim)',marginTop:2, textAlign:'left' }}>{form.email}</div>
           </div>
         </div>
       </div>
@@ -5137,7 +5343,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   const addStudentNotifications = useCallback((incoming, isRealtime = false) => {
     if (!incoming.length) return;
 
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifSilenced(user?.id, n) && !isNotifDeleted(user?.id, n.id));
 
     if (allowed.length) {
       const existingIds = new Set(seenNotifIdsInStateRef.current);
@@ -5158,7 +5364,7 @@ export default function StudentDashboard({ user, onSignOut }) {
 
   const showInitialStudentBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifSilenced(user?.id, n) && !isNotifDeleted(user?.id, n.id));
     if (!allowed.length) return;
 
     const readIds = new Set(getNotifHistory(user?.id).filter(h => h.read).map(h => h.id));
@@ -5336,7 +5542,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   const deliverExtraStudentNotifs = useCallback((notifs, isRealtime) => {
     const uid = user?.id;
     if (!uid || !notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(uid, n.id));
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifSilenced(uid, n) && !isNotifDeleted(uid, n.id));
     if (!allowed.length) return;
 
     const readIds = new Set(getNotifHistory(uid).filter(h => h.read).map(h => h.id));
@@ -5460,6 +5666,21 @@ export default function StudentDashboard({ user, onSignOut }) {
     };
   }, [user?.id, fetchStudentNewArrivals]);
 
+  // Safety net: anything that shows as read in the bell must also be read in
+  // the Notification History, so the two lists can never disagree.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    const readInBell = notifications.filter(n => n.read).map(n => n.id);
+    if (!readInBell.length) return;
+    const unreadInHistory = new Set(getNotifHistory(uid).filter(h => !h.read).map(h => h.id));
+    const toMark = readInBell.filter(id => unreadInHistory.has(id));
+    if (!toMark.length) return;
+    let next = null;
+    toMark.forEach(id => { next = markNotifHistoryRead(uid, id); });
+    if (next) setNotifHistory(next);
+  }, [notifications, user?.id]);
+
   const unreadNotifCount = useMemo(
     () => notifications.reduce((n, item) => (item.read ? n : n + 1), 0),
     [notifications]
@@ -5469,7 +5690,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   const visibleNotifications = useMemo(() => {
 
     const prefs = notifPrefsRef.current;
-    const enabled = notifications.filter(n => prefs[n.type] === true);
+    const enabled = notifications.filter(n => prefs[n.type] === true && !isNotifSilenced(user?.id, n) && !isStaleDueStageNotif(n));
     return notifTab === 'unread' ? enabled.filter(n => !n.read) : enabled;
 
   }, [notifications, notifTab, prefsVersion]);
@@ -5554,6 +5775,14 @@ export default function StudentDashboard({ user, onSignOut }) {
     navigate(target.tab);
     setNotifOpen(false);
     setHistoryOpen(false);
+
+    // Soft highlight (in the notification's colour) on the exact row / card.
+    const hitKey =
+        n.type === 'NEW_ARRIVAL' && n.extra?.bookId != null ? `book:${n.extra.bookId}`
+      : (n.type === 'BORROW_APPROVED' || n.type === 'BORROW_CANCELLED') && n.extra?.borrowId != null ? `request:${n.extra.borrowId}`
+      : n.type === 'DUE_DATE_REMINDER' && n.extra?.borrowId != null ? `borrowing:${n.extra.borrowId}`
+      : null;
+    flashNotifTarget(hitKey, (STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT).color);
   };
 
   const handleBellClick = () => {
@@ -5646,7 +5875,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   const renderStudentNotifHistoryPage = () => {
 
     const currentPrefs = getNotifPrefs(user?.id);
-    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true);
+    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true && !isNotifSilenced(user?.id, n) && !isStaleDueStageNotif(n));
 
     const q = historySearch.trim().toLowerCase();
     const rows = enabledHistory.filter(n => {

@@ -791,43 +791,28 @@ export default function UserManagement({ onStatsRefresh }) {
       }
       showToast('User updated successfully.');
     } else {
-      const { data: adminData, error: adminErr } = await supabaseAdmin.auth.admin.createUser({
-        email: formData.email.trim(), password: formData.password,
-        // Not auto-confirmed: like Sign Up, the new user must click the link in
-        // the confirmation email before they can log in to the student portal.
-        email_confirm: false,
-        user_metadata: { first_name: formData.first_name.trim(), last_name: formData.last_name.trim(), role: formData.role },
+      // The account is NOT created yet: the server keeps these details as a
+      // pending signup and only creates the user (and profile) once they click
+      // the confirmation link in their email.
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${API_BASE}/api/admin/create-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({
+          email: formData.email.trim(), password: formData.password,
+          profile: {
+            first_name: formData.first_name.trim(), last_name: formData.last_name.trim(),
+            role: formData.role,
+            ...idFields(formData), ...academicFields(formData),
+            // Phase 9: stamp campus_id so the new user belongs to this librarian's campus
+            ...(campusId ? { campus_id: campusId } : {}),
+          },
+        }),
       });
-      if (adminErr) throw adminErr;
-
-      const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
-        id: adminData.user.id,
-        first_name: formData.first_name.trim(), last_name: formData.last_name.trim(),
-        email: formData.email.trim(), role: formData.role,
-        ...idFields(formData), ...academicFields(formData),
-        // Phase 9: stamp campus_id so the new user belongs to this librarian's campus
-        ...(campusId ? { campus_id: campusId } : {}),
-        created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-      if (profileErr) {
-        // Roll back the auth account so a failed profile insert never leaves
-        // an orphaned login that has no profiles row (=> "missing profile").
-        await supabaseAdmin.auth.admin.deleteUser(adminData.user.id).catch(() => {});
-        throw profileErr;
-      }
-      // Email the confirmation link — same endpoint the Sign Up page's
-      // "Resend email" uses, so the user gets the identical email.
-      let emailSent = false;
-      try {
-        const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: formData.email.trim().toLowerCase() }),
-        });
-        emailSent = res.ok;
-      } catch { /* server unreachable — handled below */ }
-      if (emailSent) showToast(`User created. A confirmation email was sent to ${formData.email.trim()}.`);
-      else showToast('User created, but the confirmation email could not be sent. The user can tap "Resend" on the login page.', true);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Could not create the user.');
+      if (json.emailSent) showToast(`Confirmation email sent to ${formData.email.trim()}. The account will be created once they confirm.`);
+      else showToast('Saved, but the confirmation email could not be sent. The user can tap "Resend" on the login page.', true);
     }
     await loadUsers();
     onStatsRefresh?.();
@@ -861,13 +846,13 @@ export default function UserManagement({ onStatsRefresh }) {
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
 
-      <div style={{
+      <div className="um-toolbar" style={{
         display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
         padding: '14px 16px', borderRadius: 10,
         background: 'linear-gradient(135deg,rgba(139,0,0,0.04),rgba(201,168,76,0.03))',
         border: '1px solid rgba(139,0,0,0.10)',
       }}>
-        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+        <div className="um-search-wrap" style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
           <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dim)', pointerEvents: 'none' }}>
             {Icon.search(14)}
           </span>
@@ -923,7 +908,7 @@ export default function UserManagement({ onStatsRefresh }) {
           overflow: 'auto', overflowX: 'auto', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
           WebkitOverflowScrolling: 'touch',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 620 }}>
+          <table className="um-table" style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed', minWidth: 620 }}>
             <colgroup>
               <col style={{ width: '22%' }} />
               <col style={{ width: '16%' }} />
@@ -983,6 +968,8 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
 
   return (
     <tr
+      className="um-row"
+      data-notif-target={`user:${u.id}`}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -991,7 +978,7 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
         transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
+      <td className="um-td um-td-name" data-label="Name" style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
           <div style={{
             width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
@@ -1015,23 +1002,23 @@ function UserRow({ user: u, idx, onEdit, onDelete }) {
           </span>
         </div>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
+      <td className="um-td" data-label="ID Number" style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.student_number || u.employee_number || '—'}</span>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
+      <td className="um-td" data-label="Email" style={{ padding: '12px 14px', verticalAlign: 'middle', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis', textAlign: 'left' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{u.email || '—'}</span>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
+      <td className="um-td" data-label="Role" style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <RoleBadge role={u.role} />
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'left' }}>
+      <td className="um-td" data-label="Joined" style={{ padding: '12px 14px', verticalAlign: 'middle', whiteSpace: 'nowrap', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
           {u.created_at
             ? new Date(u.created_at).toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' })
             : '—'}
         </span>
       </td>
-      <td style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
+      <td className="um-td um-td-actions" data-label="Actions" style={{ padding: '12px 14px', verticalAlign: 'middle', textAlign: 'left' }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <ActionBtn variant="edit" onClick={onEdit}>
             {Icon.edit(12)} Edit

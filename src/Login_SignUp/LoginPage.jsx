@@ -497,6 +497,21 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
   // auto = true when triggered by the remember-me auto sign-in. It skips the
   // captcha (a human already chose to be remembered on this device) but still
   // goes through the 2FA check, which the trusted-device token satisfies.
+  // True when this email + password belong to a signup whose confirmation
+  // link hasn't been opened yet — i.e. the account doesn't exist in the
+  // system until it's confirmed (see /api/auth/pending-status).
+  const checkPendingAccount = async (emailNorm, pw) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/pending-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailNorm, password: pw }),
+      });
+      const j = await res.json().catch(() => ({}));
+      return res.ok && j.pending === true;
+    } catch { return false; }
+  };
+
   const doLogin = async (rawEmail, pw, { auto = false } = {}) => {
     setError('');
     const emailNorm = rawEmail.trim().toLowerCase();
@@ -507,13 +522,20 @@ export default function LoginPage({ onGoSignup, onGoForgot, onLoginSuccess, onGo
 
     if (authErr) {
       if (/not confirmed/i.test(authErr.message)) setUnverified(emailNorm);
+      let pendingAcct = false;
+      if (!auto && authErr.message === 'Invalid login credentials') {
+        pendingAcct = await checkPendingAccount(emailNorm, pw);
+        if (pendingAcct) setUnverified(emailNorm);
+      }
       if (auto) {
         setAutoUser(null);
         setPassword('');
         setError('Your saved password no longer works. Please sign in again.');
       } else {
         setError(
-          authErr.message === 'Invalid login credentials'
+          pendingAcct
+            ? 'Your account isn\u2019t active yet \u2014 it hasn\u2019t been created until you confirm your email. Open the LibraScan confirmation link we sent to your inbox (check spam too), then log in.'
+            : authErr.message === 'Invalid login credentials'
             ? 'Incorrect email or password. Please try again.'
             : /not confirmed/i.test(authErr.message)
               ? 'Please confirm your email first. Check your inbox (and spam folder) for the LibraScan confirmation link.'

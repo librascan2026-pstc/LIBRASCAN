@@ -992,14 +992,14 @@ function ViewModal({ book, onClose, onEdit }) {
   ) : null;
 
   return (
-    <div style={{
+    <div className="bd-overlay" style={{
       position: 'fixed', inset: 0, background: 'rgba(20,0,0,0.60)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       zIndex: 1000, padding: 24, backdropFilter: 'blur(4px)',
     }}
       onClick={e => e.target === e.currentTarget && onClose()}
     >
-      <div style={{
+      <div className="bd-modal" style={{
         background: 'var(--cream)', borderRadius: 14,
         border: '1px solid rgba(139,0,0,0.18)',
         boxShadow: '0 20px 60px rgba(30,0,0,0.42)',
@@ -1007,7 +1007,7 @@ function ViewModal({ book, onClose, onEdit }) {
         display: 'flex', flexDirection: 'column',
         animation: 'lm-fade-in 0.22s ease',
       }}>
-        <div style={{
+        <div className="bd-head" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           padding: '18px 24px',
           background: 'linear-gradient(135deg, var(--maroon-deep), var(--maroon-mid))',
@@ -1051,9 +1051,9 @@ function ViewModal({ book, onClose, onEdit }) {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 14, overflowY: 'auto', flex: 1, padding: 16, alignItems: 'flex-start' }}>
+        <div className="bd-body" style={{ display: 'flex', gap: 14, overflowY: 'auto', flex: 1, padding: 16, alignItems: 'flex-start' }}>
           {/* Side card — same bordered, rounded-panel language as the Browse Catalog Book Details popup */}
-          <div style={{
+          <div className="bd-side" style={{
             width: 220, flexShrink: 0, padding: '18px 14px 16px',
             border: '1px solid rgba(139,0,0,0.18)', borderRadius: 14,
             background: 'rgba(255,255,255,0.55)',
@@ -1123,7 +1123,7 @@ function ViewModal({ book, onClose, onEdit }) {
             )}
           </div>
 
-          <div style={{
+          <div className="bd-main" style={{
             flex: 1, minWidth: 0, padding: '20px 22px 22px', overflowY: 'auto',
             border: '1px solid rgba(139,0,0,0.18)', borderRadius: 14, background: 'rgba(255,255,255,0.55)',
           }}>
@@ -1154,7 +1154,7 @@ function ViewModal({ book, onClose, onEdit }) {
             </div>
 
             {/* Facts grid — icon-chip cards, same visual language as the Browse Catalog facts panel */}
-            <div style={{
+            <div className="bd-facts" style={{
               display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px 20px', padding: '14px 16px',
               border: '1px solid rgba(139,0,0,0.16)', borderRadius: 12, background: 'rgba(255,255,255,0.45)',
             }}>
@@ -1859,14 +1859,14 @@ export default function Book_Catalog() {
     <div className="lm-module">
       <Toast message={toast.msg} type={toast.type} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div className="bc-stats" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         {[
           { label: 'Total Titles', value: totalBooks },
           { label: 'Total Copies', value: totalCopies },
           { label: 'Available', value: availableCount },
           { label: 'Borrowed', value: borrowedCount },
         ].map(({ label, value }) => (
-          <div key={label} style={{
+          <div key={label} className="bc-stat" style={{
             padding: '8px 16px', borderRadius: 8,
             background: 'linear-gradient(135deg,rgba(139,0,0,0.06),rgba(201,168,76,0.04))',
             border: '1px solid rgba(139,0,0,0.12)',
@@ -1878,7 +1878,7 @@ export default function Book_Catalog() {
             <span style={{ fontSize: 11.5, color: 'var(--text-dim)', fontFamily: 'var(--font-sans)' }}>{label}</span>
           </div>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+        <div className="bc-actions" style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <button onClick={fetchBooks} title="Refresh" style={{
             padding: '9px 11px', borderRadius: 8, fontSize: 12,
             border: '1px solid rgba(139,0,0,0.20)', background: 'transparent',
@@ -1906,13 +1906,13 @@ export default function Book_Catalog() {
         </div>
       </div>
 
-      <div style={{
+      <div className="bc-filters" style={{
         display: 'flex', gap: 10, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center',
         padding: '14px 16px', borderRadius: 10,
         background: 'linear-gradient(135deg,rgba(139,0,0,0.04),rgba(201,168,76,0.03))',
         border: '1px solid rgba(139,0,0,0.10)',
       }}>
-        <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
+        <div className="bc-search" style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
           <span style={{
             position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
             color: 'var(--text-dim)', pointerEvents: 'none',
@@ -1925,18 +1925,18 @@ export default function Book_Catalog() {
             }}
           />
         </div>
-        <select style={selectStyle} value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
+        <select className="bc-select" style={selectStyle} value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
           <option value="all">All Genres</option>
           {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
         </select>
         {(activeTab === 'book' || activeTab === 'inventory') && (
           <>
-            <select style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+            <select className="bc-select" style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
               <option value="all">All Status</option>
               <option value="Available">Available</option>
               <option value="Borrowed">Borrowed</option>
             </select>
-            <select style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
+            <select className="bc-select" style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
               <option value="all">All Shelves</option>
               {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
@@ -1944,6 +1944,7 @@ export default function Book_Catalog() {
         )}
         {activeTab === 'inventory' && (
           <select
+            className="bc-select"
             style={selectStyle}
             value={`${invSort.key}:${invSort.dir}`}
             onChange={e => { const [key, dir] = e.target.value.split(':'); setInvSort({ key, dir }); }}
@@ -1961,7 +1962,7 @@ export default function Book_Catalog() {
             <option value="status:desc">Sort: Status (Borrowed first)</option>
           </select>
         )}
-        <span style={{
+        <span className="bc-count" style={{
           marginLeft: 'auto', fontSize: 11.5, color: 'var(--text-dim)',
           fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
         }}>
@@ -1973,13 +1974,13 @@ export default function Book_Catalog() {
         </span>
       </div>
 
-      <div style={{ display: 'flex', gap: 28, marginBottom: 20, borderBottom: '1.5px solid rgba(139,0,0,0.12)' }}>
+      <div className="bc-tabs" style={{ display: 'flex', gap: 28, marginBottom: 20, borderBottom: '1.5px solid rgba(139,0,0,0.12)' }}>
         {[
           { key: 'book',      label: 'Book',            icon: Ic.book,  count: null },
           { key: 'inventory', label: 'Inventory',       icon: Ic.boxes, count: copies.length || null },
           { key: 'pending',   label: 'Unregister book', icon: Ic.clock, count: pendingBooks.length },
         ].map(t => (
-          <button key={t.key} onClick={() => setActiveTab(t.key)} style={{
+          <button key={t.key} className="bc-tab" onClick={() => setActiveTab(t.key)} style={{
             display: 'flex', alignItems: 'center', gap: 7,
             padding: '0 0 11px', cursor: 'pointer',
             fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700,
@@ -2036,11 +2037,11 @@ export default function Book_Catalog() {
             </div>
           </div>
         ) : (
-          <div style={{
+          <div className="bc-tbl-wrap" style={{
             borderRadius: 10, border: '1px solid rgba(201,168,76,0.35)',
             overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
           }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table className="bc-tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{
                   background: 'linear-gradient(135deg, #8B0000, #6B0000)',
@@ -2086,7 +2087,7 @@ export default function Book_Catalog() {
           </div>
         </div>
       ) : (
-        <div style={{
+        <div className="bc-grid" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
           gap: 20,
@@ -2284,6 +2285,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
     : '—';
   return (
     <tr
+      className="bc-trow"
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onClick={onView}
@@ -2293,7 +2295,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
         cursor: 'pointer', transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
+      <td className="bc-td bc-td-title" data-label="Title" style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
             <img src={book.cover_image_url} alt=""
@@ -2318,32 +2320,32 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
           }}>{book.title}</div>
         </div>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Authors" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{
           fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           display: 'block', maxWidth: 160,
         }}>{book.authors || '—'}</span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="ISBN" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
           {book.isbn || '—'}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Call No." style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.04em' }}>
           {book.call_number || '—'}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Copies" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
           {parseInt(book.copies) || 0}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Submitted" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>{submitted}</span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Status" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{
           display: 'inline-flex', alignItems: 'center', gap: 5,
           padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
@@ -2354,7 +2356,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
           Awaiting Confirmation
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }} onClick={e => e.stopPropagation()}>
+      <td className="bc-td bc-td-actions" data-label="Action" style={{ padding: '11px 16px', textAlign: 'left' }} onClick={e => e.stopPropagation()}>
         <ActionBtn variant="delete" onClick={onWithdraw}>{Ic.trash} Withdraw</ActionBtn>
       </td>
     </tr>
@@ -2422,11 +2424,11 @@ function InventoryPanel({
           </div>
         </div>
       ) : (
-        <div style={{
+        <div className="bc-tbl-wrap" style={{
           borderRadius: 10, border: '1px solid rgba(139,0,0,0.14)',
           overflow: 'hidden', boxShadow: '0 2px 12px rgba(30,0,0,0.07)',
         }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="bc-tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{
                 background: 'linear-gradient(135deg, #8B0000, #6B0000)',
@@ -2488,6 +2490,7 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
   const book = copy.book || {};
   return (
     <tr
+      className="bc-trow"
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       style={{
@@ -2496,7 +2499,7 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
         transition: 'background 0.14s',
       }}
     >
-      <td style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
+      <td className="bc-td bc-td-title" data-label="Title" style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
             <img src={book.cover_image_url} alt=""
@@ -2521,22 +2524,22 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
           }}>{book.title || 'Untitled'}</div>
         </div>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Copy" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 13, fontWeight: 700, fontFamily: 'var(--font-sans)', color: 'var(--maroon-mid)' }}>
           #{copy.copy_number}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Copy ID" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 11.5, color: 'var(--text-muted)', fontFamily: 'monospace', letterSpacing: '0.02em' }}>
           {(copy.copy_id || '').slice(0, 8)}…
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Shelf Location" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
           {book.shelf_location || '—'}
         </span>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td" data-label="Status" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3, alignItems: 'flex-start' }}>
           <StatusBadge status={copy.status} />
           {copy.stale && (
@@ -2546,7 +2549,7 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
           )}
         </div>
       </td>
-      <td style={{ padding: '11px 16px', textAlign: 'left' }}>
+      <td className="bc-td bc-td-actions" data-label="Action" style={{ padding: '11px 16px', textAlign: 'left' }}>
         <div style={{ display: 'flex', gap: 5, flexWrap: 'nowrap' }}>
           <ActionBtn variant="qr" onClick={onViewQr}>{Ic.qr} QR</ActionBtn>
           {copy.stale && (

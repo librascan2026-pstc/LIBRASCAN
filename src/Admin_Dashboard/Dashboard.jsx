@@ -6,6 +6,7 @@ import {
   getNotifPrefs,
   getNotifSoundEnabled,
   NOTIF_PREFS_EVENT,
+  isNotifSilenced,
 } from './notificationPrefs';
 import {
   getNotifHistory,
@@ -98,6 +99,33 @@ function getNotifTarget(n) {
   }
 }
 
+
+// Finds the record a clicked notification points at (rows/cards carry a
+// data-notif-target token), scrolls to it and gives it a short, soft highlight
+// in the notification's own colour. Rows mount after their data loads, so it
+// retries briefly instead of giving up on the first miss.
+function flashNotifTarget(key, color) {
+  if (!key || typeof document === 'undefined') return;
+  const selector = `[data-notif-target~="${String(key).replace(/"/g, '')}"]`;
+  const started  = Date.now();
+  const tryFlash = () => {
+    const el = document.querySelector(selector);
+    if (!el) return Date.now() - started > 5000;      // give up after 5s
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (color) el.style.setProperty('--lm-hit', color);
+    el.classList.remove('lm-notif-hit', 'lm-notif-hit-out');
+    void el.offsetWidth;
+    el.classList.add('lm-notif-hit');
+    setTimeout(() => el.classList.add('lm-notif-hit-out'), 1800);
+    setTimeout(() => {
+      el.classList.remove('lm-notif-hit', 'lm-notif-hit-out');
+      el.style.removeProperty('--lm-hit');
+    }, 2700);
+    return true;
+  };
+  if (tryFlash()) return;
+  const timer = setInterval(() => { if (tryFlash()) clearInterval(timer); }, 150);
+}
 
 function fmtAgo(iso) {
   if (!iso) return '';
@@ -241,7 +269,7 @@ export default function Dashboard({ user, onSignOut }) {
     // legacy/retired type that no longer has a toggle — is excluded by
     // default instead of silently passing through.
     const prefs = notifPrefsRef.current;
-    const enabled = notifications.filter(n => prefs[n.type] === true);
+    const enabled = notifications.filter(n => prefs[n.type] === true && !isNotifSilenced(user?.id, n));
     return notifTab === 'unread' ? enabled.filter(n => !n.read) : enabled;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [notifications, notifTab, prefsVersion]);
@@ -265,6 +293,21 @@ export default function Dashboard({ user, onSignOut }) {
   // once its tab mounts. `nonce` forces the target tab to re-run its focus
   // effect even if the same id is clicked again.
   const [notifFocus, setNotifFocus] = useState({ prop: null, value: null, nonce: 0 });
+
+  // Safety net: anything that shows as read in the bell must also be read in
+  // the Notification History, so the two lists can never disagree.
+  useEffect(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    const readInBell = notifications.filter(n => n.read).map(n => n.id);
+    if (!readInBell.length) return;
+    const unreadInHistory = new Set(getNotifHistory(uid).filter(h => !h.read).map(h => h.id));
+    const toMark = readInBell.filter(id => unreadInHistory.has(id));
+    if (!toMark.length) return;
+    let next = null;
+    toMark.forEach(id => { next = markNotifHistoryRead(uid, id); });
+    if (next) setNotifHistory(next);
+  }, [notifications, user?.id]);
 
   // Per-row "…" menu (bell dropdown + "See all" history page) — tracks
   // which single notification's menu is open, if any. Only one can be open
@@ -420,7 +463,7 @@ export default function Dashboard({ user, onSignOut }) {
     // Strict opt-in ("=== true") rather than "!== false" — a type absent
     // from prefs entirely (disabled, or a retired/legacy type with no
     // toggle at all) must never be treated as allowed.
-    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
+    const allowed = incoming.filter(n => notifPrefsRef.current[n.type] === true && !isNotifSilenced(user?.id, n) && !isNotifDeleted(user?.id, n.id));
 
     if (allowed.length) {
       // De-dupe against the CURRENT id set (a plain ref-tracked set the
@@ -470,7 +513,7 @@ export default function Dashboard({ user, onSignOut }) {
   // had already added a moment earlier.
   const showInitialBatch = useCallback((notifs) => {
     if (!notifs.length) return;
-    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifDeleted(user?.id, n.id));
+    const allowed = notifs.filter(n => notifPrefsRef.current[n.type] === true && !isNotifSilenced(user?.id, n) && !isNotifDeleted(user?.id, n.id));
     if (!allowed.length) return;
 
     // Bug fix: a notification the person already opened/read in a previous
@@ -1042,6 +1085,16 @@ export default function Dashboard({ user, onSignOut }) {
       nonce: Date.now(),
     });
 
+    // Soft highlight (in the notification's colour) on the exact record.
+    if (target.kind === 'exact') {
+      const hitKey =
+          target.focusProp === 'focusBorrowId'    ? `borrow:${target.focusValue}`
+        : target.focusProp === 'focusBorrowingId' ? `borrowing:${target.focusValue}`
+        : target.focusProp === 'focusUserId'      ? `user:${target.focusValue}`
+        : null;
+      flashNotifTarget(hitKey, (NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST).color);
+    }
+
     setNotifOpen(false);
     setHistoryOpen(false);
   };
@@ -1217,7 +1270,7 @@ export default function Dashboard({ user, onSignOut }) {
     // saved before that type was removed and would otherwise sit here
     // forever with no way to turn them off.
     const currentPrefs = getNotifPrefs(user?.id);
-    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true);
+    const enabledHistory = notifHistory.filter(n => currentPrefs[n.type] === true && !isNotifSilenced(user?.id, n));
 
     const q = historySearch.trim().toLowerCase();
     const rows = enabledHistory.filter(n => {

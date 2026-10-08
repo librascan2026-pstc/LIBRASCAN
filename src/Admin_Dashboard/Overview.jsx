@@ -2,13 +2,6 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
 
-const Icon = {
-  users:  (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>,
-  books:  (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>,
-  borrow: (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>,
-  attend: (s=20) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>,
-};
-
 const CATEGORY_COLORS = [
   '#8B0000','#C9A84C','#1A4DA0','#0D7377','#5B2C8D',
   '#B87333','#277A3C','#C0392B','#2E4057','#A04000',
@@ -464,6 +457,8 @@ const SCROLL_STYLE = `
   .lm-overview-page .lm-stat-card { padding: 15px 16px 13px; gap: 4px; }
   .lm-overview-page .lm-stat-icon { width: 34px; height: 34px; margin-bottom: 2px; }
   .lm-overview-page .lm-stat-value { font-size: 26px; }
+  /* Hide the gold accent line along the top edge of the stat cards (Overview only). */
+  .lm-overview-page .lm-stat-card::before { display: none; }
   .lm-overview-page .lm-stat-sub { margin-top: 0; }
   .lm-overview-page .lm-panel { padding: 14px 16px; margin-bottom: 0; }
   .lm-overview-page .lm-panel-title { margin-bottom: 8px; padding-bottom: 6px; }
@@ -556,7 +551,11 @@ export default function Overview({ onNavigate }) {
     try {
       const todayStr = todayLocal();
 
-      let qUsers    = supabase.from('profiles').select('id', { count: 'exact' });
+      // Total Users mirrors the User Management list exactly: same table, same
+      // client, same campus scope, and the same exclusion of super_admin and
+      // library_manager accounts (only students/employees are managed there).
+      let qUsers    = supabaseAdmin.from('profiles').select('id', { count: 'exact' })
+        .or('role.is.null,role.not.in.(super_admin,library_manager)');
       let qBooks    = supabase.from('books').select('id', { count: 'exact' });
       let qBorrowed = supabaseAdmin.from('borrowings').select('id', { count: 'exact' }).eq('status', 'Borrowed');
       let qAttend   = supabase.from('attendance_logs').select('id', { count: 'exact' }).eq('date', todayStr);
@@ -757,10 +756,10 @@ export default function Overview({ onNavigate }) {
   }, [loadStats, loadCharts]);
 
   const STAT_CARDS = [
-    { label: 'Total Users',      value: stats.users,      icon: Icon.users,  sub: 'Registered accounts' },
-    { label: 'Books in Catalog', value: stats.books,      icon: Icon.books,  sub: 'Total collection'    },
-    { label: 'Books Borrowed',   value: stats.borrowed,   icon: Icon.borrow, sub: 'Currently borrowed today'   },
-    { label: "Today's Visitors", value: stats.attendance, icon: Icon.attend, sub: 'Attendance today'    },
+    { label: 'Total Users',      value: stats.users,      sub: 'Registered accounts' },
+    { label: 'Books in Catalog', value: stats.books,      sub: 'Total collection'    },
+    { label: 'Books Borrowed',   value: stats.borrowed,   sub: 'Currently borrowed today'   },
+    { label: "Today's Visitors", value: stats.attendance, sub: 'Attendance today'    },
   ];
 
   const programTotal = programDist.reduce((s, p) => s + p.count, 0) || 1;
@@ -776,9 +775,8 @@ export default function Overview({ onNavigate }) {
       <style>{SCROLL_STYLE}</style>
 
       <div className="lm-stats-grid">
-        {STAT_CARDS.map(({ label, value, icon, sub }) => (
+        {STAT_CARDS.map(({ label, value, sub }) => (
           <div key={label} className="lm-stat-card">
-            <div className="lm-stat-icon">{icon(20)}</div>
             <div className="lm-stat-label">{label}</div>
             <div className="lm-stat-value">
               {loading

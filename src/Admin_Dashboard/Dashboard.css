@@ -1330,6 +1330,27 @@ a { text-decoration: none; }
   outline-offset: 2px;
 }
 
+/* Notification History — keep the row content (type, message) left-aligned. */
+.lm-notif-hist-list .lm-notif-body,
+.lm-notif-hist-list .lm-notif-msg { text-align: left; }
+
+/* Soft highlight on the record a clicked notification points to. The colour
+   (--lm-hit) is set from the notification's own type colour. */
+.lm-notif-hit { --lm-hit: #C9A84C; }
+tr.lm-notif-hit > td {
+  background-color: color-mix(in srgb, var(--lm-hit) 18%, transparent) !important;
+  transition: background-color 0.8s ease, box-shadow 0.8s ease;
+}
+tr.lm-notif-hit > td:first-child { box-shadow: inset 4px 0 0 var(--lm-hit); }
+tr.lm-notif-hit.lm-notif-hit-out > td { background-color: transparent !important; }
+tr.lm-notif-hit.lm-notif-hit-out > td:first-child { box-shadow: inset 4px 0 0 transparent; }
+.lm-notif-hit:not(tr) {
+  outline: 3px solid color-mix(in srgb, var(--lm-hit) 55%, transparent);
+  outline-offset: 2px;
+  transition: outline-color 0.8s ease;
+}
+.lm-notif-hit.lm-notif-hit-out:not(tr) { outline-color: transparent; }
+
 @media (max-width: 560px) {
   .lm-notif-hist-list { max-height: none; }
 }
@@ -2560,3 +2581,448 @@ a { text-decoration: none; }
 .um-table-scroll::-webkit-scrollbar-track { background: rgba(139,0,0,0.05); border-radius: 10px; }
 .um-table-scroll::-webkit-scrollbar-thumb { background: rgba(201,168,76,0.75); border-radius: 10px; }
 .um-table-scroll::-webkit-scrollbar-thumb:hover { background: rgba(201,168,76,1); }
+
+
+/* ==========================================================================
+   RESPONSIVE ENHANCEMENTS  (appended — nothing above this line was changed)
+   Breakpoints: ≤1024 tablet-landscape · ≤900 tablet-portrait (drawer nav)
+                ≤768 large phone · ≤560 phone · ≤380 small phone
+   ========================================================================== */
+
+/* ---------- Global safety nets ---------- */
+img, svg, video, canvas { max-width: 100%; }
+.lm-main, .lm-content, .lm-module { min-width: 0; }
+.lm-main { min-height: 100vh; min-height: 100dvh; }
+.lm-content { overflow-x: hidden; }
+input, select, textarea { max-width: 100%; }
+
+/* ---------- Tablet landscape / small laptop (≤1024) ---------- */
+@media (max-width: 1024px) {
+  .lm-content { padding: 20px 20px 28px; }
+  .lm-catalog-grid { grid-template-columns: repeat(3, 1fr) !important; }
+}
+
+/* ---------- Tablet portrait (769–900): same slide-in drawer as phones ---------- */
+@media (min-width: 769px) and (max-width: 900px) {
+  :root { --sidebar-w: 252px; --topbar-h: 64px; }
+  .lm-sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.30s cubic-bezier(0.4, 0, 0.2, 1), width 0.30s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 300;
+    width: var(--sidebar-w) !important;
+  }
+  .lm-sidebar.mobile-open { transform: translateX(0); }
+  .lm-sidebar-overlay { display: block !important; }
+  .lm-main, .lm-main.sidebar-collapsed { margin-left: 0 !important; }
+  .lm-hamburger { display: flex !important; }
+  .lm-collapse-btn { display: none !important; }
+  .lm-topbar { padding: 0 18px; gap: 10px; }
+  .lm-topbar-left { flex-direction: row; align-items: center; gap: 12px; }
+  .lm-stats-grid { grid-template-columns: repeat(2, 1fr); }
+  .lm-content { padding: 18px 18px 28px; }
+}
+
+/* ---------- Modals / pop-ups: never overflow the screen ---------- */
+@media (max-width: 768px) {
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] {
+    padding: 12px !important;
+  }
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] > div[style*="max-height"] {
+    max-height: calc(100vh - 24px) !important;
+    max-height: calc(100dvh - 24px) !important;
+  }
+  .lm-modal { max-height: calc(100dvh - 24px); overflow-y: auto; }
+}
+
+/* ---------- Tables: contained, smooth horizontal scroll ---------- */
+@media (max-width: 768px) {
+  .lm-table-wrap, .ra-table-wrap, .um-table-scroll,
+  div[style*="overflow-x: auto"], div[style*="overflow: auto"] {
+    -webkit-overflow-scrolling: touch;
+    max-width: 100%;
+  }
+  /* Book Catalog — Unregister / Inventory tables were clipped (overflow:hidden) */
+  div[style*="overflow: hidden"][style*="box-shadow: rgba(30, 0, 0, 0.07)"] {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  div[style*="overflow: hidden"][style*="box-shadow: rgba(30, 0, 0, 0.07)"] > table { min-width: 620px; }
+}
+
+/* ======================================================================
+   BOOK CATALOG
+   ====================================================================== */
+@media (max-width: 768px) {
+  .bc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 14px !important; }
+}
+@media (max-width: 380px) {
+  .bc-grid { gap: 10px !important; }
+}
+@media (max-width: 330px) {
+  .bc-grid { grid-template-columns: minmax(0, 1fr) !important; }
+}
+
+/* Book Details modal — stack cover card above details on tablets/phones */
+@media (max-width: 720px) {
+  .bd-overlay { padding: 10px !important; }
+  .bd-modal {
+    max-height: calc(100vh - 20px) !important;
+    max-height: calc(100dvh - 20px) !important;
+    border-radius: 16px !important;
+  }
+  .bd-head { padding: 14px 16px !important; border-radius: 16px 16px 0 0 !important; gap: 10px; }
+  .bd-head h2 { font-size: 15px !important; }
+  .bd-head > div:last-child { flex-shrink: 0; }
+  .bd-body {
+    min-height: 0;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    padding: 12px !important;
+    gap: 12px !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .bd-side {
+    position: static !important;
+    width: 100% !important;
+    padding: 14px !important;
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 200px));
+    justify-content: center;
+    column-gap: 14px !important; row-gap: 12px !important;
+    align-items: start !important;
+  }
+  .bd-side > div:first-child { grid-column: 1; grid-row: 1; }              /* cover */
+  .bd-side > div:nth-child(4) { grid-column: 2; grid-row: 1; }             /* original scan */
+  .bd-side > div:nth-child(2) { grid-column: 1 / -1; grid-row: 2; }        /* copies label */
+  .bd-side > button { grid-column: 1 / -1; grid-row: 3; }                  /* QR button */
+  /* no abstract scan → cover sits centred on its own */
+  .bd-side > div:first-child:nth-last-child(3) { grid-column: 1 / -1; justify-self: center; width: 100%; max-width: 180px; }
+  .bd-main { padding: 16px !important; overflow: visible !important; }
+  .bd-main h3 { font-size: 20px !important; word-break: break-word; }
+  .bd-facts { gap: 12px 16px !important; padding: 12px !important; }
+}
+@media (max-width: 480px) {
+  .bd-facts { grid-template-columns: 1fr !important; }
+}
+
+/* ======================================================================
+   USER MANAGEMENT — table becomes readable cards on phones
+   ====================================================================== */
+@media (max-width: 768px) {
+  .um-toolbar { padding: 12px !important; gap: 8px !important; }
+  .um-search-wrap { flex: 1 1 100% !important; min-width: 0 !important; }
+}
+@media (max-width: 640px) {
+  .um-table-scroll { overflow: visible !important; border: none !important; box-shadow: none !important; background: transparent !important; }
+  .um-table, .um-table tbody { display: block !important; width: 100% !important; min-width: 0 !important; }
+  .um-table colgroup, .um-table thead { display: none !important; }
+  .um-row {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 14px;
+    margin-bottom: 12px;
+    background: var(--cream-light) !important;
+    border: 1px solid rgba(139,0,0,0.16) !important;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(30,0,0,0.07);
+  }
+  .um-td {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 0 !important;
+    min-width: 0;
+    border-bottom: 1px dashed rgba(139,0,0,0.12);
+    white-space: normal !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+  }
+  .um-td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .um-td > span { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+  .um-td-name {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+    padding: 0 0 10px !important;
+    border-bottom: 1px solid rgba(201,168,76,0.35);
+  }
+  .um-td-name::before { display: none; }
+  .um-td-name > div { width: 100%; }
+  .um-td-name span { text-align: left; white-space: normal !important; }
+  .um-td-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+    border-bottom: none;
+    padding: 12px 0 0 !important;
+  }
+  .um-td-actions::before { display: none; }
+  .um-td-actions button { min-height: 36px; padding: 6px 14px !important; }
+}
+
+/* ======================================================================
+   REPORTS & ANALYTICS
+   (.ra-root .ra-stat-grid has higher specificity than the media rules
+    inside Reports_Analytics.jsx, which is why phones got 1 card per row)
+   ====================================================================== */
+@media (max-width: 768px) {
+  .lm-content .ra-root div[style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+  .lm-content .ra-root .ra-mod-controls { width: 100%; }
+}
+
+/* ======================================================================
+   FORMS INSIDE MODALS (Add/Edit Book, Add User, Borrow, Attendance…)
+   ====================================================================== */
+@media (max-width: 560px) {
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] [style*="grid-template-columns: 1fr 1fr;"],
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] [style*="grid-template-columns: 1fr 1fr "] {
+    grid-template-columns: 1fr !important;
+  }
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] [style*="grid-template-columns: 1fr 1fr 1fr"] {
+    grid-template-columns: 1fr 1fr !important;
+  }
+  /* Keep taps comfortable and stop iOS zooming into inputs */
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] input,
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] select,
+  [style*="position: fixed"][style*="z-index"][style*="justify-content: center"] textarea { font-size: 16px; }
+}
+
+/* ======================================================================
+   SHARED PAGE PIECES — headers, toolbars, filters, stat cards
+   ====================================================================== */
+@media (max-width: 768px) {
+  .lm-module-header { flex-wrap: wrap; gap: 10px; }
+  .lm-search { min-width: 0; }
+}
+@media (max-width: 560px) {
+  .lm-stats-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 8px !important; }
+  .lm-stat-card { padding: 12px 12px !important; min-width: 0; overflow-wrap: anywhere; }
+  .lm-stat-value { font-size: 22px !important; }
+  .lm-stat-label { font-size: 10px; }
+  .lm-quick-stats { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .lm-pagination { flex-wrap: wrap; justify-content: center; }
+}
+@media (max-width: 380px) {
+  .lm-stats-grid { gap: 6px !important; }
+  .lm-stat-card { padding: 10px !important; }
+  .lm-stat-value { font-size: 19px !important; }
+}
+
+/* ---------- Wide screens: keep content comfortably readable ---------- */
+@media (min-width: 1920px) {
+  .lm-content { padding: 38px 48px; }
+}
+
+/* ---------- Landscape phones: short viewport ---------- */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root { --topbar-h: 52px; }
+  .bd-modal { max-height: calc(100dvh - 12px) !important; }
+}
+
+/* ---------- Reduced-motion ----------
+   Removed on purpose: forcing animation-duration to 0.01ms on EVERY element made
+   all infinite animations (running header line, bell, pulse dots, spinners) loop
+   thousands of times per second on devices with "reduce motion"/battery saver on,
+   which showed up as violent flickering instead of a smooth run. */
+
+
+/* ==========================================================================
+   RESPONSIVE ENHANCEMENTS — PART 2
+   Book Catalog (header, filters, tabs, Inventory + Unregister cards)
+   Settings → Profile (banner, personal information)
+   ========================================================================== */
+
+/* ======================================================================
+   BOOK CATALOG
+   ====================================================================== */
+@media (max-width: 640px) {
+
+  /* Stat chips → tidy 2×2 grid, buttons on their own full-width row */
+  .bc-stats { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px !important; margin-bottom: 14px !important; }
+  .bc-stat { padding: 10px 12px !important; min-width: 0; justify-content: flex-start; }
+  .bc-actions { grid-column: 1 / -1; margin-left: 0 !important; width: 100%; }
+  .bc-actions > button:last-child { flex: 1; justify-content: center; }
+
+  /* Search + filters → search on top, selects in two columns */
+  .bc-filters { display: grid !important; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px !important; padding: 12px !important; margin-bottom: 14px !important; }
+  .bc-search { grid-column: 1 / -1; flex: none !important; min-width: 0 !important; width: 100%; }
+  .bc-select { width: 100%; min-width: 0; }
+  .bc-select:only-of-type, .bc-select:nth-of-type(3), .bc-select[aria-label="Sort inventory"] { grid-column: 1 / -1; }
+  .bc-count { grid-column: 1 / -1; margin-left: 0 !important; text-align: right; }
+
+  /* Tabs: one tidy row, no wrapped labels */
+  .bc-tabs { gap: 0 !important; justify-content: space-between; margin-bottom: 14px !important; }
+  .bc-tab { flex: 1 1 auto; justify-content: center; white-space: nowrap; gap: 5px !important; padding: 0 6px 11px !important; font-size: 12.5px !important; }
+
+  /* Inventory + Unregister tables → cards */
+  .bc-tbl-wrap { overflow: visible !important; border: none !important; box-shadow: none !important; background: transparent !important; }
+  .bc-tbl, .bc-tbl tbody { display: block !important; width: 100% !important; min-width: 0 !important; }
+  .bc-tbl thead { display: none !important; }
+  .bc-trow {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+    margin-bottom: 12px;
+    background: var(--cream-light) !important;
+    border: 1px solid rgba(139,0,0,0.16) !important;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(30,0,0,0.07);
+  }
+  .bc-td {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    max-width: none !important;
+    padding: 8px 0 !important;
+    border-bottom: 1px dashed rgba(139,0,0,0.12);
+  }
+  .bc-td::before {
+    content: attr(data-label);
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .bc-td > span {
+    min-width: 0; max-width: none !important;
+    white-space: normal !important; overflow: visible !important;
+    overflow-wrap: anywhere; text-align: right;
+  }
+  .bc-td > div[style*="flex-direction: column"] { align-items: flex-end !important; }
+  .bc-td-title {
+    justify-content: flex-start;
+    padding: 0 0 10px !important;
+    border-bottom: 1px solid rgba(201,168,76,0.35);
+  }
+  .bc-td-title::before { display: none; }
+  .bc-td-title > div { min-width: 0; width: 100%; }
+  .bc-td-title > div > div:last-child {
+    max-width: none !important; white-space: normal !important;
+    overflow: visible !important; text-overflow: clip !important;
+    font-size: 14px !important; line-height: 1.3;
+  }
+  .bc-td-title img { width: 40px !important; height: 52px !important; }
+  .bc-td-actions {
+    justify-content: flex-end;
+    border-bottom: none;
+    padding: 12px 0 0 !important;
+  }
+  .bc-td-actions::before { display: none; }
+  .bc-td-actions > div { flex-wrap: wrap !important; justify-content: flex-end; }
+  .bc-td-actions button { min-height: 36px; }
+}
+@media (max-width: 380px) {
+  .bc-tab > span:first-child { display: none; }   /* hide tab icons on very small phones */
+}
+
+/* ======================================================================
+   SETTINGS → PROFILE
+   (selectors carry .lm-content so they win over the <style> block that
+    Settings.jsx injects at render time)
+   ====================================================================== */
+@media (max-width: 768px) {
+  .lm-content .set-prof-name {
+    max-width: 100% !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-overflow: clip;
+    line-height: 1.1;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+  }
+  .lm-content .set-prof-info { min-width: 0; flex: 1; }
+  .lm-content .set-prof-panel-hdr { flex-wrap: wrap; row-gap: 10px; }
+  .lm-content .set-prof-panel-title { flex: 1 1 auto; text-align: left; }
+  .lm-content .set-prof-emailrow { overflow-wrap: anywhere; align-items: flex-start; }
+  .lm-content .set-prof-role { overflow-wrap: anywhere; }
+}
+@media (max-width: 520px) {
+  .lm-content .set-prof-cover {
+    height: auto; min-height: 96px;
+    padding: 14px 16px 12px;
+    align-items: flex-end;
+  }
+  .lm-content .set-prof-av-float { left: 16px; top: 68px; }
+  .lm-content .set-prof-avwrap { width: 56px; height: 56px; border-width: 3px; }
+  .lm-content .set-prof-avinit { font-size: 18px; }
+  .lm-content .set-prof-cam-btn { width: 24px; height: 24px; border-width: 2px; }
+  .lm-content .set-prof-namewrap { margin-left: 68px; text-align: left; }
+  .lm-content .set-prof-info { text-align: left; }
+  .lm-content .set-prof-name { font-size: clamp(17px, 5.2vw, 24px); text-align: left; letter-spacing: 0.02em; }
+  .lm-content .set-prof-remove-btn { top: 10px; right: 12px; padding: 5px 10px; font-size: 10.5px; }
+  .lm-content .set-prof-subinfo { padding: 36px 16px 14px; }
+
+  .lm-content .set-prof-panel { padding: 16px; }
+  .lm-content .set-prof-panel-title { font-size: 11.5px; letter-spacing: 0.08em; }
+  .lm-content .set-prof-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 14px; }
+  .lm-content .set-prof-grid > .set-prof-field:last-child { grid-column: 1 / -1; }   /* email */
+  .lm-content .set-prof-field, .lm-content .set-prof-flabel, .lm-content .set-prof-fvalue { text-align: left; }
+  .lm-content .set-prof-grid:has(input) { grid-template-columns: 1fr; }                /* edit mode */
+
+  .lm-content .s-tabs { margin-bottom: 18px; }
+  .lm-content .s-tab { flex: 1; justify-content: center; padding: 10px 8px; }
+}
+@media (max-width: 340px) {
+  .lm-content .set-prof-grid { grid-template-columns: 1fr; }
+  .lm-content .s-tab { gap: 4px; font-size: 12px; }
+  .lm-content .s-tab svg { display: none; }
+}
+
+
+/* ==========================================================================
+   RESPONSIVE ENHANCEMENTS — PART 3
+   Reports & Analytics summary cards + tabs
+   (.lm-content prefix → beats the <style> block injected by
+    Reports_Analytics.jsx, which was overriding the earlier rules)
+   ========================================================================== */
+@media (max-width: 768px) {
+  .lm-content .ra-root .ra-stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .lm-content .ra-root .ra-stat { padding: 11px 12px; text-align: center; }
+  .lm-content .ra-root .ra-stat-lbl { font-size: 10px; letter-spacing: .07em; margin-bottom: 6px; }
+  .lm-content .ra-root .ra-stat-val { font-size: 24px; margin-bottom: 4px; }
+  .lm-content .ra-root .ra-stat-sub { font-size: 11px; }
+  /* 5 cards → last one spans the full row instead of leaving a hole */
+  .lm-content .ra-root .ra-stat-grid > .ra-stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .lm-content .ra-root .ra-nav-tabs { margin-bottom: 14px; scrollbar-width: none; }
+  .lm-content .ra-root .ra-nav-tabs::-webkit-scrollbar { display: none; }
+}
+@media (max-width: 480px) {
+  .lm-content .ra-root .ra-nav-tab svg { display: none; }
+  .lm-content .ra-root .ra-nav-tab { padding: 9px 12px; }
+}
+@media (max-width: 380px) {
+  .lm-content .ra-root .ra-stat-grid { gap: 8px; }
+  .lm-content .ra-root .ra-stat { padding: 10px; }
+  .lm-content .ra-root .ra-stat-val { font-size: 22px; }
+}
+
+
+/* ==========================================================================
+   RESPONSIVE ENHANCEMENTS — PART 4
+   Reports & Analytics tab bar: no scrollbar, drag (mouse) / swipe (touch)
+   ========================================================================== */
+.lm-content .ra-root .ra-nav-tabs {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.lm-content .ra-root .ra-nav-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
+.lm-content .ra-root .ra-nav-tabs.ra-dragging { cursor: grabbing; }
+.lm-content .ra-root .ra-nav-tabs.ra-dragging .ra-nav-tab { pointer-events: none; }

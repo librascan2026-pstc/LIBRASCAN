@@ -622,6 +622,81 @@ const CSS = `
     transform: translateY(-1px);
   }
   .sas-modal-actions .sas-btn.d:active:not(:disabled) { transform: translateY(0); }
+
+  /* ====================================================================
+     RESPONSIVE — phone / tablet / laptop-PC
+     Appended last so it only refines this page; nothing above changed.
+     ==================================================================== */
+  .sas-wrap { min-width: 0; }
+  .sas-prof-banner, .sas-prof-panel { text-align: left; }
+  .sas-prof-namewrap { flex: 1 1 auto; }
+  .sas-prof-name { max-width: 100%; }
+  .sas-prof-fvalue { white-space: normal; overflow-wrap: anywhere; }
+  .sas-prof-panel-hdr { flex-wrap: wrap; row-gap: 10px; }
+  .sas-prof-panel-title { flex: 1 1 auto; min-width: 0; }
+  .sas-prof-panel-hdr > div { flex-wrap: wrap; }
+
+  /* laptop / desktop: email gets a wider column so it never gets squeezed */
+  @media (min-width: 901px) {
+    .sas-prof-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(0, 1.9fr); }
+  }
+
+  /* tablet: 2-column grid, email spans the full row */
+  @media (max-width: 900px) {
+    .sas-prof-grid { gap: 14px 20px; }
+    .sas-prof-field:last-child { grid-column: 1 / -1; }
+  }
+  @media (max-width: 768px) {
+    .sas-wrap { padding-bottom: 56px; }
+    .sas-prof-name { font-size: clamp(22px, 4.6vw, 30px); }
+  }
+
+  /* phones */
+  @media (max-width: 520px) {
+    .sas-tabs { margin-bottom: 18px; }
+    .sas-tab { flex: 1 1 0; justify-content: center; padding: 10px 8px; }
+
+    .sas-prof-banner { margin-bottom: 16px; border-radius: 12px; }
+    .sas-prof-cover { height: 92px; min-height: 92px; padding: 0 14px 10px; }
+    .sas-prof-remove-btn { top: 10px; right: 12px; padding: 5px 10px; font-size: 10.5px; }
+    .sas-prof-av-float { left: 14px; top: 52px; }
+    .sas-prof-avwrap { width: 72px; height: 72px; border-width: 3px; }
+    .sas-prof-avinit { font-size: 22px; }
+    .sas-prof-cam-btn { width: 26px; height: 26px; border-width: 2px; }
+    .sas-prof-namewrap { margin-left: 86px; }
+    .sas-prof-name {
+      font-size: 20px; letter-spacing: 0.02em; line-height: 1.15;
+      white-space: normal; display: -webkit-box;
+      -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    }
+    .sas-prof-subinfo { padding: 8px 14px 14px 100px; gap: 3px; min-height: 56px; }
+    .sas-prof-role { font-size: 12px; line-height: 1.35; }
+    .sas-prof-emailrow { font-size: 11px; line-height: 1.35; align-items: flex-start; overflow-wrap: anywhere; word-break: break-word; }
+    .sas-prof-emailrow svg { margin-top: 3px; flex-shrink: 0; }
+
+    .sas-prof-panel { padding: 16px 14px; border-radius: 12px; }
+    .sas-prof-panel-hdr { margin-bottom: 14px; padding-bottom: 10px; }
+    .sas-prof-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+
+    .sas-card { padding: 16px 14px; border-radius: 12px; }
+    .sas-mfa-bar { flex-wrap: wrap; padding: 12px 14px; }
+    .sas-mfa-right { margin-left: auto; }
+    .sas-btn-row .sas-btn { flex: 1 1 auto; }
+
+    .sas-toast { left: 14px; right: 14px; bottom: 76px; max-width: none; }
+    .sas-fab { right: 14px; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); height: 48px; width: 48px; border-radius: 24px; }
+    .sas-fab-icon { width: 48px; height: 48px; }
+  }
+
+  /* very small phones */
+  @media (max-width: 360px) {
+    .sas-prof-av-float { left: 12px; }
+    .sas-prof-avwrap { width: 64px; height: 64px; }
+    .sas-prof-namewrap { margin-left: 76px; }
+    .sas-prof-name { font-size: 18px; }
+    .sas-prof-subinfo { padding-left: 90px; }
+    .sas-prof-grid { grid-template-columns: minmax(0, 1fr); }
+  }
 `;
 
 const ROLES = {

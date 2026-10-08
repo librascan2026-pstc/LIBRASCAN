@@ -225,6 +225,7 @@ function useScannerCapture(onScan) {
   const bufRef     = useRef('');
   const timerRef   = useRef(null);
   const refocusRef = useRef(null);
+  const blurTimerRef = useRef(null);   // delays the "not focused" UI so the 80ms auto-refocus never flashes it
   const [receiving, setReceiving] = useState(false);
   const [pulse,     setPulse]     = useState(false);
   const [focused,   setFocused]   = useState(true);
@@ -243,7 +244,7 @@ function useScannerCapture(onScan) {
   useEffect(() => {
     inputRef.current?.focus({ preventScroll: true });
     const poll = setInterval(refocusIfSafe, 2000);
-    return () => { clearInterval(poll); clearTimeout(refocusRef.current); clearTimeout(timerRef.current); };
+    return () => { clearInterval(poll); clearTimeout(refocusRef.current); clearTimeout(timerRef.current); clearTimeout(blurTimerRef.current); };
   }, [refocusIfSafe]);
 
   const handleKeyDown = useCallback((e) => {
@@ -260,8 +261,12 @@ function useScannerCapture(onScan) {
     }
   }, [onScan]);
 
-  const handleBlur  = useCallback(() => { setFocused(false); refocusIfSafe(); }, [refocusIfSafe]);
-  const handleFocus = useCallback(() => setFocused(true), []);
+  const handleBlur  = useCallback(() => {
+    clearTimeout(blurTimerRef.current);
+    blurTimerRef.current = setTimeout(() => setFocused(false), 300);
+    refocusIfSafe();
+  }, [refocusIfSafe]);
+  const handleFocus = useCallback(() => { clearTimeout(blurTimerRef.current); setFocused(true); }, []);
 
   const inputEl = (
     <input ref={inputRef} onKeyDown={handleKeyDown} onBlur={handleBlur} onFocus={handleFocus}
@@ -288,7 +293,7 @@ function ScannerPanel({ onScan, scannerReady }) {
           height: 4,
           background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
           backgroundSize: '200% 100%',
-          animation: 'am-shimmer-bar 3s ease-in-out infinite',
+          animation: 'am-shimmer-bar 4s linear infinite',
         }} />
 
         <div style={{ padding: '20px 28px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -331,7 +336,7 @@ function ScannerPanel({ onScan, scannerReady }) {
               width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
               background: focused ? '#4caf50' : G,
               boxShadow: focused ? '0 0 0 3px rgba(76,175,80,0.25)' : 'none',
-              animation: focused ? 'am-blink 2s ease-in-out infinite' : 'none',
+              animation: focused ? 'lm-live-pulse 2s ease-out infinite' : 'none',
               transition: 'all 0.3s',
             }} />
             {receiving ? 'Reading…' : focused ? 'Input Ready' : 'Click to Activate'}

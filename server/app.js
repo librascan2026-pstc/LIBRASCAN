@@ -602,6 +602,130 @@ async function issueVerificationEmail(req, { userId, email, name }) {
   return { sent: true };
 }
 
+// ---------------------------------------------------------------------------
+// PENDING SIGNUPS — an account is NOT created (no auth.users row, no profiles
+// row) until its email link is clicked. Until then everything the person typed
+// lives in `pending_signups` (see pending_signups.sql); the password is kept
+// AES-256-GCM encrypted (never plain text) only so the account can be created
+// at the moment of confirmation. Used by /api/auth/signup and
+// /api/admin/create-user. Optional env: PENDING_SIGNUP_SECRET (falls back to
+// SUPABASE_SERVICE_ROLE_KEY).
+// ---------------------------------------------------------------------------
+const pendingKey = crypto.createHash('sha256')
+  .update(String(process.env.PENDING_SIGNUP_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || 'librascan-pending'))
+  .digest();
+
+function encryptSecret(plain) {
+  const iv = crypto.randomBytes(12);
+  const c  = crypto.createCipheriv('aes-256-gcm', pendingKey, iv);
+  const ct = Buffer.concat([c.update(String(plain), 'utf8'), c.final()]);
+  return [iv, c.getAuthTag(), ct].map((b) => b.toString('base64')).join('.');
+}
+
+function decryptSecret(blob) {
+  try {
+    const [iv, tag, ct] = String(blob).split('.').map((s) => Buffer.from(s, 'base64'));
+    const d = crypto.createDecipheriv('aes-256-gcm', pendingKey, iv);
+    d.setAuthTag(tag);
+    return Buffer.concat([d.update(ct), d.final()]).toString('utf8');
+  } catch { return null; }
+}
+
+const sameSecret = (a, b) => {
+  const x = crypto.createHash('sha256').update(String(a)).digest();
+  const y = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(x, y);
+};
+
+// Emails a fresh confirmation link for an existing pending row (throttled).
+async function sendPendingVerification(req, row) {
+  if (row.last_sent_at && Date.now() - new Date(row.last_sent_at).getTime() < VERIFY_RESEND_MS) {
+    return { sent: false, throttled: true };
+  }
+  const token = generateConfirmToken();
+  const { error } = await supabaseAdmin.from('pending_signups').update({
+    token_hash: hashConfirmToken(token),
+    expires_at: new Date(Date.now() + VERIFY_TTL_MS).toISOString(),
+    last_sent_at: new Date().toISOString(),
+  }).eq('id', row.id);
+  if (error) throw new Error(error.message);
+
+  const base = `${req.protocol}://${req.get('host')}`; // THIS server's own origin
+  try {
+    await sendVerificationEmail({ to: row.email, name: row.payload?.profile?.first_name || '', verifyUrl: `${base}/verify-email?token=${token}` });
+  } catch (err) {
+    // Don't make the person wait out the throttle for an email that never left.
+    await supabaseAdmin.from('pending_signups').update({ last_sent_at: row.last_sent_at || new Date(0).toISOString() }).eq('id', row.id);
+    throw err;
+  }
+  return { sent: true };
+}
+
+// Stores (or replaces) the pending signup for `email` and emails the link.
+// Returns { emailSent, throttled }.
+async function createPendingSignup(req, { email, password, profile, userMetadata, rollbackOnProfileError }) {
+  const { data: prev } = await supabaseAdmin
+    .from('pending_signups').select('id, last_sent_at').eq('email', email).eq('status', 'pending').maybeSingle();
+  if (prev?.last_sent_at && Date.now() - new Date(prev.last_sent_at).getTime() < VERIFY_RESEND_MS) {
+    return { emailSent: true, throttled: true };
+  }
+
+  // Newest details win; old pending links stop working.
+  await supabaseAdmin.from('pending_signups').delete().eq('email', email);
+  const { data: row, error: insErr } = await supabaseAdmin.from('pending_signups').insert({
+    email,
+    token_hash: hashConfirmToken(generateConfirmToken()), // placeholder, replaced by the send below
+    payload: { pw: encryptSecret(password), profile, userMetadata, rollback: !!rollbackOnProfileError },
+    status: 'pending',
+    expires_at: new Date(Date.now() + VERIFY_TTL_MS).toISOString(),
+    last_sent_at: new Date(0).toISOString(),
+  }).select('*').single();
+  if (insErr) throw new Error(insErr.message);
+
+  try {
+    await sendPendingVerification(req, row);
+  } catch (err) {
+    console.error('[pending-signup] verification email failed:', err.message);
+    return { emailSent: false };
+  }
+  return { emailSent: true };
+}
+
+// Called the moment the emailed link is opened: ONLY now are the auth user and
+// profile row created. Returns { ok } | { exists } | { duplicate } | { failed }.
+async function activatePendingSignup(row) {
+  const p = row.payload || {};
+  const password = decryptSecret(p.pw);
+  if (!password) return { failed: true };
+
+  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
+    email: row.email,
+    password,
+    email_confirm: true,
+    user_metadata: p.userMetadata || {},
+  });
+  if (createErr || !created?.user) {
+    const msg = createErr?.message || '';
+    if (/already|registered|exists/i.test(msg)) return { exists: true };
+    console.error('[verify-email] createUser failed:', msg);
+    return { failed: true };
+  }
+
+  const user = created.user;
+  const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
+    ...(p.profile || {}),
+    id: user.id,
+    email: row.email,
+    updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' });
+  if (profileErr) console.error('[verify-email] profiles upsert error:', profileErr.message);
+  if (profileErr && p.rollback) {
+    await supabaseAdmin.auth.admin.deleteUser(user.id).catch(() => {});
+    return profileErr.code === '23505' ? { duplicate: true } : { failed: true };
+  }
+  return { ok: true };
+}
+
 // POST /api/auth/signup — public. Replaces the browser-side supabase.auth.signUp().
 app.post('/api/auth/signup', async (req, res) => {
   const b = req.body || {};
@@ -612,12 +736,29 @@ app.post('/api/auth/signup', async (req, res) => {
   const middleName    = String(b.middleName || '').trim();
   const username      = String(b.username || '').trim();
   const studentNumber = String(b.studentNumber || '').trim();
+  // Employees sign up through the same route; students are the default.
+  const isEmployee     = String(b.role || '').toLowerCase() === 'employee';
+  const employeeNumber = String(b.employeeNumber || '').trim();
 
   // Same rules as the form — never trust the browser alone.
   if (!firstName || !lastName || !username) return res.status(400).json({ error: 'Please fill in all required fields.' });
-  if (!/^\d{10,}$/.test(studentNumber))     return res.status(400).json({ error: 'Invalid student number.' });
-  if (!email.endsWith(PSU_DOMAIN) || email !== `${studentNumber}${PSU_DOMAIN}`) {
-    return res.status(400).json({ error: `Email must be your Student Number followed by ${PSU_DOMAIN}.` });
+  if (isEmployee) {
+    // Employees: 5+ digit employee number, any @pampangastateu.edu.ph address,
+    // plus a campus and a department that belongs to that campus.
+    if (!/^\d{5,}$/.test(employeeNumber))     return res.status(400).json({ error: 'Invalid employee number.' });
+    if (!/^[A-Za-z0-9._%+\-]+@pampangastateu\.edu\.ph$/i.test(email)) {
+      return res.status(400).json({ error: `Employees must use a ${PSU_DOMAIN} email address.` });
+    }
+    if (!b.campusId)     return res.status(400).json({ error: 'Please select your campus.' });
+    if (!b.departmentId) return res.status(400).json({ error: 'Please select your department.' });
+    const { data: dept } = await supabaseAdmin.from('departments').select('id')
+      .eq('id', b.departmentId).eq('campus_id', b.campusId).maybeSingle();
+    if (!dept) return res.status(400).json({ error: 'Please select a valid department for your campus.' });
+  } else {
+    if (!/^\d{10,}$/.test(studentNumber))     return res.status(400).json({ error: 'Invalid student number.' });
+    if (!email.endsWith(PSU_DOMAIN) || email !== `${studentNumber}${PSU_DOMAIN}`) {
+      return res.status(400).json({ error: `Email must be your Student Number followed by ${PSU_DOMAIN}.` });
+    }
   }
   if (password.length < 8 || !/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password)) {
     return res.status(400).json({ error: 'Password must be 8+ characters with an uppercase letter, a lowercase letter and a number.' });
@@ -642,53 +783,67 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 
   const { data: taken } = await supabaseAdmin
-    .from('profiles').select('id').eq('student_number', studentNumber).maybeSingle();
-  if (taken) return res.status(409).json({ error: 'This Student Number is already registered to another account.' });
+    .from('profiles').select('id')
+    .eq(isEmployee ? 'employee_number' : 'student_number', isEmployee ? employeeNumber : studentNumber)
+    .maybeSingle();
+  if (taken) return res.status(409).json({ error: `This ${isEmployee ? 'Employee' : 'Student'} Number is already registered to another account.` });
 
-  // email_confirm:false => created UNCONFIRMED, and Supabase sends no email.
-  const { data: created, error: createErr } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: false,
-    user_metadata: {
-      first_name: firstName, last_name: lastName, middle_name: middleName,
-      username, student_number: studentNumber, role: 'student',
-      campus_id: b.campusId || null, college_id: b.collegeId || null,
-      program_id: b.programId || null, major_id: b.majorId || null,
-    },
-  });
-  if (createErr || !created?.user) {
-    const msg = createErr?.message || 'Could not create the account.';
-    const dup = /already|registered|exists/i.test(msg);
-    return res.status(dup ? 409 : 500).json({ error: dup ? 'This email is already registered. Please log in instead.' : msg });
-  }
-
-  const user = created.user;
-  const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
-    id: user.id,
-    first_name: firstName, last_name: lastName, middle_name: middleName,
-    username, email, student_number: studentNumber,
-    campus_id: b.campusId || null, college_id: b.collegeId || null,
-    program_id: b.programId || null, major_id: b.majorId || null,
-    role: 'student',
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'id' });
-  if (profileErr) console.error('[auth/signup] profiles upsert error:', profileErr.message);
-
+  // NOTHING is created in auth.users / profiles yet. The details wait in
+  // pending_signups and the account only comes into existence when the
+  // emailed link is opened (see GET /verify-email).
+  let pend;
   try {
-    await issueVerificationEmail(req, { userId: user.id, email, name: firstName });
+    pend = await createPendingSignup(req, {
+      email, password,
+      rollbackOnProfileError: isEmployee,
+      userMetadata: isEmployee ? {
+        first_name: firstName, last_name: lastName, middle_name: middleName,
+        username, employee_number: employeeNumber, role: 'employee',
+        campus_id: b.campusId || null, department_id: b.departmentId || null,
+      } : {
+        first_name: firstName, last_name: lastName, middle_name: middleName,
+        username, student_number: studentNumber, role: 'student',
+        campus_id: b.campusId || null, college_id: b.collegeId || null,
+        program_id: b.programId || null, major_id: b.majorId || null,
+      },
+      profile: isEmployee ? {
+        first_name: firstName, last_name: lastName, middle_name: middleName,
+        username, employee_number: employeeNumber,
+        campus_id: b.campusId || null, department_id: b.departmentId || null,
+        role: 'employee',
+      } : {
+        first_name: firstName, last_name: lastName, middle_name: middleName,
+        username, student_number: studentNumber,
+        campus_id: b.campusId || null, college_id: b.collegeId || null,
+        program_id: b.programId || null, major_id: b.majorId || null,
+        role: 'student',
+      },
+    });
   } catch (err) {
-    // Account exists; the person can hit "Resend" on the next screen.
-    console.error('[auth/signup] verification email failed:', err.message);
-    return res.status(201).json({ needsVerification: true, emailSent: false });
+    console.error('[auth/signup] could not store pending signup:', err.message);
+    return res.status(500).json({ error: 'Could not start your registration. Please try again.' });
   }
-  res.status(201).json({ needsVerification: true, emailSent: true });
+  res.status(201).json({ needsVerification: true, emailSent: pend.emailSent });
 });
 
 
 app.post('/api/auth/resend-verification', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   if (!email) return res.status(400).json({ error: 'Missing email.' });
+
+  // Not-yet-created account (waiting in pending_signups): re-send its link.
+  const { data: pend } = await supabaseAdmin
+    .from('pending_signups').select('*').eq('email', email).eq('status', 'pending').maybeSingle();
+  if (pend) {
+    try {
+      const r = await sendPendingVerification(req, pend);
+      if (r.throttled) return res.status(429).json({ error: 'Please wait a minute before requesting another email.' });
+    } catch (err) {
+      console.error('[auth/resend-verification] pending failed:', err.message);
+      return res.status(502).json({ error: 'Could not send the email. Please try again shortly.' });
+    }
+    return res.json({ sent: true });
+  }
 
   const { data: profile } = await supabaseAdmin
     .from('profiles').select('id, first_name').eq('email', email).maybeSingle();
@@ -707,6 +862,87 @@ app.post('/api/auth/resend-verification', async (req, res) => {
   res.json({ sent: true });
 });
 
+
+// POST /api/auth/pending-status { email, password } — public. Lets the login
+// screen tell "wrong password" apart from "account not created yet, confirm
+// your email first". Only answers true when the PASSWORD matches too, so it
+// can't be used to find out which emails are waiting.
+app.post('/api/auth/pending-status', async (req, res) => {
+  const email    = String(req.body?.email || '').trim().toLowerCase();
+  const password = String(req.body?.password || '');
+  if (!email || !password) return res.json({ pending: false });
+
+  const { data: row } = await supabaseAdmin
+    .from('pending_signups').select('payload, expires_at').eq('email', email).eq('status', 'pending').maybeSingle();
+  if (!row) return res.json({ pending: false });
+
+  const stored = decryptSecret(row.payload?.pw);
+  if (!stored || !sameSecret(stored, password)) return res.json({ pending: false });
+  res.json({ pending: true, expired: new Date(row.expires_at).getTime() < Date.now() });
+});
+
+// POST /api/admin/create-user — used by the Super Admin and Librarian
+// "Add user" screens. Same rule as public signup: the account is NOT created
+// (no auth user, no profile) until the new user clicks the emailed link.
+// Needs the caller's Supabase access token as a Bearer token.
+//   body: { email, password, profile: { first_name, last_name, role, campus_id,
+//           student_number?, employee_number?, college_id?, program_id?,
+//           major_id?, department_id?, middle_name?, username? } }
+const ADMIN_FULL_ROLES    = ['super_admin', 'superadmin', 'admin'];
+const ADMIN_LIMITED_ROLES = ['librarian', 'library_manager'];
+const ADMIN_PROFILE_KEYS  = [
+  'first_name', 'last_name', 'middle_name', 'username', 'role',
+  'student_number', 'employee_number',
+  'campus_id', 'college_id', 'program_id', 'major_id', 'department_id',
+];
+app.post('/api/admin/create-user', requireUser, async (req, res) => {
+  const caller = await getProfile(req.authUser.id);
+  const callerRole = String(caller?.role || '').toLowerCase();
+  const isFull = ADMIN_FULL_ROLES.includes(callerRole);
+  if (!isFull && !ADMIN_LIMITED_ROLES.includes(callerRole)) {
+    return res.status(403).json({ error: 'You are not allowed to add users.' });
+  }
+
+  const b = req.body || {};
+  const email    = String(b.email || '').trim().toLowerCase();
+  const password = String(b.password || '');
+
+  // Only whitelisted columns, empty values dropped (client can't inject others).
+  const profile = {};
+  for (const k of ADMIN_PROFILE_KEYS) {
+    const v = b.profile?.[k];
+    if (v !== undefined && v !== null && String(v).trim() !== '') profile[k] = String(v).trim();
+  }
+  profile.role = String(profile.role || '').toLowerCase();
+
+  if (!email || !profile.first_name || !profile.last_name || !profile.role) {
+    return res.status(400).json({ error: 'Please fill in all required fields.' });
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return res.status(400).json({ error: 'Enter a valid email address.' });
+  if (password.length < 8) return res.status(400).json({ error: 'Minimum 8 characters.' });
+  // Librarians can only add students/employees; only super admins can add other roles.
+  if (!isFull && !['student', 'employee'].includes(profile.role)) {
+    return res.status(403).json({ error: 'You are not allowed to create that kind of account.' });
+  }
+
+  const { data: existing } = await supabaseAdmin.from('profiles').select('id').eq('email', email).maybeSingle();
+  if (existing) return res.status(409).json({ error: 'This email is already registered.' });
+  for (const [col, label] of [['student_number', 'Student'], ['employee_number', 'Employee']]) {
+    if (!profile[col]) continue;
+    const { data: t } = await supabaseAdmin.from('profiles').select('id').eq(col, profile[col]).maybeSingle();
+    if (t) return res.status(409).json({ error: `This ${label} Number is already registered to another account.` });
+  }
+
+  const userMetadata = { first_name: profile.first_name, last_name: profile.last_name, role: profile.role };
+
+  try {
+    const pend = await createPendingSignup(req, { email, password, profile, userMetadata, rollbackOnProfileError: true });
+    res.status(201).json({ needsVerification: true, emailSent: pend.emailSent });
+  } catch (err) {
+    console.error('[admin/create-user] failed:', err.message);
+    res.status(500).json({ error: 'Could not start the registration. Please try again.' });
+  }
+});
 
 
 const RESET_CODE_TTL_MS   = 10 * 60 * 1000; // code valid for 10 minutes
@@ -863,6 +1099,41 @@ app.get('/verify-email', async (req, res) => {
 
   if (!token) return res.status(400).send(verifyPage({ tone: 'warn', title: 'Link not valid', body: 'This confirmation link is missing its token.', href: loginUrl, label: 'Back to login' }));
 
+  // New flow: the account doesn't exist yet — create it NOW, on confirmation.
+  const { data: pending } = await supabaseAdmin
+    .from('pending_signups').select('*').eq('token_hash', hashConfirmToken(token)).maybeSingle();
+  if (pending) {
+    if (pending.status === 'verified') {
+      return res.send(verifyPage({ tone: 'ok', title: 'Email already confirmed', body: 'Your account is active. You can log in now.', href: loginUrl, label: 'Go to login' }));
+    }
+    if (pending.status === 'processing') {
+      return res.status(409).send(verifyPage({ tone: 'warn', title: 'Almost done', body: 'Your account is being activated. Please refresh this page in a moment.', href: loginUrl, label: 'Back to login' }));
+    }
+    if (new Date(pending.expires_at).getTime() < Date.now()) {
+      return res.status(410).send(verifyPage({ tone: 'warn', title: 'This link has expired', body: 'Go back to the login page and use \u201cResend confirmation email\u201d to get a fresh link.', href: loginUrl, label: 'Back to login' }));
+    }
+
+    // Claim it so a double-click / email scanner can't create the account twice.
+    const { data: claimed } = await supabaseAdmin.from('pending_signups')
+      .update({ status: 'processing' }).eq('id', pending.id).eq('status', 'pending').select('id');
+    if (!claimed?.length) {
+      return res.status(409).send(verifyPage({ tone: 'warn', title: 'Almost done', body: 'Your account is being activated. Please refresh this page in a moment.', href: loginUrl, label: 'Back to login' }));
+    }
+
+    const result = await activatePendingSignup(pending);
+    if (result.ok) {
+      await supabaseAdmin.from('pending_signups')
+        .update({ status: 'verified', verified_at: new Date().toISOString(), payload: {} }).eq('id', pending.id);
+      return res.send(verifyPage({ tone: 'ok', title: 'Email confirmed!', body: 'Thanks \u2014 your LibraScan account is now active. You can log in.', href: loginUrl, label: 'Go to login' }));
+    }
+    if (result.exists || result.duplicate) {
+      await supabaseAdmin.from('pending_signups').delete().eq('id', pending.id);
+      return res.status(409).send(verifyPage({ tone: 'warn', title: 'Already registered', body: result.duplicate ? 'That username or ID number is already registered to another account.' : 'This email is already registered. Please log in instead.', href: loginUrl, label: 'Back to login' }));
+    }
+    await supabaseAdmin.from('pending_signups').update({ status: 'pending' }).eq('id', pending.id);
+    return res.status(500).send(verifyPage({ tone: 'warn', title: 'Something went wrong', body: 'We couldn\u2019t activate your account right now. Please try the link again in a moment.', href: loginUrl, label: 'Back to login' }));
+  }
+
   const { data: row } = await supabaseAdmin
     .from('email_verifications').select('*').eq('token_hash', hashConfirmToken(token)).maybeSingle();
 
@@ -892,7 +1163,7 @@ app.get('/verify-email', async (req, res) => {
 app.use('/api/auth/google', googleAuthRouter);
 
 
-const DUE_EMAIL_LOAN_PERIOD_DAYS     = 7;
+const DUE_EMAIL_LOAN_PERIOD_DAYS     = 3;
 const DUE_EMAIL_REMINDER_DAYS_BEFORE = 3;
 const PH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;   // Asia/Manila is UTC+8, no DST
 const DAY_MS           = 24 * 60 * 60 * 1000;

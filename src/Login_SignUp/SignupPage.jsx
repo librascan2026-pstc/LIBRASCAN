@@ -728,7 +728,7 @@ export default function SignupPage({ onGoLogin, onGoLanding }) {
         return;
       }
       if (json.emailSent === false) {
-        setResendMsg('We created your account but could not send the email. Tap "Resend" below.');
+        setResendMsg('We saved your details but could not send the email. Tap "Resend" below. Your account is created once you confirm your email.');
       }
     } catch {
       setLoad(false);

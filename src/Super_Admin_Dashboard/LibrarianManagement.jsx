@@ -4,7 +4,7 @@ import {
   Building2, ChevronLeft, ChevronRight, AlertTriangle, Check, ShieldCheck,
   Briefcase, GraduationCap, Hash, Landmark, BookOpen, Camera,
 } from 'lucide-react';
-import { supabaseAdmin } from '../supabaseClient';
+import { supabase, supabaseAdmin } from '../supabaseClient';
 
 /* ── Empty-state illustration: soft halo, floating disc, blush people, gold "add" badge ── */
 function UsersEmptyIcon({ size = 96 }) {
@@ -913,56 +913,32 @@ function UserModal({ user, users, campuses, defaultRole = 'student', onClose, on
       }
 
       const email = form.email.trim().toLowerCase();
-      const { data: authData, error: authErr } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: form.password,
-        // Librarians can log in immediately. Employees and students confirm
-        // by email first, exactly like the Admin portal / Sign Up flow.
-        email_confirm: isLib,
-        user_metadata: { first_name: form.first_name.trim(), last_name: form.last_name.trim(), role: form.role },
+      // The account is NOT created yet (for ANY role, librarians included):
+      // the server keeps these details as a pending signup and only creates
+      // the user and profile once they click the confirmation link emailed to
+      // them. That also means a profile photo can't be attached until then.
+      const { data: { session } } = await supabase.auth.getSession();
+      const res = await fetch(`${API_BASE}/api/admin/create-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session?.access_token || ''}` },
+        body: JSON.stringify({
+          email, password: form.password,
+          profile: {
+            first_name: form.first_name.trim(),
+            last_name:  form.last_name.trim(),
+            role:       form.role,
+            campus_id:  form.campus_id,
+            ...idFields(form),
+            ...academicFields(form),
+          },
+        }),
       });
-      if (authErr) throw authErr;
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Could not create the user.');
 
-      const { error: profileErr } = await supabaseAdmin.from('profiles').upsert({
-        id:         authData.user.id,
-        first_name: form.first_name.trim(),
-        last_name:  form.last_name.trim(),
-        email,
-        role:       form.role,
-        campus_id:  form.campus_id,
-        ...idFields(form),
-        ...academicFields(form),
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
-      if (profileErr) {
-        // Never leave an orphaned login without a profiles row.
-        await supabaseAdmin.auth.admin.deleteUser(authData.user.id).catch(() => {});
-        throw profileErr;
-      }
-
-      // Photo is optional; a failed upload never undoes the account.
-      let photoWarn = '';
-      if (photoFile) {
-        try { await uploadAvatar(authData.user.id, photoFile); }
-        catch (pe) { photoWarn = ` The photo could not be saved (${pe.message}) — add it by editing the user.`; }
-      }
-
-      if (isLib) {
-        onSaved(`Librarian created and can log in immediately.${photoWarn}`, Boolean(photoWarn));
-      } else {
-        let emailSent = false;
-        try {
-          const res = await fetch(`${API_BASE}/api/auth/resend-verification`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email }),
-          });
-          emailSent = res.ok;
-        } catch { /* server unreachable — handled below */ }
-        if (emailSent) onSaved(`${ROLE_META[form.role].label} created. A confirmation email was sent to ${email}.${photoWarn}`, Boolean(photoWarn));
-        else onSaved(`${ROLE_META[form.role].label} created, but the confirmation email could not be sent. They can tap "Resend" on the login page.${photoWarn}`, true);
-      }
+      const photoNote = photoFile ? ' The profile photo can be added by editing the user after they confirm.' : '';
+      if (json.emailSent) onSaved(`${ROLE_META[form.role].label} saved. A confirmation email was sent to ${email} — the account is created once they confirm.${photoNote}`, Boolean(photoNote));
+      else onSaved(`${ROLE_META[form.role].label} saved, but the confirmation email could not be sent. They can tap "Resend" on the login page.${photoNote}`, true);
     } catch (err) {
       setApi(err.message || 'An error occurred.');
     } finally {

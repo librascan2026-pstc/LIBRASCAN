@@ -616,6 +616,7 @@ function TxRow({ tx, onClick, onDelete }) {
   const isBorrowed = tx.status?.toLowerCase() === 'borrowed';
   return (
     <tr
+      data-notif-target={`borrowing:${tx.id}`}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
       onClick={onClick}
@@ -1001,7 +1002,7 @@ const TAB_CSS = `
 `;
 
 
-export default function BookManagement({ initialTab }) {
+export default function BookManagement({ initialTab, focusNonce }) {
   // Phase 9 — campus isolation: every read/write below is scoped to the
   // signed-in librarian's campus_id so campuses never see or mutate each
   // other's borrowings, requests, students, or book copies.
@@ -1010,6 +1011,11 @@ export default function BookManagement({ initialTab }) {
 
   const [activeTab,    setActiveTab]    = useState(initialTab || 'scanner');
 
+  // Clicking a notification re-targets the tab even when this page is already open.
+  useEffect(() => {
+    if (focusNonce && initialTab) setActiveTab(initialTab);
+  }, [focusNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   const [pendingRequests,    setPendingRequests]    = useState([]);
   const [loadingPending,     setLoadingPending]     = useState(false);
@@ -1017,11 +1023,13 @@ export default function BookManagement({ initialTab }) {
   const [newPendingAlert,    setNewPendingAlert]    = useState(null);
   const [pendingError,       setPendingError]       = useState(null);
   const [rejectConfirm,      setRejectConfirm]      = useState(null);
+  const [limitAlert,         setLimitAlert]         = useState(null);
 
   const [step,         setStep]         = useState(0);
   const [student,      setStudent]      = useState(null);
   const [scanning,     setScanning]     = useState(false);
   const [focused,      setFocused]      = useState(true);
+  const focusBlurTimer = useRef(null);   // delays the "not focused" UI so the auto-refocus never flashes it
   const [lastResult,   setLastResult]   = useState(null);
   const [resultVisible, setResultVisible] = useState(false);
 
@@ -1146,6 +1154,65 @@ export default function BookManagement({ initialTab }) {
     try {
       setProcessingPendingId(pendingReq.id);
       setPendingError(null);
+
+      // ── Borrow-limit validation ─────────────────────────────────────────
+      // Block the approval if this student already has BORROW_LIMIT books
+      // out. Nothing is written, so the request simply stays in Pending.
+      {
+        const reqUUID = UUID_RE.test(String(pendingReq.student_id || '').trim())
+          ? String(pendingReq.student_id).trim()
+          : null;
+        const reqNumbers = [...new Set(
+          [pendingReq.student_number, reqUUID ? null : pendingReq.student_id]
+            .map(v => String(v || '').trim())
+            .filter(Boolean)
+        )];
+        const openIds = new Set();
+
+        if (reqUUID) {
+          const { data: byUuid, error: uuidErr } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .eq('student_id', reqUUID).eq('status', 'Borrowed');
+          if (uuidErr) console.warn('[Approve] limit check (student_id) error:', uuidErr.message);
+          (byUuid || []).forEach(r => openIds.add(r.id));
+        }
+
+        for (const no of reqNumbers) {
+          const { data: byNo, error: noErr } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .eq('student_number', no).eq('status', 'Borrowed');
+          if (noErr) console.warn('[Approve] limit check (student_number) error:', noErr.message);
+          (byNo || []).forEach(r => openIds.add(r.id));
+
+          // Older rows embedded the number in student_name as "Name [Number]"
+          const { data: byEmbedded, error: embErr } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .ilike('student_name', `%[${no}]%`).eq('status', 'Borrowed');
+          if (embErr) console.warn('[Approve] limit check (embedded no.) error:', embErr.message);
+          (byEmbedded || []).forEach(r => openIds.add(r.id));
+        }
+
+        // Last resort only: no usable ID on the request, so match by name.
+        if (!reqUUID && reqNumbers.length === 0 && pendingReq.student_name) {
+          const { data: byName, error: nameErr } = await supabaseAdmin
+            .from('borrowings').select('id')
+            .ilike('student_name', `${String(pendingReq.student_name).trim()}%`).eq('status', 'Borrowed');
+          if (nameErr) console.warn('[Approve] limit check (name) error:', nameErr.message);
+          (byName || []).forEach(r => openIds.add(r.id));
+        }
+
+        if (openIds.size >= BORROW_LIMIT) {
+          playErrorSound();
+          setLimitAlert({
+            student_name: pendingReq.student_name || 'This student',
+            student_number: pendingReq.student_number || null,
+            book_title: pendingReq.book_title || null,
+            count: openIds.size,
+          });
+          setProcessingPendingId(null);
+          return;
+        }
+      }
 
    
       // student_name now holds the name only; the ID goes in its own
@@ -2025,8 +2092,8 @@ export default function BookManagement({ initialTab }) {
     
       <input
         ref={inputRef} onKeyDown={handleKeyDown}
-        onBlur={() => { setFocused(false); refocusIfSafe(); }}
-        onFocus={() => setFocused(true)}
+        onBlur={() => { clearTimeout(focusBlurTimer.current); focusBlurTimer.current = setTimeout(() => setFocused(false), 300); refocusIfSafe(); }}
+        onFocus={() => { clearTimeout(focusBlurTimer.current); setFocused(true); }}
         readOnly aria-hidden="true" tabIndex={-1}
         style={{ position:'fixed', top:0, left:0, width:1, height:1, opacity:0, pointerEvents:'none', zIndex:-1, border:'none', outline:'none', background:'transparent' }}
       />
@@ -2109,12 +2176,15 @@ export default function BookManagement({ initialTab }) {
         position:'relative',
       }}>
      
-        <div style={{
-          height:4,
-          background:`linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
-          backgroundSize:'200% 100%',
-          animation:'bm-shimmer-bar 3s ease-in-out infinite',
-        }}/>
+        <div style={{ height: 4, position: 'relative', overflow: 'hidden', isolation: 'isolate', background: MAR2 }}>
+<div className="bm-bar-run" style={{
+  position: 'absolute', top: 0, left: 0, width: '200%', height: '100%',
+  background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
+  transform: 'translate3d(-50%, 0, 0)',
+  animation: 'bm-shimmer-bar 4s linear infinite',
+  willChange: 'transform', pointerEvents: 'none',
+}} />
+</div>
 
       
         <div style={{
@@ -2163,7 +2233,7 @@ export default function BookManagement({ initialTab }) {
                 width:7, height:7, borderRadius:'50%', flexShrink:0,
                 background: focused ? '#4caf50' : G,
                 boxShadow: focused ? '0 0 0 3px rgba(76,175,80,0.25)' : 'none',
-                animation: focused ? 'bm-blink 2s ease-in-out infinite' : 'none',
+                animation: focused ? 'lm-live-pulse 2s ease-out infinite' : 'none',
                 transition:'all 0.3s',
               }}/>
               {focused ? 'Input Ready' : 'Click to Activate'}
@@ -2359,7 +2429,7 @@ export default function BookManagement({ initialTab }) {
             <span style={{
               width: 7, height: 7, borderRadius: '50%',
               background: G, boxShadow: `0 0 0 3px rgba(201,168,76,0.25)`,
-              animation: 'bm-blink 2s ease-in-out infinite',
+              animation: 'lm-live-pulse-gold 2s ease-out infinite',
             }}/>
             Live
           </div>
@@ -2443,12 +2513,15 @@ export default function BookManagement({ initialTab }) {
             border: `1.5px solid rgba(139,0,0,0.12)`,
             background: CREAM,
           }}>
-            <div style={{
-              height: 4,
-              background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
-              backgroundSize: '200% 100%',
-              animation: 'bm-shimmer-bar 3s ease-in-out infinite',
-            }}/>
+            <div style={{ height: 4, position: 'relative', overflow: 'hidden', isolation: 'isolate', background: MAR2 }}>
+<div className="bm-bar-run" style={{
+  position: 'absolute', top: 0, left: 0, width: '200%', height: '100%',
+  background: `linear-gradient(90deg, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2}, ${MAR}, ${G}, ${MAR}, ${MAR2})`,
+  transform: 'translate3d(-50%, 0, 0)',
+  animation: 'bm-shimmer-bar 4s linear infinite',
+  willChange: 'transform', pointerEvents: 'none',
+}} />
+</div>
             <div style={{ padding: '56px 24px', textAlign: 'center' }}>
               <div style={{
                 width: 60, height: 60, borderRadius: 18, margin: '0 auto 16px',
@@ -2484,7 +2557,7 @@ export default function BookManagement({ initialTab }) {
               })() : '—';
 
               return (
-                <div key={req.id} style={{
+                <div key={req.id} data-notif-target={`borrow:${req.id}`} style={{
                   borderRadius: 14, overflow: 'hidden',
                   border: `1.5px solid rgba(139,0,0,0.14)`,
                   background: isProcessing
@@ -2789,6 +2862,63 @@ export default function BookManagement({ initialTab }) {
       )}
 
       </>}
+      {limitAlert && (
+        <div
+          onClick={() => setLimitAlert(null)}
+          style={{
+            position:'fixed', inset:0, zIndex:4500,
+            background:'rgba(10,0,0,0.82)', backdropFilter:'blur(8px)',
+            display:'flex', alignItems:'center', justifyContent:'center', padding:20,
+            animation:'bm-fadeIn 0.2s ease',
+          }}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              background: CREAM, borderRadius:20, width:'100%', maxWidth:420,
+              border:'2px solid rgba(201,168,76,0.35)',
+              boxShadow:'0 24px 64px rgba(0,0,0,0.55)',
+              animation:'bm-slideUp 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+              overflow:'hidden',
+            }}>
+            <div style={{
+              background:`linear-gradient(135deg, ${MAR}, ${MAR2})`,
+              padding:'18px 24px',
+              borderBottom:'2px solid rgba(201,168,76,0.3)',
+            }}>
+              <div style={{ fontFamily:"'Cinzel', serif", fontSize:15, color:GP, fontWeight:700 }}>Borrow Limit Reached</div>
+              <div style={{ fontSize:11.5, color:'rgba(245,228,168,0.6)', fontFamily:'var(--font-sans)', marginTop:2 }}>
+                This request cannot be approved
+              </div>
+            </div>
+            <div style={{ padding:'20px 24px' }}>
+              <div style={{
+                padding:'12px 14px', borderRadius:10, marginBottom:14,
+                background:'rgba(139,0,0,0.06)', border:'1px solid rgba(139,0,0,0.15)',
+              }}>
+                <div style={{ fontSize:13, fontWeight:700, color:'#1a0000', fontFamily:'var(--font-sans)', marginBottom:3 }}>
+                  {limitAlert.student_name}{limitAlert.student_number ? ` (${limitAlert.student_number})` : ''}
+                </div>
+                {limitAlert.book_title && (
+                  <div style={{ fontSize:12, color:'#6b4040', fontFamily:'var(--font-sans)' }}>
+                    Requested: {limitAlert.book_title}
+                  </div>
+                )}
+              </div>
+              <div style={{ fontSize:12.5, color:'#4a2a2a', fontFamily:'var(--font-sans)', lineHeight:1.55, marginBottom:18 }}>
+                This student already has <strong>{limitAlert.count}</strong> of <strong>{BORROW_LIMIT}</strong> allowed
+                books borrowed. The request stays in <strong>Pending</strong> and can be approved once a book is returned.
+              </div>
+              <button onClick={() => setLimitAlert(null)} style={{
+                width:'100%', padding:'12px', borderRadius:10, border:'none',
+                background:`linear-gradient(135deg, ${MAR}, ${MAR2})`,
+                cursor:'pointer',
+                fontFamily:'var(--font-sans)', fontSize:13.5, fontWeight:700, color:GP,
+                boxShadow:'0 4px 14px rgba(139,0,0,0.3)',
+              }}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
       {rejectConfirm && (
         <div style={{
           position:'fixed', inset:0, zIndex:4000,
@@ -2887,9 +3017,11 @@ export default function BookManagement({ initialTab }) {
           50%       { opacity:1;   left:10%; right:10%; }
         }
         @keyframes bm-shimmer-bar {
-          0%   { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
-        }
+    /* GPU-composited slide of exactly ONE gradient tile (the layer is 2 tiles wide),
+       so the loop is seamless: no restart jump, no easing stall, no repaint. */
+    from { transform: translate3d(-50%, 0, 0); }
+    to   { transform: translate3d(0, 0, 0); }
+  }
         @keyframes bm-scan-line {
           from { transform:translateX(-100%); }
           to   { transform:translateX(100%); }
