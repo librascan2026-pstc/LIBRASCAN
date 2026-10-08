@@ -123,33 +123,43 @@ const Ic = {
 const TAB_CSS = `
   .am-tabs {
     display: flex;
-    border-bottom: 1px solid rgba(139,0,0,0.18);
-    margin-bottom: 24px;
-    gap: 0;
+    gap: 3px;
+    border-bottom: 2px solid rgba(139,0,0,0.10);
+    margin-bottom: 20px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
   }
+  .am-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  .am-tabs.am-dragging { cursor: grabbing; }
+  .am-tabs.am-dragging .am-tab { pointer-events: none; }
   .am-tab {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 7px;
-    padding: 10px 24px;
+    padding: 10px 20px;
     border: none;
-    border-bottom: 2.5px solid transparent;
-    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
     background: transparent;
     font-family: var(--font-sans);
     font-size: 13px;
     font-weight: 500;
     color: var(--text-muted, #7A3030);
     cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
+    transition: all var(--ease, 0.15s);
     white-space: nowrap;
-    user-select: none;
+    flex-shrink: 0;
   }
-  .am-tab:hover { color: var(--text-secondary, #5A1010); }
+  .am-tab:hover { color: var(--maroon-mid, #A01010); }
   .am-tab.am-on {
     font-weight: 700;
-    color: #8B0000;
-    border-bottom-color: #8B0000;
+    color: var(--maroon-deep, #6B0000);
+    border-bottom-color: var(--maroon-mid, #A01010);
   }
   .am-tab-badge {
     display: inline-flex;
@@ -192,17 +202,13 @@ const TAB_CSS = `
     0%, 100% { opacity:1; }
     50%       { opacity:0.35; }
   }
+  @media (max-width: 768px) {
+    .am-tabs { margin-bottom: 14px; }
+    .am-tab { padding: 8px 12px; font-size: 11px; }
+  }
   @media (max-width: 480px) {
-    .am-tabs {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      flex-wrap: nowrap;
-    }
-    .am-tab {
-      padding: 10px 16px;
-      font-size: 12px;
-      flex-shrink: 0;
-    }
+    .am-tab svg { display: none; }
+    .am-tab { padding: 9px 12px; }
   }
 `;
 
@@ -992,6 +998,38 @@ export default function AttendanceMonitoring() {
   const [delConfirm,  setDelConfirm]  = useState(null);
   const resultTimer                   = useRef(null);
 
+  // Tab bar: drag with the mouse to scroll left/right (touch swipe works natively).
+  const tabsDragRef = useRef(null);
+  useEffect(() => {
+    const el = tabsDragRef.current;
+    if (!el) return;
+    let down = false, moved = false, startX = 0, startLeft = 0;
+    const onDown = e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      down = true; moved = false; startX = e.clientX; startLeft = el.scrollLeft;
+    };
+    const onMove = e => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) > 5) { moved = true; el.classList.add('am-dragging'); }
+      if (moved) el.scrollLeft = startLeft - dx;
+    };
+    const onEnd = () => { if (!down) return; down = false; el.classList.remove('am-dragging'); };
+    const onClickCapture = e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('click', onClickCapture, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+    };
+  }, []);
+
   const loadRecords = useCallback(async () => {
     setLoading(true);
     try {
@@ -1105,7 +1143,7 @@ export default function AttendanceMonitoring() {
         <StatCard label="Last Hour"        value={stats.lastHour} sub="Entries in past 60 min" />
       </div>
 
-      <div className="am-tabs">
+      <div className="am-tabs" ref={tabsDragRef}>
         <button
           className={`am-tab${activeTab === 'scanner' ? ' am-on' : ''}`}
           onClick={() => setActiveTab('scanner')}

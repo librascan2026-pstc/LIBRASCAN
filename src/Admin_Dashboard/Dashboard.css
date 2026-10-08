@@ -655,6 +655,7 @@ a { text-decoration: none; }
   font-family: var(--font-sans);
   letter-spacing: 0.01em;
   font-weight: 500;
+  text-align: left;
 }
 
 .lm-topbar-right {
@@ -2930,6 +2931,7 @@ input, select, textarea { max-width: 100%; }
    ====================================================================== */
 @media (max-width: 768px) {
   .lm-content .set-prof-name {
+    font-size: clamp(22px, 4.6vw, 30px);
     max-width: 100% !important;
     white-space: normal;
     overflow-wrap: anywhere;
@@ -2949,19 +2951,22 @@ input, select, textarea { max-width: 100%; }
 }
 @media (max-width: 520px) {
   .lm-content .set-prof-cover {
-    height: auto; min-height: 96px;
-    padding: 14px 16px 12px;
+    height: 92px; min-height: 92px;
+    padding: 0 14px 10px;
     align-items: flex-end;
   }
-  .lm-content .set-prof-av-float { left: 16px; top: 68px; }
-  .lm-content .set-prof-avwrap { width: 56px; height: 56px; border-width: 3px; }
-  .lm-content .set-prof-avinit { font-size: 18px; }
-  .lm-content .set-prof-cam-btn { width: 24px; height: 24px; border-width: 2px; }
-  .lm-content .set-prof-namewrap { margin-left: 68px; text-align: left; }
+  .lm-content .set-prof-av-float { left: 14px; top: 52px; }
+  .lm-content .set-prof-avwrap { width: 72px; height: 72px; border-width: 3px; }
+  .lm-content .set-prof-avinit { font-size: 22px; }
+  .lm-content .set-prof-cam-btn { width: 26px; height: 26px; border-width: 2px; }
+  .lm-content .set-prof-namewrap { margin-left: 86px; text-align: left; }
   .lm-content .set-prof-info { text-align: left; }
-  .lm-content .set-prof-name { font-size: clamp(17px, 5.2vw, 24px); text-align: left; letter-spacing: 0.02em; }
+  .lm-content .set-prof-name { font-size: 20px; text-align: left; letter-spacing: 0.02em; line-height: 1.15; }
   .lm-content .set-prof-remove-btn { top: 10px; right: 12px; padding: 5px 10px; font-size: 10.5px; }
-  .lm-content .set-prof-subinfo { padding: 36px 16px 14px; }
+  .lm-content .set-prof-subinfo { padding: 8px 14px 14px 100px; gap: 3px; min-height: 56px; }
+  .lm-content .set-prof-role { line-height: 1.35; }
+  .lm-content .set-prof-emailrow { line-height: 1.35; word-break: break-word; }
+  .lm-content .set-prof-emailrow svg { margin-top: 3px; flex-shrink: 0; }
 
   .lm-content .set-prof-panel { padding: 16px; }
   .lm-content .set-prof-panel-title { font-size: 11.5px; letter-spacing: 0.08em; }
@@ -3002,7 +3007,6 @@ input, select, textarea { max-width: 100%; }
   .lm-content .ra-root .ra-nav-tabs::-webkit-scrollbar { display: none; }
 }
 @media (max-width: 480px) {
-  .lm-content .ra-root .ra-nav-tab svg { display: none; }
   .lm-content .ra-root .ra-nav-tab { padding: 9px 12px; }
 }
 @media (max-width: 380px) {

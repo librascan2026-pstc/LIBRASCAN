@@ -938,33 +938,43 @@ const txPayload = {
 const TAB_CSS = `
   .bm-tabs {
     display: flex;
-    border-bottom: 1px solid rgba(139,0,0,0.18);
-    margin-bottom: 24px;
-    gap: 0;
+    gap: 3px;
+    border-bottom: 2px solid rgba(139,0,0,0.10);
+    margin-bottom: 20px;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
   }
+  .bm-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
+  .bm-tabs.bm-dragging { cursor: grabbing; }
+  .bm-tabs.bm-dragging .bm-tab { pointer-events: none; }
   .bm-tab {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 7px;
-    padding: 10px 24px;
+    padding: 10px 20px;
     border: none;
-    border-bottom: 2.5px solid transparent;
-    margin-bottom: -1px;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
     background: transparent;
     font-family: var(--font-sans);
     font-size: 13px;
     font-weight: 500;
     color: var(--text-muted, #7A3030);
     cursor: pointer;
-    transition: color 0.15s, border-color 0.15s;
+    transition: all var(--ease, 0.15s);
     white-space: nowrap;
-    user-select: none;
+    flex-shrink: 0;
   }
-  .bm-tab:hover  { color: var(--text-secondary, #5A1010); }
-  .bm-tab.bm-on  {
+  .bm-tab:hover { color: var(--maroon-mid, #A01010); }
+  .bm-tab.bm-on {
     font-weight: 700;
-    color: #8B0000;
-    border-bottom-color: #8B0000;
+    color: var(--maroon-deep, #6B0000);
+    border-bottom-color: var(--maroon-mid, #A01010);
   }
   .bm-tab-badge {
     display: inline-flex;
@@ -987,17 +997,13 @@ const TAB_CSS = `
     background: rgba(139,0,0,0.15);
     color: #8B0000;
   }
+  @media (max-width: 768px) {
+    .bm-tabs { margin-bottom: 14px; }
+    .bm-tab { padding: 8px 12px; font-size: 11px; }
+  }
   @media (max-width: 480px) {
-    .bm-tabs {
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      flex-wrap: nowrap;
-    }
-    .bm-tab {
-      padding: 10px 16px;
-      font-size: 12px;
-      flex-shrink: 0;
-    }
+    .bm-tab svg { display: none; }
+    .bm-tab { padding: 9px 12px; }
   }
 `;
 
@@ -1015,6 +1021,38 @@ export default function BookManagement({ initialTab, focusNonce }) {
   useEffect(() => {
     if (focusNonce && initialTab) setActiveTab(initialTab);
   }, [focusNonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Tab bar: drag with the mouse to scroll left/right (touch swipe works natively).
+  const tabsDragRef = useRef(null);
+  useEffect(() => {
+    const el = tabsDragRef.current;
+    if (!el) return;
+    let down = false, moved = false, startX = 0, startLeft = 0;
+    const onDown = e => {
+      if (e.pointerType !== 'mouse' || e.button !== 0) return;
+      down = true; moved = false; startX = e.clientX; startLeft = el.scrollLeft;
+    };
+    const onMove = e => {
+      if (!down) return;
+      const dx = e.clientX - startX;
+      if (!moved && Math.abs(dx) > 5) { moved = true; el.classList.add('bm-dragging'); }
+      if (moved) el.scrollLeft = startLeft - dx;
+    };
+    const onEnd = () => { if (!down) return; down = false; el.classList.remove('bm-dragging'); };
+    const onClickCapture = e => { if (moved) { e.preventDefault(); e.stopPropagation(); moved = false; } };
+    el.addEventListener('pointerdown', onDown);
+    el.addEventListener('click', onClickCapture, true);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onEnd);
+    window.addEventListener('pointercancel', onEnd);
+    return () => {
+      el.removeEventListener('pointerdown', onDown);
+      el.removeEventListener('click', onClickCapture, true);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onEnd);
+      window.removeEventListener('pointercancel', onEnd);
+    };
+  }, []);
 
 
   const [pendingRequests,    setPendingRequests]    = useState([]);
@@ -2119,7 +2157,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
       </div>
 
       {/* ── Tab bar ── */}
-      <div className="bm-tabs">
+      <div className="bm-tabs" ref={tabsDragRef}>
         <button
           className={`bm-tab${activeTab === 'scanner' ? ' bm-on' : ''}`}
           onClick={() => setActiveTab('scanner')}

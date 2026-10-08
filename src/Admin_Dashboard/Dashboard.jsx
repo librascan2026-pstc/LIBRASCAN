@@ -166,9 +166,9 @@ const NavIcons = {
 
 const NAV = [
   { id: 'overview',    label: 'Dashboard',             icon: 'overview',   section: '' },
-  { id: 'attendance',  label: 'Attendance Monitoring', icon: 'attendance', section: '' },
-  { id: 'bookmanage', label: 'Book Management', icon: 'bookmanage', section: '' },
-  { id: 'catalog',  label: 'Book Catalog',      icon: 'catalog',  section: '' },
+  { id: 'attendance',  label: 'Visitor Monitoring', icon: 'attendance', section: '' },
+  { id: 'bookmanage', label: 'Book Scanner', icon: 'bookmanage', section: '' },
+  { id: 'catalog',  label: 'Book Management',      icon: 'catalog',  section: '' },
   { id: 'users',    label: 'User Management',   icon: 'users',    section: '' },
   { id: 'reports',  label: 'Reports & Analytics', icon: 'reports', section: '' },
   { id: 'settings', label: 'Settings',          icon: 'settings', section: '' },
@@ -178,9 +178,9 @@ const SECTION_LABELS = ['',  ];
 
 const LABEL_MAP = {
   overview:    'Overview Dashboard',
-  attendance:  'Attendance Monitoring',
-  bookmanage:  'Book Management',
-  catalog:     'Book Catalog',
+  attendance:  'Visitor Monitoring',
+  bookmanage:  'Book Scanner',
+  catalog:     'Book Management',
   users:       'User Management',
   reports:     'Reports & Analytics',
   settings:    'Settings',

@@ -4728,7 +4728,6 @@ function PageProfile({ user, profile, onProfileUpdate }) {
           <CourseField />
           <Field label="Campus"            fkey="campus"      readOnly />
           <Field label="Email Address"     fkey="email"  type="email" readOnly />
-          <Field label="Contact Number"    fkey="phone"  type="tel"   />
         </div>
       </div>
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
