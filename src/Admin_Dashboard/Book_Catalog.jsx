@@ -1608,9 +1608,32 @@ export default function Book_Catalog() {
       .channel('inventory-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowings'  }, silentRefresh)
+      // A Super Admin approving a registration only flips books.registration_status
+      // (book_copies rows already exist), so without this the Inventory tab never
+      // heard about the approval and the new copies stayed hidden until a refresh.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'books'       }, silentRefresh)
       .subscribe();
     return () => supabase.removeChannel(ch);
   }, [fetchCopies]);
+
+  // Safety net, same idea as the Dashboard's notification poll: if Realtime
+  // replication is switched off for a table, postgres_changes never fires. This
+  // quietly re-syncs the Book and Inventory tabs every few seconds while the
+  // page is visible (and instantly when the tab regains focus), so an approved
+  // book still shows up on its own without a manual refresh.
+  useEffect(() => {
+    const refreshBoth = () => {
+      if (document.visibilityState !== 'visible') return;
+      fetchBooks(false);
+      fetchCopies(false);
+    };
+    const pollId = setInterval(refreshBoth, 6000);
+    document.addEventListener('visibilitychange', refreshBoth);
+    return () => {
+      clearInterval(pollId);
+      document.removeEventListener('visibilitychange', refreshBoth);
+    };
+  }, [fetchBooks, fetchCopies]);
 
   // Back-fills book_copies rows (with their own QR) for books whose Copies
   // count is ahead of how many individual records exist — the "Generate"

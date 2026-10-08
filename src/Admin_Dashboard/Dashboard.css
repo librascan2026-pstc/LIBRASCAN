@@ -3026,3 +3026,21 @@ input, select, textarea { max-width: 100%; }
 .lm-content .ra-root .ra-nav-tabs::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .lm-content .ra-root .ra-nav-tabs.ra-dragging { cursor: grabbing; }
 .lm-content .ra-root .ra-nav-tabs.ra-dragging .ra-nav-tab { pointer-events: none; }
+
+/* ---------- Mobile / tablet drawer: keep Sign Out visible ----------
+   .lm-sidebar uses min-height:100vh, which on mobile browsers is taller than
+   the visible screen (100vh ignores the address bar / bottom nav bar), so the
+   sidebar footer with the Sign Out button was pushed off-screen. In the
+   drawer breakpoints, size the sidebar to the real visible height instead
+   (the nav list scrolls inside it) and clear the phone's bottom safe area. */
+@media (max-width: 900px) {
+  .lm-sidebar {
+    min-height: 0;
+    height: auto;
+    max-height: 100vh;
+    max-height: 100dvh;
+  }
+  .lm-sidebar-footer {
+    padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  }
+}
