@@ -1164,7 +1164,7 @@ app.use('/api/auth/google', googleAuthRouter);
 
 
 const DUE_EMAIL_LOAN_PERIOD_DAYS     = 3;
-const DUE_EMAIL_REMINDER_DAYS_BEFORE = 3;
+const DUE_EMAIL_REMINDER_DAYS_BEFORE = 1;   // email starts the day BEFORE the due date (same as StudentDashboard's DUE_NOTIF_DAYS_BEFORE)
 const PH_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;   // Asia/Manila is UTC+8, no DST
 const DAY_MS           = 24 * 60 * 60 * 1000;
 
@@ -1199,7 +1199,7 @@ app.get('/api/cron/due-reminders', async (req, res) => {
     for (let from = 0; ; from += 1000) {
       const { data, error } = await supabaseAdmin
         .from('borrowings')
-        .select('id, student_id, student_name, student_email, book_title, status, borrowed_at, returned_at')
+        .select('id, student_id, student_number, student_name, book_title, status, borrowed_at, returned_at')
         .is('returned_at', null)
         .not('borrowed_at', 'is', null)
         .order('id', { ascending: true })
@@ -1220,19 +1220,32 @@ app.get('/api/cron/due-reminders', async (req, res) => {
       let stage = null;
       if (info.daysLeft < 0) stage = 'overdue';
       else if (info.daysLeft === 0) stage = 'due_today';
-      else if (info.daysLeft <= DUE_EMAIL_REMINDER_DAYS_BEFORE) stage = 'reminder';
+      else if (info.daysLeft <= DUE_EMAIL_REMINDER_DAYS_BEFORE) stage = 'due_tomorrow';
       if (!stage) continue;
       summary.checked++;
 
-      // Recipient: the email saved on the borrowing, else the student's profile.
-      let to = (b.student_email || '').trim();
+      // Recipient: the student's profile email. Same lookups the dashboard uses to
+      // find a student's borrowings: student_id (uuid), student_number, or the
+      // "Name [Number]" suffix saved in student_name.
+      let to = '';
       let name = (b.student_name || '').replace(/\s*\[[^\]]*\]\s*$/, '').trim();
-      if ((!to || !name) && b.student_id && uuidRe.test(String(b.student_id))) {
-        const { data: prof } = await supabaseAdmin
+      let prof = null;
+      if (b.student_id && uuidRe.test(String(b.student_id))) {
+        const r = await supabaseAdmin
           .from('profiles').select('email, first_name').eq('id', b.student_id).maybeSingle();
-        if (!to) to = (prof?.email || '').trim();
-        if (prof?.first_name) name = prof.first_name;
+        prof = r.data || null;
       }
+      if (!prof) {
+        const embedded = /\[([^\]]+)\]\s*$/.exec(b.student_name || '');
+        const number = String(b.student_number || embedded?.[1] || (!uuidRe.test(String(b.student_id || '')) ? b.student_id : '') || '').trim();
+        if (number) {
+          const r = await supabaseAdmin
+            .from('profiles').select('email, first_name').eq('student_number', number).maybeSingle();
+          prof = r.data || null;
+        }
+      }
+      to = (prof?.email || '').trim();
+      if (prof?.first_name) name = prof.first_name;
       if (!to) { summary.skippedNoEmail++; continue; }
 
       // Claim this (borrowing, stage) first so overlapping runs can never double-send.

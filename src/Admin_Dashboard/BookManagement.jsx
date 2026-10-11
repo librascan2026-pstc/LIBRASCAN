@@ -89,6 +89,26 @@ const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-PH', { year:
 const fmtTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', hour12:true }) : '—';
 const fmtFull = (iso) => iso ? `${fmtDate(iso)} · ${fmtTime(iso)}` : '—';
 
+// Returned-At column for a book that is still out: a due-date stage instead of
+// a plain "Still out". Same rule as the student's notifications / emails
+// (due date = borrowed day + 3 calendar days):
+//   due tomorrow → "Due Soon" · due today → "Due Today" · past due → "Overdue".
+// Earlier than that (just borrowed) → null, so the row keeps showing "Still out".
+const TX_LOAN_PERIOD_DAYS = 3;
+function getTxDueStage(borrowedAtIso, now = new Date()) {
+  const borrowedAt = new Date(borrowedAtIso);
+  if (!borrowedAtIso || Number.isNaN(borrowedAt.getTime())) return null;
+  const due = new Date(borrowedAt);
+  due.setDate(due.getDate() + TX_LOAN_PERIOD_DAYS);
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+  const today  = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysLeft = Math.round((dueDay.getTime() - today.getTime()) / 86400000);
+  if (daysLeft < 0)   return { label: 'Overdue',   color: '#B23A3A' };
+  if (daysLeft === 0) return { label: 'Due Today', color: '#C2570C' };
+  if (daysLeft === 1) return { label: 'Due Soon',  color: '#C97A1B' };
+  return null;
+}
+
 
 function playSuccessSound() {
   try {
@@ -614,6 +634,7 @@ function TxRow({ tx, onClick, onDelete }) {
   const [hov, setHov] = useState(false);
   const [delHov, setDelHov] = useState(false);
   const isBorrowed = tx.status?.toLowerCase() === 'borrowed';
+  const dueStage = isBorrowed && !tx.returned_at ? getTxDueStage(tx.borrowed_at) : null;
   return (
     <tr
       data-notif-target={`borrowing:${tx.id}`}
@@ -663,9 +684,15 @@ function TxRow({ tx, onClick, onDelete }) {
             <div style={{ fontSize:11, color:'#5a9e5c', fontFamily:'var(--font-sans)' }}>{fmtTime(tx.returned_at)}</div>
           </>
         ) : (
-          <span style={{ fontSize:11.5, color: isBorrowed ? '#c0564e' : '#9a7070', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>
-            {isBorrowed ? 'Still out' : '—'}
-          </span>
+          dueStage ? (
+            <span style={{ fontSize:11.5, fontWeight:700, color: dueStage.color, fontFamily:'var(--font-sans)' }}>
+              {dueStage.label}
+            </span>
+          ) : (
+            <span style={{ fontSize:11.5, color: isBorrowed ? '#c0564e' : '#9a7070', fontFamily:'var(--font-sans)', fontStyle:'italic' }}>
+              {isBorrowed ? 'Still out' : '—'}
+            </span>
+          )
         )}
       </td>
       <td style={{ padding:'11px 14px', textAlign:'left' }} onClick={e => e.stopPropagation()}>

@@ -27,9 +27,7 @@ import {
 import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
 import { fetchSecurityAlerts, securityAlertMessage } from '../utils/securityAlerts';
 
-/* ═══════════════════════════════════════════════════════════════
-   INLINE STYLES  — mirrors every token in Dashboard.css exactly
-═══════════════════════════════════════════════════════════════ */
+
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;500;600;700&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,600&family=Playfair+Display:wght@500;600;700&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
 
@@ -2558,11 +2556,7 @@ tr.lm-notif-hit.lm-notif-hit-out > td:first-child { box-shadow: inset 4px 0 0 tr
   .sdb-profile-field-grid { grid-template-columns:1fr !important; }
 }
 
-/* ════════════════════════════════════════════════════════════════════════
-   HOME — PROMO BANNER ("Read something unforgettable") + SITE FOOTER
-   RESPONSIVE (phone · tablet · laptop · large screens). Appended last;
-   desktop (>900px) layout and look are unchanged except the ≥1600 boost.
-   ════════════════════════════════════════════════════════════════════════ */
+
 .sdb-home-footer-eyebrow-row > .sdb-home-footer-title { min-width:0; }
 .sdb-home-footer-title { overflow-wrap:anywhere; }
 
@@ -2623,12 +2617,7 @@ tr.lm-notif-hit.lm-notif-hit-out > td:first-child { box-shadow: inset 4px 0 0 tr
 `;
 
 
-const STUDENT_NOTIF_MAX = 100; // how many rows to fetch/keep in the live bell list
-// BUG FIX: this used to gate the initial load to only the last 24h
-// (STUDENT_RECENT_WINDOW_MS), so a decision from yesterday simply stopped
-// qualifying as "recent" on today's load and vanished from the bell/history.
-// Removed — every fetched row (bounded only by STUDENT_NOTIF_MAX above) is
-// now shown/stored regardless of age, same fix as Dashboard.jsx.
+const STUDENT_NOTIF_MAX = 100; 
 
 
 const STUDENT_NOTIF_TYPES = {
@@ -2639,19 +2628,28 @@ const STUDENT_NOTIF_TYPES = {
   NEW_ARRIVAL:      { label: 'New Arrival', color: '#1D6FA5' },
 };
 
+
+const STUDENT_DUE_STAGE_INFO = {
+  soon:    { label: 'Due Soon',  color: '#C97A1B' },
+  today:   { label: 'Due Today', color: '#C2570C' },
+  overdue: { label: 'Overdue',   color: '#B23A3A' },
+};
+function getStudentNotifTypeInfo(n) {
+  const base = STUDENT_NOTIF_TYPES[n?.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
+  if (n?.type !== 'DUE_DATE_REMINDER') return base;
+  const id = String(n?.id || '');
+  if (n?.extra?.overdue || id.startsWith('due_overdue_')) return STUDENT_DUE_STAGE_INFO.overdue;
+  const m = /_d(\d+)$/.exec(id);
+  if (m) return Number(m[1]) === 0 ? STUDENT_DUE_STAGE_INFO.today : STUDENT_DUE_STAGE_INFO.soon;
+  return base;
+}
+
 function buildStudentNotification({ id, type, title, message, createdAt, extra = {} }) {
   return { id, type, title, message, createdAt, extra, read: false };
 }
 
 
-/* ── Due-date reminders & new-arrival alerts ─────────────────────────────
-   Both are rebuilt from live tables with deterministic ids (like the borrow
-   decisions above), so they de-dupe against the bell list and the saved
-   history and can never be created twice for the same borrowing / book.      */
 
-// The `borrowings` table has no due-date column (the History page sets
-// `due_date: null`), so a book's due date = borrowed_at + this many days.
-// Change this if your library's loan period is different.
 const STUDENT_LOAN_PERIOD_DAYS = 3;
 const DUE_REMINDER_DAYS_BEFORE = 3;          // remind when this many days (or fewer) remain (History page "Due Soon" badge)
 // Notifications only start the day BEFORE the due date: due tomorrow (1), due today (0), then overdue (<0).
@@ -2764,10 +2762,7 @@ function getStudentNotifTarget(n) {
   }
 }
 
-// Finds the record a clicked notification points at (rows/cards carry a
-// data-notif-target token), scrolls to it and gives it a short, soft highlight
-// in the notification's own colour. Rows mount after their data loads, so it
-// retries briefly instead of giving up on the first miss.
+
 function flashNotifTarget(key, color) {
   if (!key || typeof document === 'undefined') return;
   const selector = `[data-notif-target~="${String(key).replace(/"/g, '')}"]`;
@@ -5291,6 +5286,44 @@ export default function StudentDashboard({ user, onSignOut }) {
     };
   }, [user?.id]);
 
+  // BUG FIX (student notifications "disappearing"): the bell list was rebuilt
+  // on every load ONLY from whatever the live tables still qualify (e.g. a
+  // request that is no longer pending/approved, a due-tomorrow reminder once
+  // the book is due today or returned, a new-arrival alert that was already
+  // delivered, anything past the fetch limit). Anything that stopped
+  // qualifying simply vanished from the bell even though it was never
+  // deleted. The persisted history (synced to Supabase, honours deletes) is
+  // the real record of what was shown, so merge it back into the bell:
+  // preferences, off-periods and deletions are still respected, and each id is
+  // merged only once per session so "Clear all" (dropdown only) stays cleared.
+  const hydratedBellRef = useRef({ uid: null, ids: new Set() });
+  const hydrateBellFromHistory = useCallback(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    if (hydratedBellRef.current.uid !== uid) hydratedBellRef.current = { uid, ids: new Set() };
+    const done  = hydratedBellRef.current.ids;
+    const prefs = notifPrefsRef.current;
+    const eligible = getNotifHistory(uid).filter(n =>
+      n && n.id != null && !done.has(n.id) &&
+      prefs[n.type] === true && !isNotifSilenced(uid, n) && !isNotifDeleted(uid, n.id) && !isStaleDueStageNotif(n));
+    if (!eligible.length) return;
+    eligible.forEach(n => done.add(n.id));
+    const missing = eligible
+      .filter(n => !seenNotifIdsInStateRef.current.has(n.id))
+      .slice(0, STUDENT_NOTIF_MAX);
+    if (!missing.length) return;
+    missing.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+    setNotifications(prev =>
+      [...prev, ...missing]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, STUDENT_NOTIF_MAX)
+    );
+  }, [user?.id]);
+
+  useEffect(() => {
+    hydrateBellFromHistory();
+  }, [hydrateBellFromHistory, prefsVersion]);
+
   useEffect(() => {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
@@ -5310,6 +5343,7 @@ export default function StudentDashboard({ user, onSignOut }) {
       setNotifications(prev => prev
         .filter(n => !isNotifDeleted(uid, n.id))
         .map(n => (!n.read && readIds.has(n.id) ? { ...n, read: true } : n)));
+      hydrateBellFromHistory();
     };
     window.addEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
     const stopSync = startNotifHistorySync(uid);
@@ -5317,7 +5351,7 @@ export default function StudentDashboard({ user, onSignOut }) {
       window.removeEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
       stopSync();
     };
-  }, [user?.id]);
+  }, [user?.id, hydrateBellFromHistory]);
 
   const playStudentNotifSound = useCallback(() => {
     try {
@@ -5597,9 +5631,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     // prefsVersion: re-check right away when the student flips the toggle.
   }, [user?.id, fetchStudentDueReminders, prefsVersion]);
 
-  // New Arrivals — a book becomes visible to students once its registration is
-  // approved. Always keeps the "already seen" set current (even while the
-  // preference is off) so turning it on later only announces books added after.
+ 
   const newArrivalSeenRef = useRef(null);
   const fetchStudentNewArrivals = useCallback(async (isRealtime = false) => {
     const uid = user?.id;
@@ -5666,8 +5698,7 @@ export default function StudentDashboard({ user, onSignOut }) {
     };
   }, [user?.id, fetchStudentNewArrivals]);
 
-  // Safety net: anything that shows as read in the bell must also be read in
-  // the Notification History, so the two lists can never disagree.
+
   useEffect(() => {
     const uid = user?.id;
     if (!uid) return;
@@ -5782,7 +5813,7 @@ export default function StudentDashboard({ user, onSignOut }) {
       : (n.type === 'BORROW_APPROVED' || n.type === 'BORROW_CANCELLED') && n.extra?.borrowId != null ? `request:${n.extra.borrowId}`
       : n.type === 'DUE_DATE_REMINDER' && n.extra?.borrowId != null ? `borrowing:${n.extra.borrowId}`
       : null;
-    flashNotifTarget(hitKey, (STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT).color);
+    flashNotifTarget(hitKey, getStudentNotifTypeInfo(n).color);
   };
 
   const handleBellClick = () => {
@@ -5795,7 +5826,7 @@ export default function StudentDashboard({ user, onSignOut }) {
   };
 
   const renderStudentNotifRow = (n) => {
-    const typeInfo = STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
+    const typeInfo = getStudentNotifTypeInfo(n);
     const isUnread = !n.read;
     const target   = getStudentNotifTarget(n);
     const canOpen  = !!target;
@@ -5911,7 +5942,7 @@ export default function StudentDashboard({ user, onSignOut }) {
             {Object.entries(STUDENT_NOTIF_TYPES)
               .filter(([key]) => currentPrefs[key] === true)
               .map(([key, t]) => (
-                <option key={key} value={key}>{t.label}</option>
+                <option key={key} value={key}>{key === 'DUE_DATE_REMINDER' ? 'Due Date Reminders' : t.label}</option>
               ))}
           </select>
           <div className="sdb-count">{rows.length} record{rows.length !== 1 ? 's' : ''}</div>
@@ -5942,7 +5973,7 @@ export default function StudentDashboard({ user, onSignOut }) {
               </div>
             ) : (
               rows.map((n, i) => {
-                const typeInfo = STUDENT_NOTIF_TYPES[n.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
+                const typeInfo = getStudentNotifTypeInfo(n);
                 const isUnread = !n.read;
                 const target   = getStudentNotifTarget(n);
                 const canOpen  = !!target;

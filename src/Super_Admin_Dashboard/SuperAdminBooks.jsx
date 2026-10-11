@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, cloneElement } from 'react';
+import { useState, useEffect, useMemo, useRef, cloneElement } from 'react';
 import {
   BookOpen, Library, PackageCheck, PackageX, Search, ChevronLeft, ChevronRight,
   Building2, X, Hash, MapPin, User, Layers, Clock, Check, Ban,
@@ -643,15 +643,28 @@ export default function SuperAdminBooks() {
   const [rejectTarget, setRejectTarget] = useState(null);
   const [actionMsg, setActionMsg]     = useState(null); // { type, text }
 
+  // Live updates: `load` below is also re-run silently (no skeleton) whenever a
+  // librarian registers/changes a book, so Pending Requests, the stat cards and
+  // the per-campus counts stay current without a page refresh.
+  const loadSeqRef     = useRef(0);       // newest load wins; stale responses are dropped
+  const loadedOnceRef  = useRef(false);   // true after the first successful load
+  const reloadBooksRef = useRef(null);
+
   useEffect(() => {
-    async function load() {
-      setLoading(true);
+    async function load(silent = false) {
+      const mySeq = ++loadSeqRef.current;
+      if (!silent) setLoading(true);
       try {
         const [campusRes, booksRes, copiesRes] = await Promise.all([
           supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active'),
           supabaseAdmin.from('books').select('*').order('created_at', { ascending: false }),
           supabaseAdmin.from('book_copies').select('book_id, status'),
         ]);
+
+        // A failed background refresh must never wipe the list that is already
+        // on screen, and an out-of-date response must never overwrite a newer one.
+        if (silent && loadedOnceRef.current && (campusRes.error || booksRes.error || copiesRes.error)) return;
+        if (mySeq !== loadSeqRef.current) return;
 
         const allCampuses = campusRes.data || [];
         const allBooks    = booksRes.data || [];
@@ -682,12 +695,55 @@ export default function SuperAdminBooks() {
 
         setBooks(merged);
         setCampuses(allCampuses);
+        loadedOnceRef.current = true;
       } catch (err) {
         console.error('[SuperAdminBooks] load error:', err.message);
       }
       setLoading(false);
     }
+    reloadBooksRef.current = load;
     load();
+    return () => {
+      loadSeqRef.current += 1;       // drop anything still in flight after unmount
+      reloadBooksRef.current = null;
+    };
+  }, []);
+
+  // Realtime: any change on `books` (a librarian submitting a new registration,
+  // a decision made elsewhere) or `book_copies` (copies are inserted right after
+  // the book itself) triggers a short-debounced silent reload. The polling +
+  // focus refresh below is the safety net for projects where Realtime is not
+  // enabled on those tables — same approach as the Books-tab badge in
+  // SuperAdminLayout.jsx.
+  useEffect(() => {
+    let timer = null;
+    let ch = null;
+    const refresh  = () => { if (reloadBooksRef.current) reloadBooksRef.current(true); };
+    const schedule = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(refresh, 300);
+    };
+
+    try {
+      ch = supabaseAdmin
+        .channel(`sab-books-live-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, schedule)
+        .subscribe();
+    } catch { /* realtime unavailable — polling below still keeps it accurate */ }
+
+    const pollId = setInterval(() => { if (!document.hidden) refresh(); }, 8000);
+    const onVisible = () => { if (!document.hidden) refresh(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      clearInterval(pollId);
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (ch) { try { supabaseAdmin.removeChannel(ch); } catch { /* already closed */ } }
+    };
   }, []);
 
   // Legacy rows without the column (pre-migration) are treated as already

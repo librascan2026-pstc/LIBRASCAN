@@ -724,6 +724,7 @@ export default function UserManagement({ onStatsRefresh }) {
   const [users,      setUsers]      = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
+  const [roleFilter, setRoleFilter] = useState('all');   // 'all' | 'student' | 'employee'
   const [showModal,  setShowModal]  = useState(false);
   const [modalUser,  setModalUser]  = useState(null);
   const [deleteUser, setDeleteUser] = useState(null);
@@ -839,7 +840,8 @@ export default function UserManagement({ onStatsRefresh }) {
 
   const filtered = users.filter(u => {
     const q = search.toLowerCase();
-    return !q || [u.first_name, u.last_name, u.email].join(' ').toLowerCase().includes(q);
+    const matchesRole = roleFilter === 'all' || u.role === roleFilter;
+    return matchesRole && (!q || [u.first_name, u.last_name, u.email].join(' ').toLowerCase().includes(q));
   });
 
   return (
@@ -863,6 +865,16 @@ export default function UserManagement({ onStatsRefresh }) {
             style={{ paddingLeft: 34 }}
           />
         </div>
+        <select
+          className="lm-select"
+          aria-label="Filter by role"
+          value={roleFilter}
+          onChange={e => setRoleFilter(e.target.value)}
+        >
+          <option value="all">All Roles</option>
+          <option value="student">Student</option>
+          <option value="employee">Employee</option>
+        </select>
         <span style={{
           fontSize: 11.5, color: 'var(--text-dim)',
           fontFamily: 'var(--font-sans)', whiteSpace: 'nowrap',
@@ -901,6 +913,9 @@ export default function UserManagement({ onStatsRefresh }) {
           <div className="lm-empty-icon">👥</div>
           <div className="lm-empty-text">No users found</div>
           {search && <div className="lm-empty-sub">Try a different search term.</div>}
+          {!search && roleFilter !== 'all' && (
+            <div className="lm-empty-sub">No {roleFilter === 'employee' ? 'employee' : 'student'} accounts found. Try another role.</div>
+          )}
         </div>
       ) : (
         <div className="um-table-scroll" style={{

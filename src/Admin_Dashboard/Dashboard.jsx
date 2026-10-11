@@ -400,6 +400,44 @@ export default function Dashboard({ user, onSignOut }) {
   const isFirstLoad = useRef(true);
   const isFirstUserLoad     = useRef(true);
 
+  // BUG FIX (library manager notifications "disappearing"): the bell list was rebuilt
+  // on every load ONLY from whatever the live tables still qualify (e.g. a
+  // request that is no longer pending/approved, a due-tomorrow reminder once
+  // the book is due today or returned, a new-arrival alert that was already
+  // delivered, anything past the fetch limit). Anything that stopped
+  // qualifying simply vanished from the bell even though it was never
+  // deleted. The persisted history (synced to Supabase, honours deletes) is
+  // the real record of what was shown, so merge it back into the bell:
+  // preferences, off-periods and deletions are still respected, and each id is
+  // merged only once per session so "Clear all" (dropdown only) stays cleared.
+  const hydratedBellRef = useRef({ uid: null, ids: new Set() });
+  const hydrateBellFromHistory = useCallback(() => {
+    const uid = user?.id;
+    if (!uid) return;
+    if (hydratedBellRef.current.uid !== uid) hydratedBellRef.current = { uid, ids: new Set() };
+    const done  = hydratedBellRef.current.ids;
+    const prefs = notifPrefsRef.current;
+    const eligible = getNotifHistory(uid).filter(n =>
+      n && n.id != null && !done.has(n.id) &&
+      prefs[n.type] === true && !isNotifSilenced(uid, n) && !isNotifDeleted(uid, n.id));
+    if (!eligible.length) return;
+    eligible.forEach(n => done.add(n.id));
+    const missing = eligible
+      .filter(n => !seenNotifIdsInStateRef.current.has(n.id))
+      .slice(0, NOTIF_MAX);
+    if (!missing.length) return;
+    missing.forEach(n => seenNotifIdsInStateRef.current.add(n.id));
+    setNotifications(prev =>
+      [...prev, ...missing]
+        .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        .slice(0, NOTIF_MAX)
+    );
+  }, [user?.id]);
+
+  useEffect(() => {
+    hydrateBellFromHistory();
+  }, [hydrateBellFromHistory, prefsVersion]);
+
   useEffect(() => {
     setNotifHistory(getNotifHistory(user?.id));
   }, [user?.id]);
@@ -422,6 +460,7 @@ export default function Dashboard({ user, onSignOut }) {
       setNotifications(prev => prev
         .filter(n => !isNotifDeleted(uid, n.id))
         .map(n => (!n.read && readIds.has(n.id) ? { ...n, read: true } : n)));
+      hydrateBellFromHistory();
     };
     window.addEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
     const stopSync = startNotifHistorySync(uid);
@@ -429,7 +468,7 @@ export default function Dashboard({ user, onSignOut }) {
       window.removeEventListener(NOTIF_HISTORY_EVENT, applySyncedHistory);
       stopSync();
     };
-  }, [user?.id]);
+  }, [user?.id, hydrateBellFromHistory]);
 
 
   
