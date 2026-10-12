@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
 import { extractAbstractText } from '../ocrClient';
@@ -63,6 +63,8 @@ const Ic = {
   boxes:    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>,
   wrench:   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14.7 6.3a4 4 0 1 0-5.4 5.4L2 19l3 3 7.3-7.3a4 4 0 0 0 5.4-5.4l-2.8 2.8-2-2z"/></svg>,
   alert:    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>,
+  chevron:  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9"/></svg>,
+  dots:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>,
 };
 
 async function uploadImage(file, folder = 'covers') {
@@ -275,13 +277,13 @@ function ImageUploadField({ label, value, preview, onFileChange, accept = 'image
   );
 }
 
-function BookFormModal({ book, onClose, onSaved }) {
+function BookFormModal({ book, onClose, onSaved, genreOptions = GENRES, shelfOptions = SHELF_LOCATIONS }) {
   // Phase 9 — campus isolation
   const { profile } = useAuth();
   const campusId = profile?.campus_id ?? null;
 
   const isEdit = Boolean(book?.id);
-  const [form, setForm]         = useState(book ? { ...EMPTY_FORM, ...book } : { ...EMPTY_FORM });
+  const [form, setForm]         = useState(book ? { ...EMPTY_FORM, ...book } : { ...EMPTY_FORM, genre: genreOptions[0] ?? '', shelf_location: shelfOptions[0] ?? '' });
   const [errors, setErrors]     = useState({});
   const [saving, setSaving]     = useState(false);
   const [apiErr, setApiErr]     = useState('');
@@ -301,6 +303,34 @@ function BookFormModal({ book, onClose, onSaved }) {
   const [qrProgress, setQrProgress] = useState('');
 
   const set = (k, v) => { setForm(f => ({ ...f, [k]: v })); setErrors(e => ({ ...e, [k]: '' })); };
+
+  // New book: if the campus genre list finishes loading after the form opened,
+  // make sure the pre-selected genre is one that actually exists for this campus.
+  useEffect(() => {
+    if (isEdit) return;
+    if (genreOptions.length && !genreOptions.includes(form.genre)) {
+      setForm(f => ({ ...f, genre: genreOptions[0] }));
+    }
+  }, [isEdit, genreOptions, form.genre]);
+
+  // Editing a book whose genre is no longer in the campus list (e.g. it was
+  // deleted) keeps showing its current genre instead of silently switching it.
+  const genreChoices = form.genre && !genreOptions.includes(form.genre)
+    ? [...genreOptions, form.genre]
+    : genreOptions;
+
+  // New book: same for shelves — make sure the pre-selected shelf exists for this campus.
+  useEffect(() => {
+    if (isEdit) return;
+    if (shelfOptions.length && !shelfOptions.includes(form.shelf_location)) {
+      setForm(f => ({ ...f, shelf_location: shelfOptions[0] }));
+    }
+  }, [isEdit, shelfOptions, form.shelf_location]);
+
+  // Editing a book whose shelf is no longer in the campus list keeps showing its current shelf.
+  const shelfChoices = form.shelf_location && !shelfOptions.includes(form.shelf_location)
+    ? [...shelfOptions, form.shelf_location]
+    : shelfOptions;
 
   const handleCoverFile = (f) => {
     setCoverFile(f);
@@ -605,14 +635,16 @@ function BookFormModal({ book, onClose, onSaved }) {
               <FieldLabel>Shelf Location</FieldLabel>
               <select style={{ ...inputStyle(), appearance: 'none', cursor: 'pointer' }}
                 value={form.shelf_location} onChange={e => set('shelf_location', e.target.value)}>
-                {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                {shelfChoices.length === 0 && <option value="">No shelves yet</option>}
+                {shelfChoices.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
             <div>
               <FieldLabel>Genre</FieldLabel>
               <select style={{ ...inputStyle(), appearance: 'none', cursor: 'pointer' }}
                 value={form.genre} onChange={e => set('genre', e.target.value)}>
-                {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
+                {genreChoices.length === 0 && <option value="">No genres yet</option>}
+                {genreChoices.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </div>
           </div>
@@ -1434,6 +1466,36 @@ export default function Book_Catalog() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [shelfFilter, setShelfFilter]   = useState('all');
 
+  // ── Genre management (per campus) ──
+  // Genres live in the `campus_genres` table (one row per campus + genre name),
+  // the same table Super Admin manages. A librarian only sees / edits their own campus's rows.
+  const [campusGenres, setCampusGenres]     = useState([]);     // rows: { id, campus_id, name, created_at }
+  const [genresReady, setGenresReady]       = useState(false);  // true once campus_genres has loaded successfully
+  const [genresLoadErr, setGenresLoadErr]   = useState(null);   // set when the table is missing / unreadable
+  const [genreMenuOpen, setGenreMenuOpen]   = useState(false);
+  const [genreRowMenu, setGenreRowMenu]     = useState(null);   // { id, step: 'menu' | 'confirm' }
+  const [genreAdding, setGenreAdding]       = useState(false);
+  const [newGenreName, setNewGenreName]     = useState('');
+  const [genreErr, setGenreErr]             = useState('');
+  const [genreEditName, setGenreEditName]     = useState('');
+  const [genreBusy, setGenreBusy]           = useState(false);
+  const genreMenuRef = useRef(null);
+
+  // ── Shelf management (per campus) ──
+  // Shelves live in the `campus_shelves` table (one row per campus + shelf name),
+  // mirroring campus_genres. A librarian only sees / edits their own campus's rows.
+  const [campusShelves, setCampusShelves]     = useState([]);     // rows: { id, campus_id, name, created_at }
+  const [shelvesReady, setShelvesReady]       = useState(false);  // true once campus_shelves has loaded successfully
+  const [shelvesLoadErr, setShelvesLoadErr]   = useState(null);   // set when the table is missing / unreadable
+  const [shelfMenuOpen, setShelfMenuOpen]     = useState(false);
+  const [shelfRowMenu, setShelfRowMenu]       = useState(null);   // { id, step: 'menu' | 'confirm' }
+  const [shelfAdding, setShelfAdding]         = useState(false);
+  const [newShelfName, setNewShelfName]       = useState('');
+  const [shelfErr, setShelfErr]               = useState('');
+  const [shelfEditName, setShelfEditName]     = useState('');
+  const [shelfBusy, setShelfBusy]             = useState(false);
+  const shelfMenuRef = useRef(null);
+
   const [showForm, setShowForm]     = useState(false);
   const [editBook, setEditBook]     = useState(null);
   const [viewBook, setViewBook]     = useState(null);
@@ -1453,6 +1515,7 @@ export default function Book_Catalog() {
   const [copyActionId, setCopyActionId]           = useState(null); // copy_id currently being fixed/deleted
   const [qrPreviewCopy, setQrPreviewCopy]         = useState(null);
   const [invSort, setInvSort]                   = useState({ key: 'title', dir: 'asc' }); // Inventory tab sorting
+  const [pendingSort, setPendingSort]           = useState({ key: 'submitted', dir: 'desc' }); // Unregister book tab sorting (newest first = the order it had before)
 
   const [toast, setToast]   = useState({ msg: '', type: 'success' });
   const toastRef = useRef();
@@ -1526,6 +1589,365 @@ export default function Book_Catalog() {
   }, [campusId]);
 
   useEffect(() => { fetchBooks(true); }, [fetchBooks]);
+
+  // Load this campus's genres (kept separate from fetchBooks so nothing there changes).
+  const loadCampusGenres = useCallback(async () => {
+    if (!campusId) return;
+    const { data, error } = await supabaseAdmin
+      .from('campus_genres')
+      .select('id, campus_id, name, created_at')
+      .eq('campus_id', campusId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      console.error('[Book_Catalog] campus_genres load error:', error.message);
+      setGenresLoadErr(error.message);
+      return;
+    }
+    setCampusGenres(data || []);
+    setGenresLoadErr(null);
+    setGenresReady(true);
+  }, [campusId]);
+  useEffect(() => { loadCampusGenres(); }, [loadCampusGenres]);
+
+  // Re-read the list whenever the genre dropdown or the Add/Edit form opens, so
+  // genres a Super Admin added or removed in the meantime show up right away.
+  useEffect(() => { if (genreMenuOpen) loadCampusGenres(); }, [genreMenuOpen, loadCampusGenres]);
+  useEffect(() => { if (showForm) loadCampusGenres(); }, [showForm, loadCampusGenres]);
+
+  // Close the genre dropdown on outside click / Escape.
+  useEffect(() => {
+    if (!genreMenuOpen) return undefined;
+    const onDown = (e) => { if (genreMenuRef.current && !genreMenuRef.current.contains(e.target)) setGenreMenuOpen(false); };
+    const onKey  = (e) => { if (e.key === 'Escape') setGenreMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [genreMenuOpen]);
+
+  // Reset the transient row menu / add form whenever the dropdown closes.
+  useEffect(() => {
+    if (!genreMenuOpen) {
+      setGenreRowMenu(null);
+      setGenreAdding(false);
+      setNewGenreName('');
+      setGenreEditName('');
+      setGenreErr('');
+    }
+  }, [genreMenuOpen]);
+
+  // This campus's genres. Falls back to the built-in list only if the
+  // `campus_genres` table could not be read (or the account has no campus).
+  const baseGenres = useMemo(() => {
+    if (!genresReady) return GENRES;
+    const seen = new Set();
+    const out = [];
+    campusGenres.forEach(r => {
+      const key = (r.name || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push(r.name);
+    });
+    return out;
+  }, [genresReady, campusGenres]);
+
+  // Campus genres first, then any legacy/custom genre still found on this campus's
+  // books so the filter stays complete (e.g. a genre deleted while books still use it).
+  const genres = useMemo(() => {
+    const extra = Array.from(new Set(books.map(b => b.genre).filter(g => g && !baseGenres.includes(g)))).sort();
+    return [...baseGenres, ...extra];
+  }, [books, baseGenres]);
+
+  // If the selected genre no longer exists in the list, go back to "All Genres".
+  useEffect(() => {
+    if (genreFilter !== 'all' && !genres.includes(genreFilter)) setGenreFilter('all');
+  }, [genres, genreFilter]);
+
+  const handleAddGenre = async () => {
+    if (genreBusy) return;
+    if (!campusId) { setGenreErr('Your account is not assigned to a campus.'); return; }
+    const name = newGenreName.replace(/\s+/g, ' ').trim();
+    if (!name) { setGenreErr('Genre name is required.'); return; }
+    if (name.length > 60) { setGenreErr('Genre name must be 60 characters or less.'); return; }
+    if (campusGenres.some(g => (g.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      setGenreErr('That genre already exists for this campus.');
+      return;
+    }
+    setGenreBusy(true);
+    setGenreErr('');
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('campus_genres')
+        .insert({ campus_id: campusId, name })
+        .select('id, campus_id, name, created_at')
+        .single();
+      if (error) {
+        setGenreErr(error.code === '23505' ? 'That genre already exists for this campus.' : (error.message || 'Could not add genre.'));
+        return;
+      }
+      setCampusGenres(prev => [...prev, data]);
+      setNewGenreName('');
+      setGenreAdding(false);
+      showToast(`Genre "${name}" added.`);
+    } catch (err) {
+      setGenreErr(err.message || 'Could not add genre.');
+    } finally {
+      setGenreBusy(false);
+    }
+  };
+
+  const handleDeleteGenre = async (row) => {
+    if (genreBusy || !row || !campusId) return;
+    setGenreBusy(true);
+    try {
+      const { error } = await supabaseAdmin
+        .from('campus_genres').delete().eq('id', row.id).eq('campus_id', campusId);
+      if (error) {
+        setGenreErr(error.message || 'Could not delete genre.');
+        setGenreRowMenu(null);
+        return;
+      }
+      setCampusGenres(prev => prev.filter(g => g.id !== row.id));
+      setGenreRowMenu(null);
+      setGenreErr('');
+      showToast(`Genre "${row.name}" removed.`);
+    } catch (err) {
+      setGenreErr(err.message || 'Could not delete genre.');
+      setGenreRowMenu(null);
+    } finally {
+      setGenreBusy(false);
+    }
+  };
+
+  const handleRenameGenre = async (row) => {
+    if (genreBusy || !row || !campusId) return;
+    const name = genreEditName.replace(/\s+/g, ' ').trim();
+    if (!name) { setGenreErr('Genre name is required.'); return; }
+    if (name.length > 60) { setGenreErr('Genre name must be 60 characters or less.'); return; }
+    if (name === row.name) {
+      setGenreRowMenu(null);
+      setGenreEditName('');
+      setGenreErr('');
+      return;
+    }
+    if (campusGenres.some(x => x.id !== row.id && (x.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      setGenreErr('That genre already exists for this campus.');
+      return;
+    }
+    const oldName = row.name;
+    setGenreBusy(true);
+    setGenreErr('');
+    try {
+      const { error } = await supabaseAdmin
+        .from('campus_genres').update({ name }).eq('id', row.id).eq('campus_id', campusId);
+      if (error) {
+        setGenreErr(error.code === '23505' ? 'That genre already exists for this campus.' : (error.message || 'Could not rename genre.'));
+        return;
+      }
+      // Keep this campus's books in sync with the new name.
+      const { error: bookErr } = await supabaseAdmin
+        .from('books').update({ genre: name }).eq('campus_id', campusId).eq('genre', oldName);
+      if (bookErr) {
+        // Roll the rename back so the list and the books never disagree.
+        await supabaseAdmin
+          .from('campus_genres').update({ name: oldName }).eq('id', row.id).eq('campus_id', campusId);
+        setGenreErr(bookErr.message || 'Could not update the books that use this genre.');
+        return;
+      }
+      setCampusGenres(prev => prev.map(x => x.id === row.id ? { ...x, name } : x));
+      setBooks(prev => prev.map(b => b.genre === oldName ? { ...b, genre: name } : b));
+      setGenreFilter(f => f === oldName ? name : f);
+      setGenreRowMenu(null);
+      setGenreEditName('');
+      setGenreErr('');
+      showToast(`Genre "${oldName}" renamed to "${name}".`);
+    } catch (err) {
+      setGenreErr(err.message || 'Could not rename genre.');
+    } finally {
+      setGenreBusy(false);
+    }
+  };
+
+  // ── Shelf management: load / dropdown behaviour / add / delete (mirrors genres) ──
+  const loadCampusShelves = useCallback(async () => {
+    if (!campusId) return;
+    const { data, error } = await supabaseAdmin
+      .from('campus_shelves')
+      .select('id, campus_id, name, created_at')
+      .eq('campus_id', campusId)
+      .order('created_at', { ascending: true });
+    if (error) {
+      console.error('[Book_Catalog] campus_shelves load error:', error.message);
+      setShelvesLoadErr(error.message);
+      return;
+    }
+    setCampusShelves(data || []);
+    setShelvesLoadErr(null);
+    setShelvesReady(true);
+  }, [campusId]);
+  useEffect(() => { loadCampusShelves(); }, [loadCampusShelves]);
+
+  // Re-read the list whenever the shelf dropdown or the Add/Edit form opens.
+  useEffect(() => { if (shelfMenuOpen) loadCampusShelves(); }, [shelfMenuOpen, loadCampusShelves]);
+  useEffect(() => { if (showForm) loadCampusShelves(); }, [showForm, loadCampusShelves]);
+
+  // Close the shelf dropdown on outside click / Escape.
+  useEffect(() => {
+    if (!shelfMenuOpen) return undefined;
+    const onDown = (e) => { if (shelfMenuRef.current && !shelfMenuRef.current.contains(e.target)) setShelfMenuOpen(false); };
+    const onKey  = (e) => { if (e.key === 'Escape') setShelfMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [shelfMenuOpen]);
+
+  // Reset the transient row menu / add form whenever the dropdown closes.
+  useEffect(() => {
+    if (!shelfMenuOpen) {
+      setShelfRowMenu(null);
+      setShelfAdding(false);
+      setNewShelfName('');
+      setShelfEditName('');
+      setShelfErr('');
+    }
+  }, [shelfMenuOpen]);
+
+  // This campus's shelves. Falls back to the built-in list only if the
+  // `campus_shelves` table could not be read (or the account has no campus).
+  const baseShelves = useMemo(() => {
+    if (!shelvesReady) return SHELF_LOCATIONS;
+    const seen = new Set();
+    const out = [];
+    campusShelves.forEach(r => {
+      const key = (r.name || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push(r.name);
+    });
+    return out;
+  }, [shelvesReady, campusShelves]);
+
+  // Campus shelves first, then any shelf still found on this campus's books
+  // so the filter stays complete (e.g. a shelf deleted while books still use it).
+  const shelves = useMemo(() => {
+    const extra = Array.from(new Set(books.map(b => b.shelf_location).filter(s => s && !baseShelves.includes(s)))).sort();
+    return [...baseShelves, ...extra];
+  }, [books, baseShelves]);
+
+  // If the selected shelf no longer exists in the list, go back to "All Shelves".
+  useEffect(() => {
+    if (shelfFilter !== 'all' && !shelves.includes(shelfFilter)) setShelfFilter('all');
+  }, [shelves, shelfFilter]);
+
+  const handleAddShelf = async () => {
+    if (shelfBusy) return;
+    if (!campusId) { setShelfErr('Your account is not assigned to a campus.'); return; }
+    const name = newShelfName.replace(/\s+/g, ' ').trim();
+    if (!name) { setShelfErr('Shelf name is required.'); return; }
+    if (name.length > 60) { setShelfErr('Shelf name must be 60 characters or less.'); return; }
+    if (campusShelves.some(s => (s.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      setShelfErr('That shelf already exists for this campus.');
+      return;
+    }
+    setShelfBusy(true);
+    setShelfErr('');
+    try {
+      const { data, error } = await supabaseAdmin
+        .from('campus_shelves')
+        .insert({ campus_id: campusId, name })
+        .select('id, campus_id, name, created_at')
+        .single();
+      if (error) {
+        setShelfErr(error.code === '23505' ? 'That shelf already exists for this campus.' : (error.message || 'Could not add shelf.'));
+        return;
+      }
+      setCampusShelves(prev => [...prev, data]);
+      setNewShelfName('');
+      setShelfAdding(false);
+      showToast(`Shelf "${name}" added.`);
+    } catch (err) {
+      setShelfErr(err.message || 'Could not add shelf.');
+    } finally {
+      setShelfBusy(false);
+    }
+  };
+
+  const handleDeleteShelf = async (row) => {
+    if (shelfBusy || !row || !campusId) return;
+    setShelfBusy(true);
+    try {
+      const { error } = await supabaseAdmin
+        .from('campus_shelves').delete().eq('id', row.id).eq('campus_id', campusId);
+      if (error) {
+        setShelfErr(error.message || 'Could not delete shelf.');
+        setShelfRowMenu(null);
+        return;
+      }
+      setCampusShelves(prev => prev.filter(s => s.id !== row.id));
+      setShelfRowMenu(null);
+      setShelfErr('');
+      showToast(`Shelf "${row.name}" removed.`);
+    } catch (err) {
+      setShelfErr(err.message || 'Could not delete shelf.');
+      setShelfRowMenu(null);
+    } finally {
+      setShelfBusy(false);
+    }
+  };
+
+  const handleRenameShelf = async (row) => {
+    if (shelfBusy || !row || !campusId) return;
+    const name = shelfEditName.replace(/\s+/g, ' ').trim();
+    if (!name) { setShelfErr('Shelf name is required.'); return; }
+    if (name.length > 60) { setShelfErr('Shelf name must be 60 characters or less.'); return; }
+    if (name === row.name) {
+      setShelfRowMenu(null);
+      setShelfEditName('');
+      setShelfErr('');
+      return;
+    }
+    if (campusShelves.some(x => x.id !== row.id && (x.name || '').trim().toLowerCase() === name.toLowerCase())) {
+      setShelfErr('That shelf already exists for this campus.');
+      return;
+    }
+    const oldName = row.name;
+    setShelfBusy(true);
+    setShelfErr('');
+    try {
+      const { error } = await supabaseAdmin
+        .from('campus_shelves').update({ name }).eq('id', row.id).eq('campus_id', campusId);
+      if (error) {
+        setShelfErr(error.code === '23505' ? 'That shelf already exists for this campus.' : (error.message || 'Could not rename shelf.'));
+        return;
+      }
+      // Keep this campus's books in sync with the new name.
+      const { error: bookErr } = await supabaseAdmin
+        .from('books').update({ shelf_location: name }).eq('campus_id', campusId).eq('shelf_location', oldName);
+      if (bookErr) {
+        // Roll the rename back so the list and the books never disagree.
+        await supabaseAdmin
+          .from('campus_shelves').update({ name: oldName }).eq('id', row.id).eq('campus_id', campusId);
+        setShelfErr(bookErr.message || 'Could not update the books that use this shelf.');
+        return;
+      }
+      setCampusShelves(prev => prev.map(x => x.id === row.id ? { ...x, name } : x));
+      setBooks(prev => prev.map(b => b.shelf_location === oldName ? { ...b, shelf_location: name } : b));
+      setShelfFilter(f => f === oldName ? name : f);
+      setShelfRowMenu(null);
+      setShelfEditName('');
+      setShelfErr('');
+      showToast(`Shelf "${oldName}" renamed to "${name}".`);
+    } catch (err) {
+      setShelfErr(err.message || 'Could not rename shelf.');
+    } finally {
+      setShelfBusy(false);
+    }
+  };
 
   useEffect(() => {
     const silentRefresh = () => fetchBooks(false);
@@ -1798,6 +2220,28 @@ export default function Book_Catalog() {
     return matchSearch && matchGenre;
   });
 
+  // Unregister book sorting — applied on top of the filters above. The default
+  // (Submitted, newest first) is the same order the list had before. Blank
+  // values (shown as "—") always sink to the bottom, in either direction.
+  const pendingSorted = [...pendingFiltered].sort((a, b) => {
+    const getVal = PENDING_SORT_FIELDS[pendingSort.key] || PENDING_SORT_FIELDS.submitted;
+    const dir = pendingSort.dir === 'desc' ? -1 : 1;
+    const x = getVal(a), y = getVal(b);
+    const blankX = x === '' || x === null || x === undefined;
+    const blankY = y === '' || y === null || y === undefined;
+    if (blankX !== blankY) return blankX ? 1 : -1;
+    if (blankX && blankY) return 0;
+    const cmp = (typeof x === 'number' && typeof y === 'number')
+      ? x - y
+      : String(x).localeCompare(String(y), undefined, { numeric: true });
+    return cmp * dir;
+  });
+
+  const handlePendingSort = (key) =>
+    setPendingSort(prev => (prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: 'asc' }));
+
   const invFiltered = copies.filter(c => {
     const q = search.toLowerCase();
     const matchSearch = !q || [c.book?.title, c.book?.authors, c.book?.isbn, c.copy_id, String(c.copy_number)]
@@ -1948,10 +2392,162 @@ export default function Book_Catalog() {
             }}
           />
         </div>
-        <select className="bc-select" style={selectStyle} value={genreFilter} onChange={e => setGenreFilter(e.target.value)}>
-          <option value="all">All Genres</option>
-          {GENRES.map(g => <option key={g} value={g}>{g}</option>)}
-        </select>
+        <div className="bc-gd" ref={genreMenuRef}>
+          <button
+            type="button"
+            className={`bc-select bc-gd-trigger${genreMenuOpen ? ' open' : ''}`}
+            style={selectStyle}
+            onClick={() => setGenreMenuOpen(o => !o)}
+            aria-haspopup="listbox"
+            aria-expanded={genreMenuOpen}
+          >
+            <span>{genreFilter === 'all' ? 'All Genres' : genreFilter}</span>
+            {Ic.chevron}
+          </button>
+
+          {genreMenuOpen && (
+            <div className="bc-gd-panel" role="listbox">
+              <div className="bc-gd-list">
+                <div
+                  className={`bc-gd-row${genreFilter === 'all' ? ' active' : ''}`}
+                  role="option"
+                  aria-selected={genreFilter === 'all'}
+                  onClick={() => { setGenreFilter('all'); setGenreMenuOpen(false); }}
+                >
+                  <span className="bc-gd-name">All Genres</span>
+                </div>
+
+                {genres.map(g => {
+                  // Only genres stored for this campus can be deleted here.
+                  const row = genresReady ? campusGenres.find(r => r.name === g) : null;
+                  const menu = row && genreRowMenu && genreRowMenu.id === row.id ? genreRowMenu : null;
+                  return (
+                    <div key={g}>
+                      <div
+                        className={`bc-gd-row${genreFilter === g ? ' active' : ''}`}
+                        role="option"
+                        aria-selected={genreFilter === g}
+                        onClick={() => { setGenreFilter(g); setGenreMenuOpen(false); }}
+                      >
+                        <span className="bc-gd-name">{g}</span>
+                        {row && (
+                          <button
+                            type="button"
+                            className="bc-gd-dots"
+                            aria-label={`Options for ${g}`}
+                            onClick={e => {
+                              e.stopPropagation();
+                              setGenreRowMenu(menu ? null : { id: row.id, step: 'menu' });
+                            }}
+                          >
+                            {Ic.dots}
+                          </button>
+                        )}
+                      </div>
+                      {menu && menu.step === 'menu' && (
+                        <div className="bc-gd-sub">
+                          <button type="button" className="bc-gd-mini" onClick={() => { setGenreEditName(row.name); setGenreErr(''); setGenreRowMenu({ id: row.id, step: 'edit' }); }}>
+                            {Ic.edit} Edit genre
+                          </button>
+                          <button type="button" className="bc-gd-mini danger" onClick={() => setGenreRowMenu({ id: row.id, step: 'confirm' })}>
+                            {Ic.trash} Delete genre
+                          </button>
+                        </div>
+                      )}
+                      {menu && menu.step === 'edit' && (
+                        <div className="bc-gd-sub edit">
+                          <input
+                            className="bc-gd-input"
+                            autoFocus
+                            maxLength={60}
+                            value={genreEditName}
+                            onChange={e => { setGenreEditName(e.target.value); setGenreErr(''); }}
+                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleRenameGenre(row); } }}
+                            placeholder="Genre name"
+                            aria-label="Edit genre name"
+                          />
+                          {(() => {
+                            const used = books.filter(b => b.genre === g).length;
+                            return used > 0 ? <span className="bc-gd-sub-note">{used} book{used === 1 ? '' : 's'} will be updated to the new name.</span> : null;
+                          })()}
+                          <div className="bc-gd-sub-actions">
+                            <button type="button" className="bc-gd-mini" disabled={genreBusy} onClick={() => { setGenreRowMenu(null); setGenreEditName(''); setGenreErr(''); }}>Cancel</button>
+                            <button type="button" className="bc-gd-mini primary" disabled={genreBusy} onClick={() => handleRenameGenre(row)}>
+                              {genreBusy ? 'Saving…' : 'Save'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {menu && menu.step === 'confirm' && (
+                        <div className="bc-gd-sub">
+                          <span>
+                            Delete "{g}"?
+                            {(() => {
+                              const used = books.filter(b => b.genre === g).length;
+                              return used > 0 ? ` ${used} book${used === 1 ? '' : 's'} will keep this genre label.` : '';
+                            })()}
+                          </span>
+                          <div className="bc-gd-sub-actions">
+                            <button type="button" className="bc-gd-mini" disabled={genreBusy} onClick={() => setGenreRowMenu(null)}>Cancel</button>
+                            <button type="button" className="bc-gd-mini danger" disabled={genreBusy} onClick={() => handleDeleteGenre(row)}>
+                              {genreBusy ? 'Deleting…' : 'Delete'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {genres.length === 0 && (
+                  <div className="bc-gd-empty">No genres yet for this campus. Add one below.</div>
+                )}
+              </div>
+
+              <div className="bc-gd-foot">
+                {!campusId && (
+                  <div className="bc-gd-err">Genre management needs a campus assigned to your account.</div>
+                )}
+                {campusId && genresLoadErr && (
+                  <div className="bc-gd-err">
+                    Genre management is not set up yet (campus_genres table unavailable). Run the provided SQL in Supabase, then reload.
+                  </div>
+                )}
+                {genreErr && <div className="bc-gd-err">{genreErr}</div>}
+
+                {!genreAdding ? (
+                  <button
+                    type="button"
+                    className="bc-gd-add-btn"
+                    disabled={!genresReady || !campusId}
+                    onClick={() => { setGenreAdding(true); setGenreErr(''); }}
+                  >
+                    {Ic.plus} Add Genre
+                  </button>
+                ) : (
+                  <>
+                    <input
+                      className="bc-gd-input"
+                      autoFocus
+                      maxLength={60}
+                      value={newGenreName}
+                      onChange={e => { setNewGenreName(e.target.value); setGenreErr(''); }}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddGenre(); } }}
+                      placeholder="e.g. Biography"
+                      aria-label="New genre name"
+                    />
+                    <div className="bc-gd-form-actions">
+                      <button type="button" className="bc-gd-mini" disabled={genreBusy} onClick={() => { setGenreAdding(false); setNewGenreName(''); setGenreErr(''); }}>Cancel</button>
+                      <button type="button" className="bc-gd-mini primary" disabled={genreBusy} onClick={handleAddGenre}>
+                        {genreBusy ? 'Saving…' : 'Save'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         {(activeTab === 'book' || activeTab === 'inventory') && (
           <>
             <select className="bc-select" style={selectStyle} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
@@ -1959,10 +2555,162 @@ export default function Book_Catalog() {
               <option value="Available">Available</option>
               <option value="Borrowed">Borrowed</option>
             </select>
-            <select className="bc-select" style={selectStyle} value={shelfFilter} onChange={e => setShelfFilter(e.target.value)}>
-              <option value="all">All Shelves</option>
-              {SHELF_LOCATIONS.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <div className="bc-gd" ref={shelfMenuRef}>
+              <button
+                type="button"
+                className={`bc-select bc-gd-trigger${shelfMenuOpen ? ' open' : ''}`}
+                style={selectStyle}
+                onClick={() => setShelfMenuOpen(o => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={shelfMenuOpen}
+              >
+                <span>{shelfFilter === 'all' ? 'All Shelves' : shelfFilter}</span>
+                {Ic.chevron}
+              </button>
+
+              {shelfMenuOpen && (
+                <div className="bc-gd-panel" role="listbox">
+                  <div className="bc-gd-list">
+                    <div
+                      className={`bc-gd-row${shelfFilter === 'all' ? ' active' : ''}`}
+                      role="option"
+                      aria-selected={shelfFilter === 'all'}
+                      onClick={() => { setShelfFilter('all'); setShelfMenuOpen(false); }}
+                    >
+                      <span className="bc-gd-name">All Shelves</span>
+                    </div>
+
+                    {shelves.map(sh => {
+                      // Only shelves stored for this campus can be deleted here.
+                      const row = shelvesReady ? campusShelves.find(r => r.name === sh) : null;
+                      const menu = row && shelfRowMenu && shelfRowMenu.id === row.id ? shelfRowMenu : null;
+                      return (
+                        <div key={sh}>
+                          <div
+                            className={`bc-gd-row${shelfFilter === sh ? ' active' : ''}`}
+                            role="option"
+                            aria-selected={shelfFilter === sh}
+                            onClick={() => { setShelfFilter(sh); setShelfMenuOpen(false); }}
+                          >
+                            <span className="bc-gd-name">{sh}</span>
+                            {row && (
+                              <button
+                                type="button"
+                                className="bc-gd-dots"
+                                aria-label={`Options for ${sh}`}
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  setShelfRowMenu(menu ? null : { id: row.id, step: 'menu' });
+                                }}
+                              >
+                                {Ic.dots}
+                              </button>
+                            )}
+                          </div>
+                          {menu && menu.step === 'menu' && (
+                            <div className="bc-gd-sub">
+                              <button type="button" className="bc-gd-mini" onClick={() => { setShelfEditName(row.name); setShelfErr(''); setShelfRowMenu({ id: row.id, step: 'edit' }); }}>
+                                {Ic.edit} Edit shelf
+                              </button>
+                              <button type="button" className="bc-gd-mini danger" onClick={() => setShelfRowMenu({ id: row.id, step: 'confirm' })}>
+                                {Ic.trash} Delete shelf
+                              </button>
+                            </div>
+                          )}
+                          {menu && menu.step === 'edit' && (
+                            <div className="bc-gd-sub edit">
+                              <input
+                                className="bc-gd-input"
+                                autoFocus
+                                maxLength={60}
+                                value={shelfEditName}
+                                onChange={e => { setShelfEditName(e.target.value); setShelfErr(''); }}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleRenameShelf(row); } }}
+                                placeholder="Shelf name"
+                                aria-label="Edit shelf name"
+                              />
+                              {(() => {
+                                const used = books.filter(b => b.shelf_location === sh).length;
+                                return used > 0 ? <span className="bc-gd-sub-note">{used} book{used === 1 ? '' : 's'} will be updated to the new name.</span> : null;
+                              })()}
+                              <div className="bc-gd-sub-actions">
+                                <button type="button" className="bc-gd-mini" disabled={shelfBusy} onClick={() => { setShelfRowMenu(null); setShelfEditName(''); setShelfErr(''); }}>Cancel</button>
+                                <button type="button" className="bc-gd-mini primary" disabled={shelfBusy} onClick={() => handleRenameShelf(row)}>
+                                  {shelfBusy ? 'Saving…' : 'Save'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                          {menu && menu.step === 'confirm' && (
+                            <div className="bc-gd-sub">
+                              <span>
+                                Delete "{sh}"?
+                                {(() => {
+                                  const used = books.filter(b => b.shelf_location === sh).length;
+                                  return used > 0 ? ` ${used} book${used === 1 ? '' : 's'} will keep this shelf label.` : '';
+                                })()}
+                              </span>
+                              <div className="bc-gd-sub-actions">
+                                <button type="button" className="bc-gd-mini" disabled={shelfBusy} onClick={() => setShelfRowMenu(null)}>Cancel</button>
+                                <button type="button" className="bc-gd-mini danger" disabled={shelfBusy} onClick={() => handleDeleteShelf(row)}>
+                                  {shelfBusy ? 'Deleting…' : 'Delete'}
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {shelves.length === 0 && (
+                      <div className="bc-gd-empty">No shelves yet for this campus. Add one below.</div>
+                    )}
+                  </div>
+
+                  <div className="bc-gd-foot">
+                    {!campusId && (
+                      <div className="bc-gd-err">Shelf management needs a campus assigned to your account.</div>
+                    )}
+                    {campusId && shelvesLoadErr && (
+                      <div className="bc-gd-err">
+                        Shelf management is not set up yet (campus_shelves table unavailable). Run the provided SQL in Supabase, then reload.
+                      </div>
+                    )}
+                    {shelfErr && <div className="bc-gd-err">{shelfErr}</div>}
+
+                    {!shelfAdding ? (
+                      <button
+                        type="button"
+                        className="bc-gd-add-btn"
+                        disabled={!shelvesReady || !campusId}
+                        onClick={() => { setShelfAdding(true); setShelfErr(''); }}
+                      >
+                        {Ic.plus} Add Shelf
+                      </button>
+                    ) : (
+                      <>
+                        <input
+                          className="bc-gd-input"
+                          autoFocus
+                          maxLength={60}
+                          value={newShelfName}
+                          onChange={e => { setNewShelfName(e.target.value); setShelfErr(''); }}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAddShelf(); } }}
+                          placeholder="e.g. Periodicals Section"
+                          aria-label="New shelf name"
+                        />
+                        <div className="bc-gd-form-actions">
+                          <button type="button" className="bc-gd-mini" disabled={shelfBusy} onClick={() => { setShelfAdding(false); setNewShelfName(''); setShelfErr(''); }}>Cancel</button>
+                          <button type="button" className="bc-gd-mini primary" disabled={shelfBusy} onClick={handleAddShelf}>
+                            {shelfBusy ? 'Saving…' : 'Save'}
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </>
         )}
         {activeTab === 'inventory' && (
@@ -1983,6 +2731,28 @@ export default function Book_Catalog() {
             <option value="shelf:desc">Sort: Shelf Location (Z–A)</option>
             <option value="status:asc">Sort: Status (Available first)</option>
             <option value="status:desc">Sort: Status (Borrowed first)</option>
+          </select>
+        )}
+        {activeTab === 'pending' && (
+          <select
+            className="bc-select"
+            style={selectStyle}
+            value={`${pendingSort.key}:${pendingSort.dir}`}
+            onChange={e => { const [key, dir] = e.target.value.split(':'); setPendingSort({ key, dir }); }}
+            aria-label="Sort unregistered books"
+          >
+            <option value="submitted:desc">Sort: Submitted (Newest first)</option>
+            <option value="submitted:asc">Sort: Submitted (Oldest first)</option>
+            <option value="title:asc">Sort: Book Title (A–Z)</option>
+            <option value="title:desc">Sort: Book Title (Z–A)</option>
+            <option value="authors:asc">Sort: Authors (A–Z)</option>
+            <option value="authors:desc">Sort: Authors (Z–A)</option>
+            <option value="isbn:asc">Sort: ISBN (Low–High)</option>
+            <option value="isbn:desc">Sort: ISBN (High–Low)</option>
+            <option value="callno:asc">Sort: Call No. (A–Z)</option>
+            <option value="callno:desc">Sort: Call No. (Z–A)</option>
+            <option value="copies:asc">Sort: Copies (Low–High)</option>
+            <option value="copies:desc">Sort: Copies (High–Low)</option>
           </select>
         )}
         <span className="bc-count" style={{
@@ -2070,18 +2840,39 @@ export default function Book_Catalog() {
                   background: 'linear-gradient(135deg, #8B0000, #6B0000)',
                   borderBottom: '2px solid rgba(201,168,76,0.35)',
                 }}>
-                  {['Book Title', 'Authors', 'ISBN', 'Call No.', 'Copies', 'Submitted', 'Status', 'Action'].map((h, i) => (
-                    <th key={h} style={{
-                      padding: '13px 16px', textAlign: 'left',
-                      fontFamily: 'var(--font-sans)', fontSize: 11,
-                      fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
-                      color: '#F5E4A8', whiteSpace: 'nowrap',
-                    }}>{h}</th>
+                  {[
+                    { label: 'Book Title', key: 'title'     },
+                    { label: 'Authors',    key: 'authors'   },
+                    { label: 'ISBN',       key: 'isbn'      },
+                    { label: 'Call No.',   key: 'callno'    },
+                    { label: 'Copies',     key: 'copies'    },
+                    { label: 'Submitted',  key: 'submitted' },
+                    { label: 'Status',     key: null        }, // every row is "Awaiting Confirmation" — nothing to sort
+                    { label: 'Action',     key: null        },
+                  ].map(h => (
+                    <th key={h.label}
+                      onClick={h.key ? () => handlePendingSort(h.key) : undefined}
+                      aria-sort={h.key && pendingSort.key === h.key ? (pendingSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                      title={h.key ? `Sort by ${h.label}` : undefined}
+                      style={{
+                        padding: '13px 16px', textAlign: 'left',
+                        fontFamily: 'var(--font-sans)', fontSize: 11,
+                        fontWeight: 700, letterSpacing: '0.10em', textTransform: 'uppercase',
+                        color: '#F5E4A8', whiteSpace: 'nowrap',
+                        cursor: h.key ? 'pointer' : 'default', userSelect: 'none',
+                      }}>
+                      {h.label}
+                      {h.key && (
+                        <span style={{ marginLeft: 6, fontSize: 9, opacity: pendingSort.key === h.key ? 1 : 0.45 }}>
+                          {pendingSort.key === h.key ? (pendingSort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                        </span>
+                      )}
+                    </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {pendingFiltered.map((book, idx) => (
+                {pendingSorted.map((book, idx) => (
                   <PendingRow
                     key={book.id}
                     book={book}
@@ -2131,6 +2922,8 @@ export default function Book_Catalog() {
       {showForm && (
         <BookFormModal
           book={editBook}
+          genreOptions={baseGenres}
+          shelfOptions={baseShelves}
           onClose={() => { setShowForm(false); setEditBook(null); }}
           onSaved={handleSaved}
         />
@@ -2300,6 +3093,25 @@ function BookCard({ book, onView, onEdit, onDelete, Ic }) {
     </div>
   );
 }
+
+// Column -> value used by the Unregister book sorting (toolbar dropdown + clickable headers).
+// Sort key for text: drops invisible characters, collapses spaces and ignores
+// leading spaces / quotes / symbols, so " Customer…" or "\"FIL 647.95…" sort
+// by their first real letter or digit instead of jumping above "A".
+const sortText = v => String(v ?? '')
+  .replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g, ' ')
+  .replace(/\s+/g, ' ')
+  .replace(/^[^\p{L}\p{N}]+/u, '')
+  .trim();
+
+const PENDING_SORT_FIELDS = {
+  title:     b => sortText(b.title),
+  authors:   b => sortText(b.authors),
+  isbn:      b => String(b.isbn ?? '').replace(/[\s-]/g, ''),   // "978-621- 04-3385 -2" == "978-621-04-3385-2"
+  callno:    b => sortText(b.call_number),
+  copies:    b => parseInt(b.copies) || 0,
+  submitted: b => { const t = Date.parse(b.created_at); return Number.isNaN(t) ? null : t; },
+};
 
 function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
   const [hov, setHov] = useState(false);

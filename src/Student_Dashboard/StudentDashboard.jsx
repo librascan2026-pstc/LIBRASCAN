@@ -3674,6 +3674,11 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
   const [olError,   setOlError]   = useState(null);
   const olReqId = useRef(0);
 
+  // ── Genres per campus — the same `campus_genres` table librarians manage in Book Catalog
+  // and Super Admin filters by. Additive: if it can't be read, the previous category list is used.
+  const [campusGenres, setCampusGenres] = useState([]);     // rows: { id, campus_id, name, created_at }
+  const [genresReady,  setGenresReady]  = useState(false);  // true once campus_genres has loaded with rows
+
   const fetchCatalog = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
@@ -3729,6 +3734,41 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
 
   useEffect(() => { fetchCatalog(true); }, [fetchCatalog]);
 
+  // Load every campus's genres (same query as Super Admin Books). A read error or an empty
+  // result (e.g. blocked by RLS) keeps the built-in/derived category list instead.
+  const loadCampusGenres = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from('campus_genres')
+        .select('id, campus_id, name, created_at')
+        .order('created_at', { ascending: true });
+      if (error) { console.warn('[Catalog campus_genres]', error.message); return; }
+      if (data && data.length) { setCampusGenres(data); setGenresReady(true); }
+    } catch (e) { console.warn('[Catalog campus_genres]', e); }
+  }, []);
+
+  useEffect(() => { loadCampusGenres(); }, [loadCampusGenres]);
+
+  // Keep genres current when a librarian adds/removes one (realtime, plus a refresh on tab focus
+  // as the safety net for projects where Realtime isn't enabled on campus_genres).
+  useEffect(() => {
+    let ch = null;
+    try {
+      ch = supabase
+        .channel(`student-catalog-genres-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'campus_genres' }, () => loadCampusGenres())
+        .subscribe();
+    } catch { /* realtime unavailable — focus refresh below still keeps it accurate */ }
+    const onVisible = () => { if (!document.hidden) loadCampusGenres(); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (ch) { try { supabase.removeChannel(ch); } catch { /* already closed */ } }
+    };
+  }, [loadCampusGenres]);
+
   // Live refresh: the moment a Super Admin approves (or a librarian edits)
   // a title, `books` changes — re-fetch quietly so a newly-approved book
   // shows up here on its own, with no page reload needed.
@@ -3764,19 +3804,57 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
     return () => clearTimeout(handle);
   }, [search, onlineOnly]);
 
-  // Standard genres (same list as the Home category rail) + "Others" + any other
-  // category/genre found on the books themselves, de-duplicated ignoring case.
-  const categories = (() => {
-    const seen = new Map();
-    [...HOME_CATEGORIES.map(c => c.key), 'Others', ...books.map(b => b.category || b.genre)]
-      .filter(Boolean)
-      .forEach(c => { const k = String(c).trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, String(c).trim()); });
-    return [...seen.values()].sort((a, b) => {
-      if (a.toLowerCase() === 'others') return 1;
-      if (b.toLowerCase() === 'others') return -1;
-      return a.localeCompare(b);
+  // Category list:
+  //  • Once campus_genres has loaded → genres come from each campus's own list (same as Super Admin
+  //    Books): "All Campuses" shows the union, picking a campus shows only that campus's genres,
+  //    followed by any genre still found on that scope's books so no book becomes un-filterable.
+  //  • Until then (or if campus_genres can't be read) → the previous list: standard genres (same list
+  //    as the Home category rail) + "Others" + any category/genre found on the books themselves,
+  //    de-duplicated ignoring case. "Online Books" is added separately in the <select> below.
+  const categories = useMemo(() => {
+    if (!genresReady) {
+      const seen = new Map();
+      [...HOME_CATEGORIES.map(c => c.key), 'Others', ...books.map(b => b.category || b.genre)]
+        .filter(Boolean)
+        .forEach(c => { const k = String(c).trim().toLowerCase(); if (k && !seen.has(k)) seen.set(k, String(c).trim()); });
+      return [...seen.values()].sort((a, b) => {
+        if (a.toLowerCase() === 'others') return 1;
+        if (b.toLowerCase() === 'others') return -1;
+        return a.localeCompare(b);
+      });
+    }
+    const seen = new Set();
+    const base = [];
+    campusGenres.forEach(r => {
+      if (campusF && String(r.campus_id) !== campusF) return;
+      const name = String(r.name || '').trim();
+      const key = name.toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      base.push(name);
     });
-  })();
+    const extraSeen = new Set();
+    const extra = [];
+    books
+      .filter(b => !campusF || String(b.campus_id) === campusF)
+      .forEach(b => {
+        const g = String(b.category || b.genre || '').trim();
+        const key = g.toLowerCase();
+        if (!key || seen.has(key) || extraSeen.has(key)) return;
+        extraSeen.add(key);
+        extra.push(g);
+      });
+    extra.sort((a, b) => a.localeCompare(b));
+    return [...base, ...extra];
+  }, [genresReady, campusGenres, books, campusF]);
+
+  // If the selected category isn't in the (campus-scoped) list any more, go back to "All Categories".
+  // "Online Books" is never reset. Waits for the catalog + genres to load so nothing resets early.
+  useEffect(() => {
+    if (!genresReady || loading) return;
+    if (!catF || catF === ONLINE_CATEGORY) return;
+    if (!categories.some(c => c.toLowerCase() === catF.toLowerCase())) setCatF('');
+  }, [categories, catF, genresReady, loading]);
 
   const filtered = books.filter(b => {
     const q  = search.toLowerCase();
@@ -5186,6 +5264,23 @@ export default function StudentDashboard({ user, onSignOut }) {
   const [activeTab,   setActiveTab]   = useState(getStudentTabFromHash);
   const [mobileOpen,  setMobileOpen]  = useState(false);
   const [showLogout,  setShowLogout]  = useState(false);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef(null);
+
+  // Close the profile dropdown on outside click or Escape
+  useEffect(() => {
+    if (!profileMenuOpen) return undefined;
+    const onDown = (e) => {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target)) setProfileMenuOpen(false);
+    };
+    const onKey = (e) => { if (e.key === 'Escape') setProfileMenuOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [profileMenuOpen]);
   const [profile,     setProfile]     = useState(null);
   const [campusName,  setCampusName]  = useState('');
   const [catalogCategory, setCatalogCategory] = useState(''); 
@@ -6283,20 +6378,51 @@ export default function StudentDashboard({ user, onSignOut }) {
               )}
             </div>
 
-            {/* Profile chip — clicking goes straight to Settings, no dropdown */}
-            <div
-              className="sdb-profile-chip"
-              onClick={()=>navigate('settings')}
-              title="Account settings"
-            >
-              {avatarUrl
-                ? <img src={avatarUrl} alt="avatar" className="sdb-avatar" style={{ padding:0 }} onError={e=>{e.target.style.display='none';}} />
-                : <div className="sdb-avatar">{initials}</div>
-              }
-              <div>
-                <div className="sdb-profile-name">{displayName}</div>
-                <div className="sdb-profile-role">{(profile?.role || user?.user_metadata?.role) === 'employee' ? 'Employee' : 'Student'}</div>
+            {/* Profile chip — opens a dropdown with Settings and Logout */}
+            <div ref={profileMenuRef} style={{ position:'relative' }}>
+              <div
+                className={`sdb-profile-chip${profileMenuOpen ? ' open' : ''}`}
+                onClick={()=>setProfileMenuOpen(o => !o)}
+                role="button"
+                tabIndex={0}
+                aria-haspopup="menu"
+                aria-expanded={profileMenuOpen}
+                title="Account menu"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setProfileMenuOpen(o => !o); }
+                }}
+              >
+                {avatarUrl
+                  ? <img src={avatarUrl} alt="avatar" className="sdb-avatar" style={{ padding:0 }} onError={e=>{e.target.style.display='none';}} />
+                  : <div className="sdb-avatar">{initials}</div>
+                }
+                <div>
+                  <div className="sdb-profile-name">{displayName}</div>
+                  <div className="sdb-profile-role">{(profile?.role || user?.user_metadata?.role) === 'employee' ? 'Employee' : 'Student'}</div>
+                </div>
               </div>
+
+              {profileMenuOpen && (
+                <div className="sdb-dropdown" role="menu" style={{ width:'100%', minWidth:170 }}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="sdb-dropdown-item"
+                    onClick={() => { setProfileMenuOpen(false); navigate('settings'); }}
+                  >
+                    {Ic.settings}Settings
+                  </button>
+                  <div className="sdb-dropdown-sep" />
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="sdb-dropdown-item danger"
+                    onClick={() => { setProfileMenuOpen(false); setShowLogout(true); }}
+                  >
+                    {Ic.logout}Logout
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </header>

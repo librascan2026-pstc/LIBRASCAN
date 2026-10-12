@@ -1180,6 +1180,15 @@ function SkelRows({cols,rows=5}){
   ));
 }
 
+// Sorting helpers for RaTable — same rules as the Inventory sorting in the Book
+// catalog: numbers compare numerically, text compares naturally, and blank
+// values always sink to the bottom whichever direction is picked.
+const raSortBlank   = v => v===null||v===undefined||v===''||(typeof v==='number'&&Number.isNaN(v));
+const raSortValue   = (row,col) => (col&&col.sortBy ? col.sortBy(row) : row[col?.key]);
+// Text is compared without invisible characters / leading spaces, quotes or symbols (so " Customer" or '"FIL 123' don't jump above "A").
+const raSortText    = v => String(v??'').replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g,' ').replace(/\s+/g,' ').replace(/^[^\p{L}\p{N}]+/u,'').trim();
+const raSortCompare = (x,y) => (typeof x==='number'&&typeof y==='number' ? x-y : raSortText(x).localeCompare(raSortText(y),undefined,{numeric:true}));
+
 function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterable=null, exportable=true, title='', dateKey=null }) {
   const [q,setQ]=useState('');
   const [fil,setFil]=useState('all');
@@ -1193,12 +1202,24 @@ function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterab
     if(q){const lq=q.toLowerCase(); r=r.filter(row=>cols.some(c=>String(row[c.key]??'').toLowerCase().includes(lq)));}
     if(fil!=='all'&&filterable) r=r.filter(row=>row[filterable.key]===fil);
     if(dateKey&&dd) r=r.filter(row=>localDay(row[dateKey])===dd);
-    if(sk) r=[...r].sort((a,b)=>{ const cmp=String(a[sk]??'').localeCompare(String(b[sk]??''),undefined,{numeric:true}); return sd==='asc'?cmp:-cmp; });
+    if(sk){ const sc=cols.find(c=>c.key===sk); if(sc) r=[...r].sort((a,b)=>{ const x=raSortValue(a,sc), y=raSortValue(b,sc); const bx=raSortBlank(x), by=raSortBlank(y); if(bx||by) return bx===by?0:(bx?1:-1); const cmp=raSortCompare(x,y); return sd==='asc'?cmp:-cmp; }); }
     return r;
   },[rows,q,fil,sk,sd,filterable,cols,dateKey,dd]);
   useEffect(()=>setPg(1),[q,fil,dd]);
   const total=Math.max(1,Math.ceil(filtered.length/pageSize));
   const paged=filtered.slice((pg-1)*pageSize,pg*pageSize);
+
+  // Toolbar "Sort" dropdown — one pair of options per column, labelled by what
+  // the column holds (A–Z for text, Low–High for numbers, or the column's own
+  // sortLabels such as Oldest/Newest first for dates).
+  const sortLabelsFor=c=>c.sortLabels||(rows.some(r=>typeof raSortValue(r,c)==='number')?['Low–High','High–Low']:['A–Z','Z–A']);
+  const sortSel=sk?`${sk}:${sd}`:'';
+  const onSortSel=e=>{
+    const v=e.target.value;
+    if(!v){ setSk(null); setSd('asc'); }
+    else{ const i=v.lastIndexOf(':'); setSk(v.slice(0,i)); setSd(v.slice(i+1)); }
+    setPg(1);
+  };
 
   // Date picker (only when the table passes dateKey) is part of `filtered`, so
   // CSV / Print only include the picked day when one is selected.
@@ -1225,6 +1246,13 @@ function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterab
       <div className="ra-toolbar">
         {searchable&&<div className="ra-search">{Ic.search()}<input value={q} onChange={e=>setQ(e.target.value)} placeholder="Search…"/>{q&&<button onClick={()=>setQ('')} style={{background:'none',border:'none',cursor:'pointer',color:'var(--text-dim)',fontSize:14}}>×</button>}</div>}
         {filterable&&<select className="ra-fsel" value={fil} onChange={e=>setFil(e.target.value)}><option value="all">All {filterable.label}</option>{filterable.options.map(o=><option key={o.value} value={o.value}>{o.label}</option>)}</select>}
+        <select className="ra-fsel" aria-label="Sort table" value={sortSel} onChange={onSortSel}>
+          <option value="">Sort: Default order</option>
+          {cols.map(c=>{ const [a,d]=sortLabelsFor(c); return [
+            <option key={`${c.key}:asc`} value={`${c.key}:asc`}>Sort: {c.label} ({a})</option>,
+            <option key={`${c.key}:desc`} value={`${c.key}:desc`}>Sort: {c.label} ({d})</option>,
+          ]; })}
+        </select>
         <div className="ra-sp"/>
         {exportable&&dateKey&&<RaDateFilter value={dd} onChange={setDd}/>}
         {exportable&&<><button className="ra-btn" onClick={exportCSV}>{Ic.dl()} CSV</button><button className="ra-btn" onClick={doPrint}>{Ic.print()} Print</button></>}
@@ -1232,8 +1260,10 @@ function RaTable({ cols, rows=[], loading, pageSize=8, searchable=true, filterab
       <div className="ra-table-wrap">
         <table className="ra-table">
           <thead><tr>{cols.map(c=>(
-            <th key={c.key} className={sk===c.key?'sorted':''} onClick={()=>sort(c.key)} style={{width:c.width}}>
-              {c.label} <span style={{opacity:.6,fontSize:9}}>{sk===c.key?(sd==='asc'?'↑':'↓'):'↕'}</span>
+            <th key={c.key} className={sk===c.key?'sorted':''} onClick={()=>sort(c.key)}
+              aria-sort={sk===c.key?(sd==='asc'?'ascending':'descending'):undefined}
+              title={`Sort by ${c.label}`} style={{width:c.width}}>
+              {c.label}<span style={{marginLeft:6,fontSize:9,opacity:sk===c.key?1:.45}}>{sk===c.key?(sd==='asc'?'▲':'▼'):'↕'}</span>
             </th>
           ))}</tr></thead>
           <tbody>
@@ -2045,9 +2075,9 @@ function TabOverdue({ data, loading }) {
     { key:'student_number', label:'ID No.',      width:'12%', render:v=><span style={{fontFamily:'monospace',fontSize:11}}>{v||'—'}</span> },
     { key:'book_title',     label:'Book',        width:'28%' },
     { key:'genre',          label:'Genre',       width:'13%', render:v=>v?<span className="ra-pill purple">{v}</span>:'—' },
-    { key:'borrowed_date',  label:'Borrowed On' },
+    { key:'borrowed_date',  label:'Borrowed On', sortBy:r=>{ const t=Date.parse(r.borrowed_at); return Number.isNaN(t)?null:t; }, sortLabels:['Oldest first','Newest first'] },
     { key:'days_out',       label:'Days Out',    render:v=><span style={{color:v>14?'#8B0000':'#9A5500',fontWeight:700}}>{v}</span> },
-    { key:'status_badge',   label:'Status',      render:(_,row)=>row.days_out>14?<span className="ra-pill red">Long Overdue</span>:<span className="ra-pill amber">Unreturned</span> },
+    { key:'status_badge',   label:'Status',      sortBy:r=>r.days_out, sortLabels:['Unreturned first','Long Overdue first'], render:(_,row)=>row.days_out>14?<span className="ra-pill red">Long Overdue</span>:<span className="ra-pill amber">Unreturned</span> },
   ];
 
   return (
@@ -2125,6 +2155,8 @@ function TabAvailability({ data, loading }) {
     { key:'available_copies', label:'Available',    render:v=><strong style={{color:'#277A3C'}}>{v??0}</strong> },
     { key:'total_copies',     label:'Total Copies', render:v=><strong>{v??0}</strong> },
     { key:'status_label',     label:'Status',
+      sortBy:r=>{ const a=r.available_copies??0,t=r.total_copies??0; return (a===0&&t>0)?0:(a===t)?2:1; },
+      sortLabels:['All Out first','All In first'],
       render:(_,row)=>{
         const a=row.available_copies??0,t=row.total_copies??0;
         if(a===0&&t>0) return <span className="ra-pill red">All Out</span>;
@@ -2219,7 +2251,7 @@ function TabTransactions({ data, loading, onRefresh }) {
     { key:'student_number', label:'ID No.',   width:'11%', render:v=><span style={{fontFamily:'monospace',fontSize:11,color:'var(--text-dim)'}}>{v||'—'}</span> },
     { key:'book_title',     label:'Book',     width:'28%' },
     { key:'genre',          label:'Genre',    width:'12%', render:v=>v?<span className="ra-pill purple" style={{fontSize:9.5}}>{v}</span>:'—' },
-    { key:'date_display',   label:'Date' },
+    { key:'date_display',   label:'Date', sortBy:r=>{ const t=Date.parse(r._ts); return Number.isNaN(t)?null:t; }, sortLabels:['Oldest first','Newest first'] },
     { key:'source',         label:'Source',   width:'10%', render:v=><span className="ra-pill grey" style={{fontSize:9}}>{v}</span> },
     { key:'status',         label:'Status',
       render:v=>{
@@ -2484,18 +2516,42 @@ function DailyVisitReportChart({ data=[], period='30d' }) {
 function generateAttendanceInsights(dailyCounts) {
   if (!dailyCounts.length) return [];
   const insights = [];
-  const maxV = Math.max(...dailyCounts.map(d => d.value));
-  const peakPt = dailyCounts.find(d => d.value === maxV);
 
-  // Peak insight
-  if (peakPt) {
-    insights.push(`The peak of attendance was on <strong>${peakPt.label}</strong> with <strong>${peakPt.value} visitor${peakPt.value !== 1 ? 's' : ''}</strong>.`);
+  // The 7-day / 30-day views plot one bar per DAY; the 1-year view plots one
+  // bar per 30-day block (labelled by month). Detect which one we have from
+  // the bucket dates so every sentence below uses the right unit.
+  const gapMs = dailyCounts.length > 1
+    ? new Date(dailyCounts[1].date) - new Date(dailyCounts[0].date)
+    : 0;
+  const isMonthly = gapMs >= 20 * 86400000;
+  const unit = isMonthly ? 'month' : 'day';
+  const prep = isMonthly ? 'in' : 'on';
+  const fmt = v => String(Math.round(v * 10) / 10);
+
+  const total = dailyCounts.reduce((s, d) => s + d.value, 0);
+
+  // Nothing plotted — don't report a "peak" of 0 visitors.
+  if (total === 0) {
+    return ['No visits were recorded across this period.'];
   }
 
-  // Find the longest *contiguous* stretch of low (<=1) days — not just
-  // "every low day filtered together," which could silently swallow a
-  // spike day in the middle and misreport it as part of a continuous
-  // low stretch.
+  // Peak insight (handles ties instead of silently naming only the first)
+  const maxV = Math.max(...dailyCounts.map(d => d.value));
+  const peaks = dailyCounts.filter(d => d.value === maxV);
+  const visitorsTxt = `${maxV} visitor${maxV !== 1 ? 's' : ''}`;
+  if (peaks.length === 1) {
+    insights.push(`The peak of attendance was ${prep} <strong>${peaks[0].label}</strong> with <strong>${visitorsTxt}</strong>.`);
+  } else if (peaks.length <= 3) {
+    const names = peaks.map(p => `<strong>${p.label}</strong>`);
+    const list = names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+    insights.push(`Attendance peaked at <strong>${visitorsTxt}</strong> ${prep} ${peaks.length} ${unit}s: ${list}.`);
+  } else {
+    insights.push(`Attendance peaked at <strong>${visitorsTxt}</strong> ${prep} ${peaks.length} ${unit}s, first reached ${prep} <strong>${peaks[0].label}</strong>.`);
+  }
+
+  // Longest *contiguous* stretch of low (<=1 visit) bars — not just
+  // "every low bar filtered together," which could swallow a spike in the
+  // middle and misreport it as part of one continuous low stretch.
   let bestRun = [];
   let currentRun = [];
   dailyCounts.forEach(d => {
@@ -2511,20 +2567,27 @@ function generateAttendanceInsights(dailyCounts) {
   if (bestRun.length >= 3) {
     const first = bestRun[0].label;
     const last = bestRun[bestRun.length - 1].label;
-    insights.push(`Consistent low attendance was observed between <strong>${first}</strong> and <strong>${last}</strong>, averaging under 1 visit per day.`);
+    const runTotal = bestRun.reduce((s, d) => s + d.value, 0);
+    if (runTotal === 0) {
+      insights.push(`No visits were recorded between <strong>${first}</strong> and <strong>${last}</strong> (${bestRun.length} ${unit}s).`);
+    } else {
+      const runAvg = Math.round((runTotal / bestRun.length) * 10) / 10;
+      insights.push(`Consistent low attendance (1 visit or fewer per ${unit}) was observed between <strong>${first}</strong> and <strong>${last}</strong>, averaging <strong>${fmt(runAvg)} visit${runAvg === 1 ? '' : 's'} per ${unit}</strong>.`);
+    }
   }
 
-  // Recent uptick: check last 3 days vs prior stretch
+  // Recent uptick: last 3 bars vs the rest of the period
   const recent = dailyCounts.slice(-3);
-  const recentAvg = recent.reduce((s,d)=>s+d.value,0) / recent.length;
-  const priorAvg = dailyCounts.slice(0, -3).reduce((s,d)=>s+d.value,0) / Math.max(dailyCounts.length-3,1);
-  if (recentAvg > priorAvg * 1.5 && recentAvg >= 2) {
-    const lastFew = recent.map(d=>d.label);
-    insights.push(`A noticeable increase in visitors is observable in the last few days (<strong>${lastFew[0]}–${lastFew[lastFew.length-1]}</strong>).`);
+  const earlier = dailyCounts.slice(0, -3);
+  if (earlier.length) {
+    const recentAvg = recent.reduce((s, d) => s + d.value, 0) / recent.length;
+    const priorAvg = earlier.reduce((s, d) => s + d.value, 0) / earlier.length;
+    if (recentAvg > priorAvg * 1.5 && recentAvg >= 2) {
+      insights.push(`A noticeable increase in visitors is observable in the last ${recent.length} ${unit}s (<strong>${recent[0].label}–${recent[recent.length - 1].label}</strong>), averaging <strong>${fmt(recentAvg)} per ${unit}</strong> compared with ${fmt(priorAvg)} earlier in the period.`);
+    }
   }
 
-  // Total visits
-  const total = dailyCounts.reduce((s,d)=>s+d.value,0);
+  // Total visits (sum of the plotted bars)
   insights.push(`Total of <strong>${total} visit${total !== 1 ? 's' : ''}</strong> recorded across this period.`);
 
   return insights;
@@ -2549,8 +2612,8 @@ function TabAttendance({ data, loading, period, setPeriod, onRefresh }) {
     { key:'full_name', label:'Name',    width:'26%' },
     { key:'id_no',     label:'ID No.',  width:'13%', render:v=><span style={{fontFamily:'monospace',fontSize:11,color:'var(--text-dim)'}}>{v||'—'}</span> },
     { key:'program',   label:'Program', width:'18%', render:v=>v?<span className="ra-pill blue">{v}</span>:'—' },
-    { key:'date',      label:'Date',    width:'12%' },
-    { key:'time_in',   label:'Time In', render:v=><span style={{fontFamily:'monospace',fontSize:11}}>{fmtTime(v)}</span> },
+    { key:'date',      label:'Date',    width:'12%', sortLabels:['Oldest first','Newest first'] },
+    { key:'time_in',   label:'Time In', sortLabels:['Earliest first','Latest first'], render:v=><span style={{fontFamily:'monospace',fontSize:11}}>{fmtTime(v)}</span> },
     { key:'status',    label:'Status',  render:v=><span className="ra-pill green">{v||'time-in'}</span> },
   ];
 
@@ -2726,8 +2789,10 @@ export default function ReportsAnalytics() {
   const warnedProgramIssuesRef = useRef(new Set());
 
 
-  const fetchStats = useCallback(async () => {
-    setStatsLoading(true);
+  // `silent` = background refresh (realtime events): keep showing the current
+  // numbers instead of flashing the skeleton / replaying the entrance animations.
+  const fetchStats = useCallback(async (silent = false) => {
+    if (!silent) setStatsLoading(true);
     try {
       let qBooks     = supabase.from('books').select('id', { count: 'exact' });
       let qBorrowed  = supabase.from('borrowings').select('id', { count: 'exact' }).eq('status','Borrowed').is('returned_at',null);
@@ -2752,12 +2817,12 @@ export default function ReportsAnalytics() {
       ] = await Promise.all([qBooks, qBorrowed, qPending, qReturned, qStudents]);
       setStats({ totalBooks, borrowedCount, pendingCount, returnedCount, studentCount });
     } catch(e) { console.error('[RA] stats error:', e); }
-    finally { setStatsLoading(false); }
+    finally { if (!silent) setStatsLoading(false); }
   }, [campusId]);
 
   // ── Rich analytics ──
-  const fetchData = useCallback(async () => {
-    setDataLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setDataLoading(true);
     try {
       const periodDays = period==='7d'?7:period==='30d'?30:365;
       const since = new Date(Date.now() - periodDays * 86400000).toISOString();
@@ -3264,7 +3329,7 @@ export default function ReportsAnalytics() {
       setAttendData({ logs: logsFiltered, logsAll, byProgram: attendByProgram, dailyCounts, periodAttendLabel });
 
     } catch(e) { console.error('[RA] fetchData error:', e); }
-    finally { setDataLoading(false); }
+    finally { if (!silent) setDataLoading(false); }
   }, [period, campusId]);
 
   useEffect(()=>{ fetchStats(); }, [fetchStats]);
@@ -3273,14 +3338,29 @@ export default function ReportsAnalytics() {
 
   const channelNameRef = useRef(`ra3-rt-${Math.random().toString(36).slice(2)}`);
 
+  // Realtime changes refresh the data in the BACKGROUND (silent = no skeleton /
+  // no re-run of the entrance animations) and are debounced, so a burst of
+  // changes (e.g. many books registered at once) causes one refresh, not many.
+  const rtTimerRef   = useRef(null);
+  const rtNeedsStats = useRef(false);
   useEffect(()=>{
+    const queueRefresh = (withStats)=>{
+      if (withStats) rtNeedsStats.current = true;
+      clearTimeout(rtTimerRef.current);
+      rtTimerRef.current = setTimeout(()=>{
+        const needStats = rtNeedsStats.current;
+        rtNeedsStats.current = false;
+        if (needStats) fetchStats(true);
+        fetchData(true);
+      }, 1000);
+    };
     const ch = supabase.channel(channelNameRef.current)
-      .on('postgres_changes',{event:'*',schema:'public',table:'borrow_requests'},()=>{ fetchStats(); fetchData(); })
-      .on('postgres_changes',{event:'*',schema:'public',table:'borrowings'},     ()=>{ fetchStats(); fetchData(); })
-      .on('postgres_changes',{event:'*',schema:'public',table:'books'},          ()=>{ fetchStats(); fetchData(); })
-      .on('postgres_changes',{event:'*',schema:'public',table:'attendance_logs'},()=>{ fetchData(); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'borrow_requests'},()=>{ queueRefresh(true); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'borrowings'},     ()=>{ queueRefresh(true); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'books'},          ()=>{ queueRefresh(true); })
+      .on('postgres_changes',{event:'*',schema:'public',table:'attendance_logs'},()=>{ queueRefresh(false); })
       .subscribe();
-    return ()=>{ supabase.removeChannel(ch); };
+    return ()=>{ clearTimeout(rtTimerRef.current); rtNeedsStats.current = false; supabase.removeChannel(ch); };
   },[fetchStats,fetchData]);
 
   // Tab bar: drag with the mouse to scroll left/right (touch swipe already works natively).

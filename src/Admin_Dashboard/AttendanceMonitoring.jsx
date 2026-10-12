@@ -805,7 +805,6 @@ function VisitorHistoryTable({ onFocusChange }) {
             >
               <option value="all">All Status</option>
               <option value="time-in">Time In</option>
-              <option value="time-out">Time Out</option>
             </select>
 
             <DateFilterButton value={dateFilter} onChange={setDateFilter} onFocus={() => onFocusChange?.(false)} onBlur={() => onFocusChange?.(true)} />

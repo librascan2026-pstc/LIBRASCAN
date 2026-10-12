@@ -65,6 +65,13 @@ const ROLE_CONFIG = {
   super_admin:     { label: 'Super Admin',     bg: 'rgba(90,0,90,0.10)',     color: '#9c27b0',  border: 'rgba(156,39,176,0.28)' },
 };
 
+// Column -> value used by the user sorting (toolbar dropdown + clickable headers).
+const USER_SORT_FIELDS = {
+  name:     u => `${u.first_name || ''} ${u.last_name || ''}`.trim(),
+  idnumber: u => u.student_number || u.employee_number || '',
+  joined:   u => { const t = Date.parse(u.created_at); return Number.isNaN(t) ? null : t; },
+};
+
 function RoleBadge({ role }) {
   const c = ROLE_CONFIG[role] || ROLE_CONFIG.student;
   return (
@@ -725,6 +732,7 @@ export default function UserManagement({ onStatsRefresh }) {
   const [loading,    setLoading]    = useState(true);
   const [search,     setSearch]     = useState('');
   const [roleFilter, setRoleFilter] = useState('all');   // 'all' | 'student' | 'employee'
+  const [userSort,   setUserSort]   = useState({ key: 'joined', dir: 'desc' }); // newest first = the order the list had before
   const [showModal,  setShowModal]  = useState(false);
   const [modalUser,  setModalUser]  = useState(null);
   const [deleteUser, setDeleteUser] = useState(null);
@@ -844,6 +852,28 @@ export default function UserManagement({ onStatsRefresh }) {
     return matchesRole && (!q || [u.first_name, u.last_name, u.email].join(' ').toLowerCase().includes(q));
   });
 
+  // Sorting — applied on top of the search / role filters above. The default
+  // (Joined, newest first) is the same order the list had before. Blank values
+  // (shown as "—" / "No name") always sink to the bottom, in either direction.
+  const sortedUsers = [...filtered].sort((a, b) => {
+    const getVal = USER_SORT_FIELDS[userSort.key] || USER_SORT_FIELDS.joined;
+    const dir = userSort.dir === 'desc' ? -1 : 1;
+    const x = getVal(a), y = getVal(b);
+    const blankX = x === '' || x === null || x === undefined;
+    const blankY = y === '' || y === null || y === undefined;
+    if (blankX !== blankY) return blankX ? 1 : -1;
+    if (blankX && blankY) return 0;
+    const cmp = (typeof x === 'number' && typeof y === 'number')
+      ? x - y
+      : String(x).localeCompare(String(y), undefined, { numeric: true });
+    return cmp * dir;
+  });
+
+  const handleUserSort = (key) =>
+    setUserSort(prev => (prev.key === key
+      ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+      : { key, dir: 'asc' }));
+
   return (
     <div className="lm-module">
       <Toast message={toast} isError={toastError} />
@@ -874,6 +904,19 @@ export default function UserManagement({ onStatsRefresh }) {
           <option value="all">All Roles</option>
           <option value="student">Student</option>
           <option value="employee">Employee</option>
+        </select>
+        <select
+          className="lm-select"
+          aria-label="Sort users"
+          value={`${userSort.key}:${userSort.dir}`}
+          onChange={e => { const [key, dir] = e.target.value.split(':'); setUserSort({ key, dir }); }}
+        >
+          <option value="joined:desc">Sort: Joined (Newest first)</option>
+          <option value="joined:asc">Sort: Joined (Oldest first)</option>
+          <option value="name:asc">Sort: Name (A–Z)</option>
+          <option value="name:desc">Sort: Name (Z–A)</option>
+          <option value="idnumber:asc">Sort: Student Number (Low–High)</option>
+          <option value="idnumber:desc">Sort: Student Number (High–Low)</option>
         </select>
         <span style={{
           fontSize: 11.5, color: 'var(--text-dim)',
@@ -937,18 +980,37 @@ export default function UserManagement({ onStatsRefresh }) {
                 background: 'linear-gradient(135deg, #8B0000, #6B0000)',
                 borderBottom: '2px solid rgba(201,168,76,0.35)',
               }}>
-                {['Name', 'ID Number', 'Email', 'Role', 'Joined', 'Actions'].map(h => (
-                  <th key={h} style={{
-                    padding: '11px 14px', textAlign: 'left',
-                    fontFamily: 'var(--font-sans)', fontSize: 10.5,
-                    fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: '#F5E4A8', whiteSpace: 'nowrap',
-                  }}>{h}</th>
+                {[
+                  { label: 'Name',      key: 'name'     },
+                  { label: 'ID Number', key: 'idnumber' },
+                  { label: 'Email',     key: null       },
+                  { label: 'Role',      key: null       },
+                  { label: 'Joined',    key: 'joined'   },
+                  { label: 'Actions',   key: null       },
+                ].map(h => (
+                  <th key={h.label}
+                    onClick={h.key ? () => handleUserSort(h.key) : undefined}
+                    aria-sort={h.key && userSort.key === h.key ? (userSort.dir === 'asc' ? 'ascending' : 'descending') : undefined}
+                    title={h.key ? `Sort by ${h.label}` : undefined}
+                    style={{
+                      padding: '11px 14px', textAlign: 'left',
+                      fontFamily: 'var(--font-sans)', fontSize: 10.5,
+                      fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+                      color: '#F5E4A8', whiteSpace: 'nowrap',
+                      cursor: h.key ? 'pointer' : 'default', userSelect: 'none',
+                    }}>
+                    {h.label}
+                    {h.key && (
+                      <span style={{ marginLeft: 6, fontSize: 9, opacity: userSort.key === h.key ? 1 : 0.45 }}>
+                        {userSort.key === h.key ? (userSort.dir === 'asc' ? '▲' : '▼') : '↕'}
+                      </span>
+                    )}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {filtered.map((u, idx) => (
+              {sortedUsers.map((u, idx) => (
                 <UserRow
                   key={u.id}
                   user={u}

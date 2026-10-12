@@ -630,6 +630,9 @@ export default function SuperAdminBooks() {
   const [search, setSearch]     = useState('');
   const [campusFilter, setCampusFilter] = useState('all');
   const [genreFilter, setGenreFilter]   = useState('all');
+  // Genres per campus — the same `campus_genres` table librarians manage in Book Catalog.
+  const [campusGenres, setCampusGenres] = useState([]);     // rows: { id, campus_id, name, created_at }
+  const [genresReady, setGenresReady]   = useState(false);  // true once campus_genres has loaded successfully
   const [statusFilter, setStatusFilter] = useState('all');
   const [page, setPage]         = useState(1);
   const [viewBook, setViewBook] = useState(null);
@@ -655,10 +658,11 @@ export default function SuperAdminBooks() {
       const mySeq = ++loadSeqRef.current;
       if (!silent) setLoading(true);
       try {
-        const [campusRes, booksRes, copiesRes] = await Promise.all([
+        const [campusRes, booksRes, copiesRes, genreRes] = await Promise.all([
           supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active'),
           supabaseAdmin.from('books').select('*').order('created_at', { ascending: false }),
           supabaseAdmin.from('book_copies').select('book_id, status'),
+          supabaseAdmin.from('campus_genres').select('id, campus_id, name, created_at').order('created_at', { ascending: true }),
         ]);
 
         // A failed background refresh must never wipe the list that is already
@@ -695,6 +699,11 @@ export default function SuperAdminBooks() {
 
         setBooks(merged);
         setCampuses(allCampuses);
+        // If campus_genres can't be read, keep what is already loaded (or the built-in fallback list).
+        if (!genreRes.error) {
+          setCampusGenres(genreRes.data || []);
+          setGenresReady(true);
+        }
         loadedOnceRef.current = true;
       } catch (err) {
         console.error('[SuperAdminBooks] load error:', err.message);
@@ -758,10 +767,37 @@ export default function SuperAdminBooks() {
   );
 
   const genres = useMemo(() => {
-    // Canonical genres first (in the librarians' order), then any legacy/custom genre found in the data.
-    const extra = Array.from(new Set(approvedBooks.map(b => b.genre).filter(g => g && !GENRES.includes(g)))).sort();
-    return [...GENRES, ...extra];
-  }, [approvedBooks]);
+    // Until campus_genres has loaded (or if the table can't be read), keep the built-in list.
+    if (!genresReady) {
+      const extra = Array.from(new Set(approvedBooks.map(b => b.genre).filter(g => g && !GENRES.includes(g)))).sort();
+      return [...GENRES, ...extra];
+    }
+    // Genres come from each campus's own list (managed by librarians in Book Catalog):
+    // "all campuses" shows the union, picking a campus shows only that campus's genres.
+    const seen = new Set();
+    const base = [];
+    campusGenres.forEach(r => {
+      if (campusFilter !== 'all' && r.campus_id !== campusFilter) return;
+      const key = (r.name || '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      base.push(r.name);
+    });
+    // Then any genre still found on that scope's books (e.g. a genre deleted while books still use it),
+    // so no book becomes impossible to filter for.
+    const extra = Array.from(new Set(
+      approvedBooks
+        .filter(b => campusFilter === 'all' || b.campus_id === campusFilter)
+        .map(b => b.genre)
+        .filter(g => g && !base.includes(g))
+    )).sort();
+    return [...base, ...extra];
+  }, [approvedBooks, campusGenres, genresReady, campusFilter]);
+
+  // If the selected genre isn't in the (campus-scoped) list any more, go back to "All Genres".
+  useEffect(() => {
+    if (genreFilter !== 'all' && !genres.includes(genreFilter)) setGenreFilter('all');
+  }, [genres, genreFilter]);
 
   const baseBooks = activeTab === 'pending' ? pendingBooks : approvedBooks;
 

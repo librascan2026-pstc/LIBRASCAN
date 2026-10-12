@@ -1,36 +1,52 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { AuthContext } from './useAuth';
 import { isMfaPending, clearMfaPending } from '../utils/mfaClient';
 
-// useAuth() itself now lives in ./useAuth.js — this file exports the
-// AuthProvider component ONLY, which keeps it a valid React Fast Refresh
-// boundary (see the comment in useAuth.js for why that matters).
+
 
 export function AuthProvider({ children }) {
-  const [user,    setUser]    = useState(undefined); // undefined = still loading
+  const [user,    setUser]    = useState(undefined); 
   const [role,    setRole]    = useState(null);
-  const [profile, setProfile] = useState(null);      // row from profiles table
+  const [profile, setProfile] = useState(null);      
   const [loading, setLoading] = useState(true);
-  // True while we have a logged-in user but haven't confirmed their role from
-  // the DB yet. Consumers (App routing) must treat this like `loading` and
-  // NOT render a role-based dashboard until this is false — otherwise stale
-  // Supabase Auth user_metadata (e.g. leftover "admin") causes a flash of the
-  // wrong dashboard before the real profiles.role value arrives.
+
   const [roleResolving, setRoleResolving] = useState(false);
+ 
+  const committedUserRef = useRef(null);
+
+  const profileRef = useRef(null);
 
   const fetchProfile = useCallback(async (userId) => {
-    if (!userId) { setProfile(null); setRole(null); setRoleResolving(false); return; }
+    if (!userId) { profileRef.current = null; setProfile(null); setRole(null); setRoleResolving(false); return; }
     setRoleResolving(true);
-    const { data } = await supabaseAdmin
-      .from('profiles')
-      .select(
-        'id, first_name, last_name, middle_name, username, email, role, ' +
-        'avatar_url, campus_id, college_id, program_id, major_id, ' +
-        'student_number,  created_at, updated_at'
-      )
-      .eq('id', userId)
-      .single();
+    const load = async () => {
+      try {
+        return await supabaseAdmin
+          .from('profiles')
+          .select(
+            'id, first_name, last_name, middle_name, username, email, role, ' +
+            'avatar_url, campus_id, college_id, program_id, major_id, ' +
+            'student_number,  created_at, updated_at'
+          )
+          .eq('id', userId)
+          .single();
+      } catch (err) {
+        return { data: null, error: err };
+      }
+    };
+    let { data, error } = await load();
+
+    if (!data && error) {
+      await new Promise((r) => setTimeout(r, 700));
+      ({ data, error } = await load());
+    }
+
+    if (!data && profileRef.current?.id === userId) {
+      setRoleResolving(false);
+      return;
+    }
+    profileRef.current = data || null;
     setProfile(data || null);
 
     setRole(data?.role || null);
@@ -49,7 +65,17 @@ export function AuthProvider({ children }) {
       setLoading(false);
     }, 6000);
 
-    supabase.auth.getSession()
+
+    const getSessionWithRetry = async () => {
+      let res = await supabase.auth.getSession();
+      for (let i = 0; i < 2 && !res?.data?.session && res?.error?.name === 'AuthRetryableFetchError'; i++) {
+        await new Promise((r) => setTimeout(r, 1500));
+        res = await supabase.auth.getSession();
+      }
+      return res;
+    };
+
+    getSessionWithRetry()
       .then(async ({ data: { session } }) => {
         clearTimeout(timeout);
         if (isRecoveryFlow) {
@@ -59,18 +85,14 @@ export function AuthProvider({ children }) {
           return;
         }
         const u = session?.user ?? null;
-        // A Supabase session can exist here (signInWithPassword already
-        // resolved it) while the account is still mid-2FA — e.g. this is a
-        // second tab in the same browser, such as the one opened by tapping
-        // "Yes, it's me" / "No, secure my account" in the confirmation
-        // email. Never treat that as signed in; only the tab that actually
-        // finishes 2FA (via commitUser -> clearMfaPending) may.
+
         if (u && isMfaPending(u.id)) {
           setUser(null);
           setRole(null);
           setLoading(false);
           return;
         }
+        committedUserRef.current = u ? u.id : null;
         setUser(u);
         if (u) await fetchProfile(u.id); 
         else setRole(null);
@@ -90,15 +112,14 @@ export function AuthProvider({ children }) {
       if (event === 'USER_UPDATED') return;
 
       const u = session?.user ?? null;
-      // Same guard as the initial getSession() check above — a token
-      // refresh or storage event firing in a not-yet-2FA'd tab must not
-      // suddenly promote it to signed in either.
-      if (u && isMfaPending(u.id)) {
+
+      if (u && isMfaPending(u.id) && committedUserRef.current !== u.id) {
         setUser(null);
         setProfile(null);
         setRole(null);
         return;
       }
+      committedUserRef.current = u ? u.id : null;
       setUser(u);
       if (u) await fetchProfile(u.id); // resolves the real role from DB
       else { setProfile(null); setRole(null); }
@@ -110,12 +131,7 @@ export function AuthProvider({ children }) {
     };
   }, [fetchProfile]);
 
-  // skipServerCall: true for the force-logout path below, where we already
-  // know (we're the ones who just got told) that the server has already
-  // revoked this exact session. Calling supabase.auth.signOut() in that case
-  // would only ever get a 403 back — it's asking the server to revoke a
-  // session that's already gone — so we skip that network round-trip
-  // entirely and just clear this tab's local copy of the session ourselves.
+
   const signOut = async ({ skipServerCall = false } = {}) => {
     const uid = user?.id;
     try {
@@ -134,6 +150,8 @@ export function AuthProvider({ children }) {
       console.warn('[AuthContext] signOut threw (non-fatal):', err);
     } finally {
       if (uid) clearMfaPending(uid);
+      committedUserRef.current = null;
+      profileRef.current = null;
       setUser(null);
       setRole(null);
       setProfile(null);
@@ -145,17 +163,7 @@ export function AuthProvider({ children }) {
     return { data, error };
   };
 
-  // Google sign-in via Google Identity Services (GIS) + Supabase
-  // signInWithIdToken. No redirect through <project>.supabase.co, so Google's
-  // popup shows your own site instead of the supabase URL.
-  //
-  // `credential` is the ID token from Google, `nonce` is the RAW nonce (Google
-  // was given the SHA-256 hash of it). Because the page doesn't reload, the
-  // caller must finish the login with commitUser() — onAuthStateChange
-  // ignores SIGNED_IN above.
-  //
-  // NOTE: like before, this does NOT go through the 2FA / device-trust /
-  // "Yes, it's me" email-confirmation flow used by password login.
+
   const signInWithGoogleIdToken = async (credential, nonce) => {
     const { data, error } = await supabase.auth.signInWithIdToken({
       provider: 'google',
@@ -166,11 +174,9 @@ export function AuthProvider({ children }) {
   };
 
   const commitUser = async (sessionUser) => {
-    // This is the one place a login is actually considered finished — no
-    // 2FA required, OTP verified, or the "Yes, it's me" email confirmed.
-    // Clearing the marker here (rather than in LoginPage) means every path
-    // that ends in commitUser is covered automatically.
+   
     clearMfaPending(sessionUser.id);
+    committedUserRef.current = sessionUser.id;
     setUser(sessionUser);
     await fetchProfile(sessionUser.id); 
   };
@@ -180,18 +186,7 @@ export function AuthProvider({ children }) {
     if (session?.user) await fetchProfile(session.user.id);
   }, [fetchProfile]);
 
-  // ----------------------------------------------------------------------
-  // Live "force logout" — the other half of Settings' "View Logins" ->
-  // Logout. Revoking a session there kills that device's REFRESH token
-  // server-side, but the ACCESS token this tab is already holding is a
-  // self-contained JWT that stays valid on its own until it naturally
-  // expires — so without this, a revoked tab would keep showing the
-  // dashboard for a while. The server broadcasts on this user's channel the
-  // instant it revokes a session; this tab listens the whole time it's
-  // signed in and signs itself out immediately on a match (or on ANY
-  // force-logout message with no sessionId, e.g. a future "log out
-  // everywhere" action).
-  // ----------------------------------------------------------------------
+
   useEffect(() => {
     if (!user?.id) return;
     let cancelled = false;
@@ -215,9 +210,7 @@ export function AuthProvider({ children }) {
         .channel(`force-logout-${user.id}`)
         .on('broadcast', { event: 'force-logout' }, ({ payload }) => {
           if (!payload?.sessionId || payload.sessionId === sessionId) {
-            // The server just told us it already revoked this session —
-            // no need to ask it to do so again (that's the 403 you'd see
-            // otherwise). Just clear this tab locally.
+         
             signOut({ skipServerCall: true });
           }
         })
