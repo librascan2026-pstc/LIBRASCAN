@@ -4688,33 +4688,10 @@ function PageProfile({ user, profile, onProfileUpdate }) {
   const CourseField = () => (
     <div className="sdb-form-group">
       <label className="sdb-label">Course / Program</label>
-      {editing
-        ? (
-          <select
-            className="sdb-input sdb-select"
-            style={{ width:'100%' }}
-            value={form.program_id}
-            disabled={loadingPrograms || programs.length === 0}
-            onChange={e => {
-              const id = e.target.value;
-              const name = programs.find(p => p.id === id)?.name || '';
-              setForm(f => ({ ...f, program_id: id, course: name }));
-            }}
-          >
-            <option value="">
-              {loadingPrograms
-                ? 'Loading courses…'
-                : (programs.length ? 'Select a course' : 'No courses available for your campus')}
-            </option>
-            {programs.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-        )
-        : <div style={{ fontFamily:'var(--font-sans)', fontSize:13, color:'var(--text-secondary)', padding:'9px 0', borderBottom:'1px solid rgba(139,0,0,.12)' }}>
-            {form.course || <span style={{ color:'var(--text-dim)', fontStyle:'italic' }}>Not set</span>}
-          </div>
-      }
+      {/* Course / Program is read-only — never editable, even in edit mode */}
+      <div style={{ fontFamily:'var(--font-sans)', fontSize:13, color:'var(--text-secondary)', padding:'9px 0', borderBottom:'1px solid rgba(139,0,0,.12)' }}>
+        {form.course || <span style={{ color:'var(--text-dim)', fontStyle:'italic' }}>Not set</span>}
+      </div>
     </div>
   );
 
@@ -4795,13 +4772,16 @@ function PageProfile({ user, profile, onProfileUpdate }) {
           )}
         </div>
         <div className="sdb-profile-field-grid" style={{ display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:'0 24px', padding:'0 0 6px' }}>
-          <Field label="First Name"        fkey="first_name"  />
-          <Field label="Middle Name"       fkey="middle_name" />
-          <Field label="Last Name"         fkey="last_name"   />
-          <Field label="Student ID"        fkey="student_id"  />
-          <CourseField />
-          <Field label="Campus"            fkey="campus"      readOnly />
-          <Field label="Email Address"     fkey="email"  type="email" readOnly />
+          {/* Field/CourseField are called as functions (not <Field/>) so the inputs
+              are not remounted on every keystroke — that remount made typing
+              lose focus after each character. */}
+          {Field({ label:'First Name',    fkey:'first_name'  })}
+          {Field({ label:'Middle Name',   fkey:'middle_name' })}
+          {Field({ label:'Last Name',     fkey:'last_name'   })}
+          {Field({ label:'Student ID',    fkey:'student_id'  })}
+          {CourseField()}
+          {Field({ label:'Campus',        fkey:'campus',     readOnly:true })}
+          {Field({ label:'Email Address', fkey:'email',      type:'email', readOnly:true })}
         </div>
       </div>
       {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}

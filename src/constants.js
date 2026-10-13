@@ -1,3 +1,4 @@
+// ─── Palette ──────────────────────────────────────────────────────────────────
 export const MAROON       = "#8B0000";
 export const MAROON_DEEP  = "#6B0000";
 export const MAROON_LIGHT = "#A80000";
@@ -7,104 +8,170 @@ export const GOLD_PALE    = "#F5E4A8";
 export const CREAM        = "#FDF8F0";
 export const WHITE        = "#FFFFFF";
 
+// ─── Navigation (ids match the section ids on the page) ──────────────────────
+export const NAV_LINKS = [
+  { id: "home",        label: "Home"        },
+  { id: "features",    label: "Features"    },
+  { id: "benefits",    label: "Benefits"    },
+  { id: "application", label: "Application" },
+  { id: "faq",         label: "FAQ"         },
+  { id: "team",        label: "Team"        },
+];
 
+// One short sentence under every section title.
+export const SECTION_COPY = {
+  features:    "Everything the library needs to lend, track, and report.",
+  benefits:    "One system that saves time for every library user.",
+  application: "See how LibraScan looks on every portal.",
+  faq:         "Quick answers to what students and staff ask most.",
+  team:        "The students and adviser behind this capstone project.",
+};
+
+// ─── Hero stats ───────────────────────────────────────────────────────────────
+// `live: true` stats are read from the database at runtime (see useLandingStats
+// in App.jsx); the others are fixed numbers.
+export const STAT_TARGETS = [
+  { key: "books",    live: true, suffix: "",  label: "Books in Catalog"    },
+  { key: "users",    live: true, suffix: "",  label: "Registered Users"    },
+  { key: "accuracy", target: 98, suffix: "%", label: "Scan Accuracy"       },
+  { key: "campuses", target: 9,  suffix: "",  label: "University Campuses" },
+];
+
+// ─── System Features ──────────────────────────────────────────────────────────
 export const FEATURES = [
   {
-    iconKey: "qr",
-    title: "QR Book Management",
-    desc: "Every book gets a unique QR code. Automate checkouts, returns, and inventory tracking with a single scan, no manual entries.",
+    iconKey: "scan",
+    title: "Scan to Borrow and Return",
+    desc: "Each book has its own QR code. One scan records a borrow or return, and overdue books are easy to spot.",
   },
   {
-    iconKey: "attendance",
-    title: "Attendance Monitoring",
-    desc: "Real-time student and staff visit logging via QR scan. Replace paper sign-in sheets with instant, accurate digital records.",
+    iconKey: "visitor",
+    title: "Visitor Monitoring",
+    desc: "Students scan their ID to log their library visit. Daily records replace paper logbooks and can be searched, filtered by date, and printed.",
   },
   {
     iconKey: "catalog",
     title: "Online Catalog",
-    desc: "Search, browse, and check book availability from anywhere, web or mobile. A smart digital library at your fingertips.",
+    desc: "Search and filter the catalog, check which books are available, and request to borrow. You are notified as soon as your request is approved.",
   },
   {
-    iconKey: "dashboard",
-    title: "Admin Dashboard",
-    desc: "Comprehensive analytics, reports, and records in one view. Empower library management with data-driven insights.",
+    iconKey: "portals",
+    title: "Three Role-Based Portals",
+    desc: "Students and employees browse, borrow, and track books. Librarians scan, manage books and users, and view reports. The Super Admin oversees all campuses and approves new books.",
   },
   {
-    iconKey: "mobile",
+    iconKey: "devices",
     title: "Mobile & Web Access",
-    desc: "Fully cross-platform: compatible with Android, iOS, and all browsers. Access the system from any device, anywhere.",
+    desc: "Use it on Android or in any web browser. Notifications and email reminders keep you updated on requests and due dates.",
   },
   {
-    iconKey: "shield",
+    iconKey: "secure",
     title: "Secure & Reliable",
-    desc: "Built on robust architecture following ISO 25010 standards, ensuring accuracy, security, and system reliability.",
+    desc: "Only PSU accounts can sign in, with two-step verification and control over signed-in devices. Each campus's data stays separate.",
   },
 ];
 
+// ─── Built for Efficiency (tabbed) ────────────────────────────────────────────
+export const PORTALS = [
+  {
+    id: "student",
+    label: "Student/Employee Portal",
+    points: [
+      "Search books through an online catalog from anywhere.",
+      "Check real-time book availability without visiting the library.",
+      "Faster checkouts and returns via QR scanning.",
+      "Student visit logs via ID QR scanning, no manual logging needed.",
+    ],
+  },
+  {
+    id: "librarian",
+    label: "Librarian Portal",
+    points: [
+      "Makes borrowing and returning fast, accurate, and easy to track, so the library always knows where every book is and who has it.",
+      "Book Management keeps the whole collection organized, accurate, and easy to register, so every book is easy to find, track, and borrow.",
+      "Every book copy gets its own QR code, so each copy can be tracked individually.",
+      "Reports and Analytics help the library buy the right books, plan for busy periods, and show proof of library usage to the administration, while saving time because reports can be downloaded or printed in a few clicks.",
+    ],
+  },
+  {
+    id: "superadmin",
+    label: "Super Admin Portal",
+    points: [
+      "Manage campuses, librarian accounts, and user accounts from a single portal.",
+      "Books across every campus can be monitored in one place, with totals, availability, and pending approvals always up to date.",
+      "Get new book requests instantly, so approvals are never delayed.",
+      "Reduce paperwork and manual follow-ups, since requests, approvals, and updates all happen online.",
+    ],
+  },
+];
 
-export const BENEFITS = {
-  students: {
-    title: " Students",
-    points: [
-      "Search books through an online catalog from anywhere",
-      "Check real-time book availability without visiting the library",
-      "Instant QR-based attendance, no manual sign-in needed",
-      "Faster checkouts and returns via QR scanning",
-    ],
+// ─── Application screenshots (files live in /public) ─────────────────────────
+export const APP_SCREENSHOTS = [
+  { src: "/User1.png",         alt: "Student portal, screen 1" },
+  { src: "/User2.png",         alt: "Student portal, screen 2" },
+  { src: "/User3.png",         alt: "Student portal, screen 3" },
+  { src: "/adminportal1.png",  alt: "Librarian portal, screen 1" },
+  { src: "/adminportal2.png",  alt: "Librarian portal, screen 2" },
+  { src: "/adminportal3.png",  alt: "Librarian portal, screen 3" },
+  { src: "/adminportal4.png",  alt: "Librarian portal, screen 4" },
+  { src: "/adminportal5.png",  alt: "Librarian portal, screen 5" },
+  { src: "/superadmin1.png",   alt: "Super Admin portal, screen 1" },
+  { src: "/superadmin2.png",   alt: "Super Admin portal, screen 2" },
+  { src: "/superadmin3.png",   alt: "Super Admin portal, screen 3" },
+];
+
+// ─── FAQ ──────────────────────────────────────────────────────────────────────
+export const FAQS = [
+  {
+    q: "Who can use LibraScan?",
+    a: "Students and employees of Pampanga State University can sign in with their PSU account. Librarian and Super Admin accounts are managed by the administration.",
   },
-  staff: {
-    title: " Library Staff",
-    points: [
-      "Automate checkout, return, and inventory tracking",
-      "Eliminate manual data entry and paper records",
-      "QR code auto-generation for newly added books",
-      "Focus on service instead of administrative tasks",
-    ],
+  {
+    q: "How do I borrow and return a book?",
+    a: "Pick the book you want, go to the QR scanner, then scan your ID QR code followed by the book's QR code to borrow it. To return a book, scan the same way at the scanner.",
   },
-  admin: {
-    title: " Administrators",
-    points: [
-      "Real-time dashboard with transaction and attendance logs",
-      "Generate detailed reports for decision-making",
-      "Analytics on system usage and book circulation",
-      "Organized, accurate data at a glance",
-    ],
+  {
+    q: "How do I log my library visit?",
+    a: "Scan your ID at the library's QR scanner. Your visit is recorded automatically, so there is no paper logbook to sign.",
   },
+  {
+    q: "Can I use LibraScan on my phone?",
+    a: "Yes. LibraScan is available on Android and in any web browser, so you can browse the catalog and track your requests from your phone or computer.",
+  },
+  {
+    q: "How is my account kept secure?",
+    a: "Only verified PSU accounts can sign in. LibraScan also uses two-step verification, either a confirmation link sent to your email or a 6-digit code. You can see which devices are signed in and log out any you don't recognize.",
+  },
+  {
+    q: "How long can I keep a book, and how will I know when it is due?",
+    a: "The standard loan period is 3 days. LibraScan sends reminders by email and in the app when a book is due tomorrow, due today, or overdue.",
+  },
+];
+
+// ─── Team ─────────────────────────────────────────────────────────────────────
+export const ADVISER = {
+  name:  "Policarpio, John Mark S., MIT",
+  role:  "Capstone Adviser",
+  photo: "/Caps_adviser.png",
 };
 
-
-export const STEPS = [
-  { num: "01", title: "Requirements Gathering", desc: "Interviews and observations with library staff and students of PSU Sto. Tomas Campus to define system requirements." },
-  { num: "02", title: "System Design",          desc: "Architecture, database structure, UI design, and QR code workflow designed for both web and mobile platforms." },
-  { num: "03", title: "Development",            desc: "Agile-driven coding: book management, attendance monitoring, online catalog, QR generation, and admin dashboard." },
-  { num: "04", title: "Testing & Debugging",    desc: "Thorough QA for QR scanning accuracy, module integration, and system reliability across all features." },
-  { num: "05", title: "Evaluation",             desc: "System assessed by library staff and student respondents using ISO 25010 standards for usability and accuracy." },
-  { num: "06", title: "Deployment",             desc: "Live deployment at PSU Sto. Tomas Campus library, with ongoing monitoring and maintenance support." },
-];
-
-
 export const TEAM = [
-  { name: "Xandru C. Bondoc"          },
-  { name: "Rusty A. Pineda"            },
-  { name: "Edzel John R. Lacap"       },
-  { name: "Prince Christian S. Mata"  },
-  { name: "Jerry Yan A. Balagtas"     },
+  { name: "Bondoc, Xandru C.",        role: "Website Developer",        photo: "/Bondoc.jpg"   },
+  { name: "Pineda, Rusty A.",         role: "Application Developer",    photo: "/Pineda.jpg"   },
+  { name: "Lacap, Edzel John R.",     role: "Documentation Specialist", photo: "/Lacap.jpg"    },
+  { name: "Mata, Prince Christian S.",role: "System Analyst",           photo: "/Mata.jpg"     },
+  { name: "Balagtas, Jerry Yan A.",   role: "QA Analyst",               photo: "/Balagtas.jpg" },
 ];
 
-
-export const SCOPE_TAGS = [
-  { label: "Web Platform",  accent: MAROON },
-  { label: "Android App",   accent: GOLD   },
-  { label: "QR Generator",  accent: MAROON },
-  { label: "Admin Portal",  accent: GOLD   },
-  { label: "Student Portal",  accent: MAROON },
-  { label: "Live Reports",  accent: GOLD   },
-];
-
-
-export const STAT_TARGETS = [
-  { target: 5000, suffix: "+", label: "Books in Catalog"  },
-  { target: 1200, suffix: "+", label: "Registered Users"  },
-  { target: 98,   suffix: "%", label: "Scan Accuracy"     },
-  { target: 9,    suffix: "",  label: "University Campus" },
+// ─── Footer ───────────────────────────────────────────────────────────────────
+export const CAMPUSES = [
+  "Apalit Campus",
+  "Bacolor Campus",
+  "Candaba Campus",
+  "Floridablanca Campus",
+  "Lubao Campus",
+  "Mexico Campus",
+  "Porac Campus",
+  "San Fernando Campus",
+  "Santo Tomas Campus",
 ];
