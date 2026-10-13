@@ -668,8 +668,15 @@ const DASHBOARD_PATH_BY_ROLE = {
   student:         '/student',
 };
 
+// ── Landing page switch ──────────────────────────────────────────────────────
+// false = the landing page ("/") is DISABLED: visiting the site goes straight
+// to the Login page, and every "back to landing" action lands on Login too.
+// All landing-page code below is kept untouched; set this to true to bring
+// the landing page back.
+const LANDING_ENABLED = false;
+
 function authPageFromPath(pathname) {
-  return AUTH_PAGE_BY_PATH[pathname] || null;
+  return AUTH_PAGE_BY_PATH[pathname] || (LANDING_ENABLED ? null : 'login');
 }
 
 // ─── Main app shell ───────────────────────────────────────────────────────────
@@ -684,6 +691,12 @@ function LandingApp() {
   // Move to an auth screen (or back to "/" when passed null), keeping the
   // address bar in sync via the native History API.
   const goToAuth = (page) => {
+    // Landing disabled: "back to landing" (page === null) means Login.
+    if (!page && !LANDING_ENABLED) {
+      if (!user && window.location.pathname === '/') window.history.replaceState({}, '', '/login');
+      setAuthPage('login');
+      return;
+    }
     const targetPath = page ? AUTH_PATH_BY_PAGE[page] : '/';
     if (window.location.pathname !== targetPath) {
       window.history.pushState({ authPage: page }, '', targetPath);
