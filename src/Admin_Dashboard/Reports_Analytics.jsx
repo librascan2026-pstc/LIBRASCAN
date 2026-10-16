@@ -3015,6 +3015,8 @@ export default function ReportsAnalytics() {
 
         if (programByStrippedCode[key]) return programByStrippedCode[key];
 
+        let best = null;
+        let bestLen = 0;
         for (const name in programByStrippedName) {
           if ((key.includes(name) || name.includes(key)) && name.length > bestLen) {
             best = programByStrippedName[name];
