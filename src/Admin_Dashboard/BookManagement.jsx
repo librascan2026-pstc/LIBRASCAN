@@ -2375,7 +2375,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
                 }}>
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
                 </div>
-                <div>
+                <div style={{ textAlign:'left' }}>
                   <div style={{ fontSize:14, fontWeight:700, color:'var(--maroon-deep)', fontFamily:"'Cinzel', serif", letterSpacing:'0.03em' }}>
                     {student.full_name}
                   </div>
