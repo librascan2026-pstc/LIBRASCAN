@@ -2191,6 +2191,9 @@ export default function CampusManagementHub() {
         )}
         {viewRow && <CourseViewModal row={viewRow} onClose={() => setViewRow(null)} />}
       </AnimatePresence>
-    </div>/* git add -A git commit -m "Update all files" git push */
+    </div>/* git add -A 
+git commit -m "Update all files"
+git push */
+
   );
 }

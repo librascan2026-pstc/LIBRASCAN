@@ -619,8 +619,8 @@ const RA_STYLES = `
   .ra-leader-rank.top2 { color:#A0A0A0; }
   .ra-leader-rank.top3 { color:#B87333; }
   .ra-leader-avatar { width:30px; height:30px; border-radius:50%; flex-shrink:0; background:linear-gradient(135deg,var(--maroon-mid),var(--maroon-deep)); border:1.5px solid rgba(201,168,76,0.30); display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-size:11px; font-weight:700; color:rgba(245,228,168,.85); overflow:hidden; }
-  .ra-leader-name { font-family:var(--font-sans); font-size:12px; font-weight:600; color:var(--text-secondary); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .ra-leader-sub  { font-family:var(--font-sans); font-size:10px; color:var(--text-dim); }
+  .ra-leader-name { font-family:var(--font-sans); font-size:12px; font-weight:600; color:var(--text-secondary); flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; }
+  .ra-leader-sub  { font-family:var(--font-sans); font-size:10px; color:var(--text-dim); text-align:left; }
   .ra-leader-badge { font-family:var(--font-sans); font-size:10.5px; font-weight:700; color:var(--maroon-mid); background:rgba(139,0,0,0.08); padding:2px 8px; border-radius:99px; flex-shrink:0; }
 
   .ra-pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:99px; white-space:nowrap; font-family:var(--font-sans); font-size:10.5px; font-weight:600; letter-spacing:.03em; text-transform:uppercase; }
