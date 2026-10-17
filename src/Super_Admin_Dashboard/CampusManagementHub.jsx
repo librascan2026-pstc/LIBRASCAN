@@ -1705,7 +1705,6 @@ export default function CampusManagementHub() {
   const [colleges, setColleges] = useState([]);
   const [programs, setPrograms] = useState([]);
   const [majors, setMajors]     = useState([]);
-  const [students, setStudents] = useState([]);
   const [loading,  setLoading]  = useState(true);
 
   const [selectedId, setSelectedId] = useState(() => {
@@ -1729,18 +1728,16 @@ export default function CampusManagementHub() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: caData }, { data: coData }, { data: pData }, { data: maData }, { data: stData }] = await Promise.all([
+    const [{ data: caData }, { data: coData }, { data: pData }, { data: maData }] = await Promise.all([
       supabaseAdmin.from('campuses').select('*').order('campus_name'),
       supabaseAdmin.from('colleges').select('*').order('college_name'),
       supabaseAdmin.from('programs').select('*').order('program_name'),
       supabaseAdmin.from('majors').select('id, program_id'),
-      supabaseAdmin.from('profiles').select('id, campus_id').eq('role', 'student'),
     ]);
     setCampuses(caData || []);
     setColleges(coData || []);
     setPrograms(pData  || []);
     setMajors(maData   || []);
-    setStudents(stData || []);
     setLoading(false);
   }, []);
 
@@ -1784,10 +1781,21 @@ export default function CampusManagementHub() {
     return majors.filter(m => campusProgramIds.has(m.program_id)).length;
   }, [majors, allCourseRows, selectedCampus]);
 
-  const studentCount = useMemo(() => {
-    if (!selectedCampus) return 0;
-    return students.filter(s => s.campus_id === selectedCampus.id).length;
-  }, [students, selectedCampus]);
+  // PERF: ask the database for just this campus's student count instead of
+  // downloading every student in the system (which was also silently capped
+  // at 1000 rows). Re-runs whenever the campus list reloads.
+  const [studentCount, setStudentCount] = useState(0);
+  useEffect(() => {
+    if (!selectedCampus) { setStudentCount(0); return undefined; }
+    let alive = true;
+    supabaseAdmin
+      .from('profiles')
+      .select('id', { count: 'exact', head: true })
+      .eq('role', 'student')
+      .eq('campus_id', selectedCampus.id)
+      .then(({ count, error }) => { if (alive && !error) setStudentCount(count || 0); });
+    return () => { alive = false; };
+  }, [selectedCampus]);
 
   const filteredCourseRows = useMemo(() => {
     let rows = allCourseRows;

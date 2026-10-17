@@ -67,7 +67,31 @@ const Ic = {
   dots:     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>,
 };
 
+// PERF: phone photos are often 3-8 MB but a cover is shown ~180px wide, which
+// makes the whole catalog slow to load. Downscale new cover uploads before
+// saving. Falls back to the original file if anything goes wrong.
+async function shrinkCover(file, maxSide = 900, quality = 0.85) {
+  try {
+    if (!file || !/^image\/(jpeg|png|webp)$/i.test(file.type)) return file;
+    const bmp   = await createImageBitmap(file);
+    const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+    if (scale === 1 && file.size < 300 * 1024) { if (bmp.close) bmp.close(); return file; }
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.max(1, Math.round(bmp.width * scale));
+    canvas.height = Math.max(1, Math.round(bmp.height * scale));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    if (bmp.close) bmp.close();
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, '') + '.jpg', { type: 'image/jpeg' });
+  } catch { return file; }
+}
+
 async function uploadImage(file, folder = 'covers') {
+  if (folder === 'covers') file = await shrinkCover(file);
   const ext  = file.name.split('.').pop();
   const path = `${folder}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
   const { error } = await supabaseAdmin.storage.from(BUCKET).upload(path, file, { upsert: true });
@@ -1950,14 +1974,16 @@ export default function Book_Catalog() {
   };
 
   useEffect(() => {
-    const silentRefresh = () => fetchBooks(false);
+    // PERF: debounced so a burst of events triggers one refetch.
+    let t = null;
+    const silentRefresh = () => { clearTimeout(t); t = setTimeout(() => fetchBooks(false), 1500); };
     const ch = supabase
       .channel('catalog-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowings'  }, silentRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'books'       }, silentRefresh)
       .subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => { clearTimeout(t); supabase.removeChannel(ch); };
   }, [fetchBooks]);
 
   // Loads every individual copy (book_copies) for the Inventory tab, joined
@@ -2025,7 +2051,9 @@ export default function Book_Catalog() {
   useEffect(() => { fetchCopies(true); }, [fetchCopies]);
 
   useEffect(() => {
-    const silentRefresh = () => fetchCopies(false);
+    // PERF: debounced so a burst of events triggers one refetch.
+    let t = null;
+    const silentRefresh = () => { clearTimeout(t); t = setTimeout(() => fetchCopies(false), 1500); };
     const ch = supabase
       .channel('inventory-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
@@ -2035,7 +2063,7 @@ export default function Book_Catalog() {
       // heard about the approval and the new copies stayed hidden until a refresh.
       .on('postgres_changes', { event: '*', schema: 'public', table: 'books'       }, silentRefresh)
       .subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => { clearTimeout(t); supabase.removeChannel(ch); };
   }, [fetchCopies]);
 
   // Safety net, same idea as the Dashboard's notification poll: if Realtime
@@ -2049,7 +2077,7 @@ export default function Book_Catalog() {
       fetchBooks(false);
       fetchCopies(false);
     };
-    const pollId = setInterval(refreshBoth, 6000);
+    const pollId = setInterval(refreshBoth, 30000); // PERF: was 6000 — realtime is the primary path
     document.addEventListener('visibilitychange', refreshBoth);
     return () => {
       clearInterval(pollId);
@@ -3033,7 +3061,7 @@ function BookCard({ book, onView, onEdit, onDelete, Ic }) {
       {/* Cover — fixed book proportion, same margins as the student catalog card so the background art frames it */}
       <div style={{ position: 'relative', flexShrink: 0, margin: '9.4% 10.3% 0', aspectRatio: '270 / 385' }}>
         {book.cover_image_url ? (
-          <img src={book.cover_image_url} alt="" style={{
+          <img src={book.cover_image_url} alt="" loading="lazy" decoding="async" style={{
             position: 'absolute', inset: 0, width: '100%', height: '100%',
             objectFit: 'contain', borderRadius: 2,
           }} />
@@ -3133,7 +3161,7 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
       <td className="bc-td bc-td-title" data-label="Title" style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
-            <img src={book.cover_image_url} alt=""
+            <img src={book.cover_image_url} alt="" loading="lazy" decoding="async"
               style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
           ) : (
             <div style={{
@@ -3337,7 +3365,7 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
       <td className="bc-td bc-td-title" data-label="Title" style={{ padding: '11px 16px', maxWidth: 240, textAlign: 'left' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {book.cover_image_url ? (
-            <img src={book.cover_image_url} alt=""
+            <img src={book.cover_image_url} alt="" loading="lazy" decoding="async"
               style={{ width: 32, height: 40, objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(139,0,0,0.15)', flexShrink: 0 }} />
           ) : (
             <div style={{

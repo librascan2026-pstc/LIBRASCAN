@@ -744,15 +744,28 @@ export default function Overview({ onNavigate }) {
   }, [loadStats, loadCharts]);
 
   useEffect(() => {
+    // PERF: debounced — a burst of events (one scan touches several tables)
+    // now causes a single reload instead of one full reload per event.
+    let timer = null;
+    let needCharts = false;
+    const queue = (charts) => {
+      if (charts) needCharts = true;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        loadStats();
+        if (needCharts) loadCharts();
+        needCharts = false;
+      }, 1500);
+    };
     const ch = supabase.channel('overview-realtime')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, () => { loadStats(); loadCharts(); })
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrowings'      }, () => { loadStats(); loadCharts(); })
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrow_requests'  }, () => { loadStats(); loadCharts(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles'        }, () => { loadStats(); })
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books'           }, () => { loadStats(); })
-      .on('postgres_changes', { event: '*',      schema: 'public', table: 'book_copies'     }, () => { loadStats(); })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance_logs' }, () => queue(true))
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrowings'      }, () => queue(true))
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'borrow_requests'  }, () => queue(true))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'profiles'        }, () => queue(false))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'books'           }, () => queue(false))
+      .on('postgres_changes', { event: '*',      schema: 'public', table: 'book_copies'     }, () => queue(false))
       .subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => { clearTimeout(timer); supabase.removeChannel(ch); };
   }, [loadStats, loadCharts]);
 
   const STAT_CARDS = [

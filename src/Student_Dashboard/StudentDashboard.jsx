@@ -3090,7 +3090,7 @@ function BookCover({ src, title, width = 80, height = 110 }) {
   const palettes = ['#7B0000','#5A0000','#8B0000','#6B0000','#4A0000','#6E2000','#003366'];
   const bg = palettes[Math.abs(((title || 'X').charCodeAt(0)) % palettes.length)];
   if (src && !err) {
-    return <img src={src} alt={title} onError={() => setErr(true)}
+    return <img src={src} alt={title} loading="lazy" decoding="async" onError={() => setErr(true)}
       style={{ width, height, objectFit:'cover', borderRadius:6, flexShrink:0, display:'block' }} />;
   }
   return (
@@ -3311,9 +3311,15 @@ function PageHome({ user, profile, onNavigate }) {
 
     load();
 
+    // PERF: debounce + random jitter so many students don't all re-query the
+    // database at the same instant after one scan.
+    let rtTimer = null;
     const ch = supabase
       .channel(`student-home-stats-${user.id}-${Math.random().toString(36).slice(2)}`)
-      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => { load(); })
+      .on('postgres_changes', { event:'*', schema:'public', table:'borrowings' }, () => {
+        clearTimeout(rtTimer);
+        rtTimer = setTimeout(load, 1000 + Math.random() * 4000);
+      })
       .subscribe();
     const onFocus = () => { load(); };
     window.addEventListener('focus', onFocus);
@@ -3321,6 +3327,7 @@ function PageHome({ user, profile, onNavigate }) {
 
     return () => {
       cancelled = true;
+      clearTimeout(rtTimer);
       clearInterval(poll);
       window.removeEventListener('focus', onFocus);
       supabase.removeChannel(ch);
@@ -3773,13 +3780,15 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
   // a title, `books` changes — re-fetch quietly so a newly-approved book
   // shows up here on its own, with no page reload needed.
   useEffect(() => {
-    const silentRefresh = () => fetchCatalog(false);
+    // PERF: debounce + jitter so one scan doesn't make every student refetch at once.
+    let t = null;
+    const silentRefresh = () => { clearTimeout(t); t = setTimeout(() => fetchCatalog(false), 1000 + Math.random() * 4000); };
     const ch = supabase
       .channel(`student-catalog-live-${Math.random().toString(36).slice(2)}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, silentRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, silentRefresh)
       .subscribe();
-    return () => supabase.removeChannel(ch);
+    return () => { clearTimeout(t); supabase.removeChannel(ch); };
   }, [fetchCatalog]);
 
   // Debounced Open Library search — fires ~500ms after typing stops, and

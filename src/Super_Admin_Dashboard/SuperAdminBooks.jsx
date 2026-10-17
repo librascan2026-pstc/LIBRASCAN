@@ -730,7 +730,7 @@ export default function SuperAdminBooks() {
     const refresh  = () => { if (reloadBooksRef.current) reloadBooksRef.current(true); };
     const schedule = () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(refresh, 300);
+      timer = setTimeout(refresh, 1500); // PERF: was 300 — a scan touches several rows; collapse them into one reload
     };
 
     try {
@@ -741,7 +741,7 @@ export default function SuperAdminBooks() {
         .subscribe();
     } catch { /* realtime unavailable — polling below still keeps it accurate */ }
 
-    const pollId = setInterval(() => { if (!document.hidden) refresh(); }, 8000);
+    const pollId = setInterval(() => { if (!document.hidden) refresh(); }, 30000); // PERF: was 8000 — each refresh reloads every book + copy
     const onVisible = () => { if (!document.hidden) refresh(); };
     window.addEventListener('focus', onVisible);
     document.addEventListener('visibilitychange', onVisible);

@@ -166,11 +166,19 @@ function playBellSound() {
 
 
 async function syncBooksFromCopies(bookId) {
-  const { data: allCopies } = await supabaseAdmin
-    .from('book_copies').select('status').eq('book_id', bookId);
+  const [{ data: allCopies }, { data: bookRow }] = await Promise.all([
+    supabaseAdmin.from('book_copies').select('status').eq('book_id', bookId),
+    supabaseAdmin.from('books').select('copies, status').eq('id', bookId).maybeSingle(),
+  ]);
   const total     = (allCopies || []).length;
   const available = (allCopies || []).filter(c => c.status === 'Available').length;
   const newStatus = available === 0 ? 'Borrowed' : 'Available';
+
+  // PERF: nothing changed -> skip the write, so no realtime event is
+  // broadcast to every open dashboard/catalog for a no-op update.
+  if (bookRow && Number(bookRow.copies) === total && bookRow.status === newStatus) {
+    return { total, available };
+  }
 
   // Only update columns confirmed in schema — avoid 400 from unknown columns
   const { error: updateErr } = await supabaseAdmin.from('books').update({
@@ -1196,6 +1204,13 @@ export default function BookManagement({ initialTab, focusNonce }) {
     setLoadingTx(false);
   }, [campusId]);
 
+  // PERF: rapid back-to-back scans collapse into one transactions reload.
+  const loadTxTimerRef = useRef(null);
+  const queueLoadTransactions = useCallback(() => {
+    clearTimeout(loadTxTimerRef.current);
+    loadTxTimerRef.current = setTimeout(() => { loadTransactions(); }, 1500);
+  }, [loadTransactions]);
+
   
   const loadPendingRequests = useCallback(async () => {
     setLoadingPending(true);
@@ -1469,7 +1484,10 @@ export default function BookManagement({ initialTab, focusNonce }) {
       }
 
 
-      const affectedBookIds = [...new Set([...allCopies.map(c => c.book_id)])];
+      // PERF: only re-sync books that actually had a stale copy fixed above
+      // (previously every book in the system was re-read and re-written on
+      // every page open).
+      const affectedBookIds = [...new Set(stale.map(c => c.book_id))];
       for (const bookId of affectedBookIds) {
         await syncBooksFromCopies(bookId);
       }
@@ -1924,7 +1942,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
               showToast(`Borrowed: "${bookTitle}" — ${student.full_name}`, 'success');
               setTransactions(prev => [result, ...prev]);
               setStep(0); setStudent(null); processingRef.current = false;
-              loadTransactions(); return;
+              queueLoadTransactions(); return;
             }
             console.error('[BookScan] Retry also failed:', retryErr);
           }
@@ -1984,7 +2002,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
         setTransactions(prev => prev.map(t => t.id === existingBorrow.id ? { ...t, ...result } : t));
       }
 
-      loadTransactions();
+      queueLoadTransactions();
 
     } catch (err) {
       console.error('[BookScan] Unexpected error:', err);
@@ -1995,7 +2013,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
 
     setStep(0); setStudent(null);
     processingRef.current = false;
-  }, [student, showToast, loadTransactions, campusId]);
+  }, [student, showToast, loadTransactions, queueLoadTransactions, campusId]);
 
   const handleKeyDown = useCallback((e) => {
     if (e.ctrlKey || e.altKey || e.metaKey) return;

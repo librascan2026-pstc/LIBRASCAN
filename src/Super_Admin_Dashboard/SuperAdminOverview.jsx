@@ -361,6 +361,42 @@ export default function SuperAdminOverview() {
     async function load() {
       setLoading(true);
       try {
+        // PERF: let the database count (see database_superadmin_counts.sql)
+        // instead of downloading every profile and book. If the function has
+        // not been created yet, or anything looks off, fall through to the
+        // original full-table path below, which is unchanged.
+        try {
+          const [{ data: cs, error: cErr }, { data: agg, error: aErr }] = await Promise.all([
+            supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active, logo_url'),
+            supabaseAdmin.rpc('superadmin_overview_counts'),
+          ]);
+          if (!cErr && !aErr && agg && Array.isArray(agg.campuses)) {
+            const byId = {};
+            agg.campuses.forEach(r => { byId[String(r.campus_id)] = r; });
+            const list = cs || [];
+            setStats({
+              totalCampuses:   list.length,
+              totalStudents:   Number(agg.total_students)   || 0,
+              totalBooks:      Number(agg.total_books)      || 0,
+              totalLibrarians: Number(agg.total_librarians) || 0,
+              totalEmployees:  Number(agg.total_employees)  || 0,
+            });
+            setCampuses(list.map(c => {
+              const r = byId[String(c.id)] || {};
+              return {
+                ...c,
+                students:   Number(r.students)   || 0,
+                books:      Number(r.books)      || 0,
+                pending:    Number(r.pending)    || 0,
+                librarians: Number(r.librarians) || 0,
+                employees:  Number(r.employees)  || 0,
+              };
+            }));
+            setLoading(false);
+            return;
+          }
+        } catch { /* fall back to the original path below */ }
+
         // Supabase returns at most 1000 rows per request, which would silently
         // cap the counts below on larger campuses — so page through profiles.
         const fetchAllProfiles = async () => {
