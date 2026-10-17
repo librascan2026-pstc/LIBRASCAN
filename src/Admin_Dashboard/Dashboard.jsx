@@ -43,12 +43,23 @@ const NOTIF_MAX = 100; // how many rows of each type to fetch/keep in the live b
 // records and are never turned into a notification (see Attendance tab).
 const NOTIF_TYPES = {
   BORROW_REQUEST:  { label: 'Borrow Request', color: '#B08D3E' },
+  BOOK_BORROWED:   { label: 'Borrowed',       color: '#A8672E' },
   BOOK_RETURNED:   { label: 'Returned',       color: '#3B5878' },
   NEW_USER:        { label: 'New User',       color: '#3E6E6B' },
   SYSTEM_ALERT:    { label: 'System',         color: '#9C5A2E' },
   REGISTRATION_APPROVED: { label: 'Registration Approved', color: '#3F6B4A' },
   REGISTRATION_REJECTED: { label: 'Registration Rejected', color: '#8B3A3A' },
 };
+
+// Notifications that mirror a toast look like that toast: green = success, red = error.
+const TOAST_NOTIF_INFO = {
+  success: { label: 'Success', color: '#2E7D32' },
+  error:   { label: 'Error',   color: '#C0392B' },
+};
+function getNotifTypeInfo(n) {
+  if (n?.extra?.source === 'toast') return n.extra.isError ? TOAST_NOTIF_INFO.error : TOAST_NOTIF_INFO.success;
+  return NOTIF_TYPES[n?.type] || NOTIF_TYPES.BORROW_REQUEST;
+}
 
 
 function buildNotification({ id, type, title, message, createdAt, extra = {} }) {
@@ -66,12 +77,14 @@ function buildNotification({ id, type, title, message, createdAt, extra = {} }) 
 //             practice (every case below now resolves to a target so
 //             every notification is clickable).
 function getNotifTarget(n) {
+  if (n?.extra?.source === 'toast') return null; // a toast has nothing to open — clicking just marks it read
   const extra = n?.extra || {};
   switch (n?.type) {
     case 'BORROW_REQUEST':
       return extra.borrowId != null
         ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'pending', focusProp: 'focusBorrowId', focusValue: extra.borrowId }
         : { kind: 'area', tab: 'bookmanage', bookManageTab: 'pending' };
+    case 'BOOK_BORROWED':
     case 'BOOK_RETURNED':
       return extra.borrowingId != null
         ? { kind: 'exact', tab: 'bookmanage', bookManageTab: 'history', focusProp: 'focusBorrowingId', focusValue: extra.borrowingId }
@@ -731,6 +744,55 @@ export default function Dashboard({ user, onSignOut }) {
     addNotifications(newNotifs, isRealtime);
   }, [addNotifications, showInitialBatch, campusId]);
 
+  // Books checked out at the front desk -- the counterpart of the returns
+  // above. Same `borrowings` table, same borrowingId reference, so a Borrowed
+  // and a Returned notification for one transaction both open that exact row
+  // in Transaction History.
+  const isFirstBorrowLoad = useRef(true);
+  const fetchRecentBorrows = useCallback(async (isRealtime = false) => {
+    let q = supabaseAdmin
+      .from('borrowings')
+      .select('id, student_name, book_title, borrowed_at, status, campus_id')
+      .not('borrowed_at', 'is', null)
+      .order('borrowed_at', { ascending: false })
+      .limit(NOTIF_MAX);
+    if (campusId) q = q.eq('campus_id', campusId);
+    const { data, error } = await q;
+
+    if (error) { console.error('[Dashboard] borrows fetch error:', error.message); return; }
+
+    const rows = data || [];
+
+    if (isFirstBorrowLoad.current) {
+      rows.forEach(r => seenIdsRef.current.add(`book_bor_${r.id}`));
+      isFirstBorrowLoad.current = false;
+      const recentNotifs = rows.map(r => buildNotification({
+        id:        `book_bor_${r.id}`,
+        type:      'BOOK_BORROWED',
+        title:     'Book Borrowed',
+        message:   `"${r.book_title || 'A book'}" was borrowed by ${r.student_name || 'a student'}.`,
+        createdAt: r.borrowed_at,
+        extra:     { borrowingId: r.id },
+      }));
+      showInitialBatch(recentNotifs);
+      return;
+    }
+
+    const newRows = rows.filter(r => !seenIdsRef.current.has(`book_bor_${r.id}`));
+    if (!newRows.length) return;
+
+    const newNotifs = newRows.map(r => buildNotification({
+      id:        `book_bor_${r.id}`,
+      type:      'BOOK_BORROWED',
+      title:     'Book Borrowed',
+      message:   `"${r.book_title || 'A book'}" was borrowed by ${r.student_name || 'a student'}.`,
+      createdAt: r.borrowed_at,
+      extra:     { borrowingId: r.id },
+    }));
+
+    addNotifications(newNotifs, isRealtime);
+  }, [addNotifications, showInitialBatch, campusId]);
+
   // NOTE: Scanner/check-in activity (attendance_logs) is intentionally NOT
   // turned into a notification. QR check-ins/check-outs stay attendance
   // records only — see AttendanceMonitoring.jsx — and are never added to
@@ -837,6 +899,7 @@ export default function Dashboard({ user, onSignOut }) {
       fetchPendingRequests(false);
       fetchRecentNewUsers(false);
       fetchRecentReturns(false);
+      fetchRecentBorrows(false);
       fetchRecentRegistrationDecisions(false);
       fetchSecurityAlertNotifs(false);
     };
@@ -903,6 +966,22 @@ export default function Dashboard({ user, onSignOut }) {
             })], true);
           }
           fetchRecentNewUsers(true);
+        })
+        .on('postgres_changes', {
+          event: 'INSERT', schema: 'public', table: 'borrowings',
+        }, (payload) => {
+          const r = payload?.new;
+          if (r && r.borrowed_at && (!campusId || r.campus_id === campusId)) {
+            addNotifications([buildNotification({
+              id:        `book_bor_${r.id}`,
+              type:      'BOOK_BORROWED',
+              title:     'Book Borrowed',
+              message:   `"${r.book_title || 'A book'}" was borrowed by ${r.student_name || 'a student'}.`,
+              createdAt: r.borrowed_at,
+              extra:     { borrowingId: r.id },
+            })], true);
+          }
+          fetchRecentBorrows(true);
         })
         .on('postgres_changes', {
           event: 'UPDATE', schema: 'public', table: 'borrowings',
@@ -988,6 +1067,7 @@ export default function Dashboard({ user, onSignOut }) {
       fetchPendingRequests(true);
       fetchRecentNewUsers(true);
       fetchRecentReturns(true);
+      fetchRecentBorrows(true);
       fetchRecentRegistrationDecisions(true);
       fetchSecurityAlertNotifs(true);
     }, 15000);
@@ -998,7 +1078,7 @@ export default function Dashboard({ user, onSignOut }) {
       if (resubscribeTimer) clearTimeout(resubscribeTimer);
       if (ch) supabase.removeChannel(ch);
     };
-  }, [fetchPendingRequests, fetchRecentNewUsers, fetchRecentReturns, fetchRecentRegistrationDecisions, fetchSecurityAlertNotifs, addNotifications, removeNotifications, campusId, user?.id]);
+  }, [fetchPendingRequests, fetchRecentNewUsers, fetchRecentReturns, fetchRecentBorrows, fetchRecentRegistrationDecisions, fetchSecurityAlertNotifs, addNotifications, removeNotifications, campusId, user?.id]);
 
   // Optimistic: flip local state first (badge updates instantly), then
   // persist. Persistence here is localStorage (notificationHistory.js) —
@@ -1131,7 +1211,7 @@ export default function Dashboard({ user, onSignOut }) {
         : target.focusProp === 'focusBorrowingId' ? `borrowing:${target.focusValue}`
         : target.focusProp === 'focusUserId'      ? `user:${target.focusValue}`
         : null;
-      flashNotifTarget(hitKey, (NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST).color);
+      flashNotifTarget(hitKey, getNotifTypeInfo(n).color);
     }
 
     setNotifOpen(false);
@@ -1152,7 +1232,7 @@ export default function Dashboard({ user, onSignOut }) {
   // Shared row renderer — used for both the "New" and "Earlier" groups in
   // the dropdown list so the markup only exists in one place.
   const renderNotifRow = (n) => {
-    const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
+    const typeInfo = getNotifTypeInfo(n);
     const isUnread = !n.read;
     const target   = getNotifTarget(n);
     const canOpen  = !!target;
@@ -1373,7 +1453,7 @@ export default function Dashboard({ user, onSignOut }) {
               </div>
             ) : (
               rows.map((n, i) => {
-                const typeInfo = NOTIF_TYPES[n.type] || NOTIF_TYPES.BORROW_REQUEST;
+                const typeInfo = getNotifTypeInfo(n);
                 const isUnread = !n.read;
                 const target   = getNotifTarget(n);
                 const canOpen  = !!target;
@@ -1850,7 +1930,7 @@ export default function Dashboard({ user, onSignOut }) {
       </div>
 
       {deletedNotifToast && createPortal(
-        <div className="lm-notif-undo-toast" role="status">
+        <div key={deletedNotifToast.id} className="lm-notif-undo-toast" role="status">
           <span className="lm-notif-undo-text">
             {deletedNotifToast._bellOnly ? 'Notification dismissed' : 'Notification deleted'}
           </span>

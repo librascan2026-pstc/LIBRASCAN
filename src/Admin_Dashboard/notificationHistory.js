@@ -53,6 +53,9 @@ export const NOTIF_HISTORY_EVENT = 'librascan-notif-history-changed';
 // so we recognize the retired message shape directly and strip it out.
 const LEGACY_CHECKIN_PATTERN = /checked in at the library\.?\s*$/i;
 function isLegacyCheckIn(n) {
+  // Toast messages ("User updated successfully." …) are live feedback only —
+  // they are never kept in the bell / history, and any already saved are pruned.
+  if (n?.extra?.source === 'toast') return true;
   return typeof n?.message === 'string' && LEGACY_CHECKIN_PATTERN.test(n.message);
 }
 

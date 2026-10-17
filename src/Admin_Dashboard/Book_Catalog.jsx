@@ -3,6 +3,7 @@ import { supabase, supabaseAdmin } from '../supabaseClient';
 import QRCode from 'qrcode';
 import { extractAbstractText } from '../ocrClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { ToastCard, getToastDuration } from '../utils/toast';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
@@ -189,27 +190,7 @@ async function ensureBookCopies(book) {
 }
 
 function Toast({ message, type = 'success' }) {
-  if (!message) return null;
-  const colors = {
-    success: { bg: 'rgba(30,0,0,0.95)', border: 'rgba(201,168,76,0.40)', dot: '#81c784' },
-    error:   { bg: 'rgba(100,0,0,0.96)', border: 'rgba(239,154,154,0.40)', dot: '#ef9a9a' },
-  };
-  const c = colors[type] || colors.success;
-  return (
-    <div style={{
-      position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
-      background: c.bg, border: `1px solid ${c.border}`,
-      borderRadius: 12, padding: '13px 20px',
-      display: 'flex', alignItems: 'center', gap: 10,
-      fontFamily: 'var(--font-sans)', fontSize: 13, color: GP,
-      boxShadow: '0 10px 32px rgba(40,0,0,0.44)',
-      animation: 'lm-toast-in 0.3s cubic-bezier(0.34,1.56,0.64,1)',
-      maxWidth: 340,
-    }}>
-      <span style={{ width: 7, height: 7, borderRadius: '50%', background: c.dot, flexShrink: 0 }} />
-      {message}
-    </div>
-  );
+  return <ToastCard msg={message} isError={type === 'error'} />;
 }
 
 function StatusBadge({ status }) {
@@ -1547,7 +1528,7 @@ export default function Book_Catalog() {
   const showToast = (msg, type = 'success') => {
     setToast({ msg, type });
     clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast({ msg: '', type: 'success' }), 3200);
+    toastRef.current = setTimeout(() => setToast({ msg: '', type: 'success' }), getToastDuration(msg));
   };
 
   const fetchBooks = useCallback(async (showSpinner = true) => {
@@ -2033,7 +2014,33 @@ export default function Book_Catalog() {
         // Stored as Borrowed but no active loan actually references it —
         // almost always the sync issue called out elsewhere in this file.
         stale:       r.status === 'Borrowed' && !borrowedSet.has(r.copy_id),
-      })).sort((a, b) => (a.book?.title || '').localeCompare(b.book?.title || '') || a.copy_number - b.copy_number);
+      })).sort((a, b) => sortText(a.book?.title).localeCompare(sortText(b.book?.title)) || a.copy_number - b.copy_number);
+
+      // Auto-release: a copy still stored as Borrowed whose loan was already
+      // returned (no active borrowing references it) goes back to Available
+      // by itself — no "Mark Available" click needed. The active loans are
+      // re-checked right before writing so a copy that is being borrowed at
+      // this very moment is never released by mistake.
+      const staleRows = withStatus.filter(c => c.stale);
+      if (staleRows.length) {
+        try {
+          const { data: freshActive } = await supabaseAdmin.from('borrowings').select('copy_label').ilike('status', 'borrowed');
+          const freshSet = new Set((freshActive || []).map(r => r.copy_label));
+          const toRelease = staleRows.filter(c => !freshSet.has(c.copy_id));
+          if (toRelease.length) {
+            const ids = toRelease.map(c => c.copy_id);
+            const { error: relErr } = await supabaseAdmin
+              .from('book_copies').update({ status: 'Available' }).in('copy_id', ids).eq('status', 'Borrowed');
+            if (!relErr) {
+              const released = new Set(ids);
+              withStatus.forEach(c => { if (released.has(c.copy_id)) { c.status = 'Available'; c.stale = false; } });
+              for (const bId of [...new Set(toRelease.map(c => c.book_id))]) await recomputeBookAggregate(bId);
+            }
+          }
+        } catch (relEx) {
+          console.warn('[Inventory] auto-release skipped:', relEx.message);
+        }
+      }
 
       setCopies(withStatus);
 
@@ -2289,7 +2296,7 @@ export default function Book_Catalog() {
     const primary = cmp(getVal(a), getVal(b)) * dir;
     if (primary) return primary;
     // Ties: keep copies of the same book together, in copy order.
-    return cmp(a.book?.title || '', b.book?.title || '') || (a.copy_number - b.copy_number);
+    return cmp(sortText(a.book?.title), sortText(b.book?.title)) || (a.copy_number - b.copy_number);
   });
 
   const handleInvSort = (key) =>
@@ -3234,10 +3241,10 @@ function PendingRow({ book, idx, onView, onWithdraw, ActionBtn, Ic }) {
 
 // Column -> value used by the Inventory sorting (toolbar dropdown + clickable headers).
 const INV_SORT_FIELDS = {
-  title:  c => c.book?.title || '',
+  title:  c => sortText(c.book?.title),
   copy:   c => c.copy_number ?? 0,
   copyid: c => c.copy_id || '',
-  shelf:  c => c.book?.shelf_location || '',
+  shelf:  c => sortText(c.book?.shelf_location),
   status: c => c.status || '',
 };
 

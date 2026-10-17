@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { FloatingToast, getToastDuration } from '../utils/toast';
 
 const fmt      = (d, opts) => new Intl.DateTimeFormat('en-PH', opts).format(d);
 const fmtTime  = (d) => fmt(new Date(d), { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
@@ -14,6 +15,10 @@ const today    = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+
+// A student/visitor who was just logged cannot be logged again until this
+// much time has passed (prevents duplicate scans / spam).
+const SCAN_COOLDOWN_MS = 5 * 60 * 1000;
 
 function parseQR(raw) {
   if (!raw?.trim()) return null;
@@ -383,11 +388,11 @@ function ScanResult({ result, onDismiss }) {
   const isSuccess = result.type === 'success';
   const isWarn    = result.type === 'warn';
   const colors = {
-    bg:     isSuccess ? 'rgba(39,122,73,0.12)' : isWarn ? 'rgba(201,168,76,0.08)' : 'rgba(139,0,0,0.15)',
-    border: isSuccess ? 'rgba(39,122,73,0.38)'  : isWarn ? 'rgba(201,168,76,0.28)' : 'rgba(239,154,154,0.30)',
-    icon:   isSuccess ? '#4caf87' : isWarn ? '#C9A84C' : '#ef9a9a',
-    iconBg: isSuccess ? 'rgba(39,122,73,0.22)' : isWarn ? 'rgba(201,168,76,0.14)' : 'rgba(139,0,0,0.22)',
-    title:  isSuccess ? '#4caf87' : isWarn ? '#F5E4A8' : '#ef9a9a',
+    bg:     isSuccess ? '#E6F4EA' : isWarn ? '#FFF6DC' : '#FDE8E8',
+    border: isSuccess ? 'rgba(46,125,50,0.50)' : isWarn ? 'rgba(201,168,76,0.65)' : 'rgba(192,57,43,0.50)',
+    icon:   isSuccess ? '#2E7D32' : isWarn ? '#C9A227' : '#C0392B',
+    iconBg: 'transparent',
+    title:  isSuccess ? '#1E5B2B' : isWarn ? '#7A5200' : '#8B1A1A',
   };
   return (
     <div style={{
@@ -395,32 +400,30 @@ function ScanResult({ result, onDismiss }) {
       borderRadius: 12, padding: '16px 20px',
       display: 'flex', alignItems: 'flex-start', gap: 14,
       animation: 'am-slideUp 0.3s ease',
+      fontFamily: 'var(--font-sans)',
     }}>
-      <div style={{
-        width: 38, height: 38, borderRadius: 10, flexShrink: 0,
-        background: colors.iconBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-        color: colors.icon,
-      }}>
-        {isSuccess ? Ic.check : Ic.warn}
-      </div>
+      <span style={{
+        width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
+        background: colors.icon, marginTop: 5,
+      }} />
       <div style={{ flex: 1 }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontSize: 14, color: colors.title, marginBottom: 4, letterSpacing: '0.03em' }}>
+        <div style={{ fontFamily: 'var(--font-sans)', fontSize: 15, fontWeight: 700, color: colors.title, marginBottom: 4, letterSpacing: '0.02em' }}>
           {result.title}
         </div>
         {result.student && (
-          <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            <strong style={{ color: 'var(--text-primary)' }}>{result.student.full_name}</strong>
+          <div style={{ fontSize: 13.5, color: '#4A1717', lineHeight: 1.6 }}>
+            <strong style={{ color: '#2A0000' }}>{result.student.full_name}</strong>
             {result.student.id_no ? ` · ID ${result.student.id_no}` : ''}
             {result.student.program ? ` · ${result.student.program}` : ''}
           </div>
         )}
         {result.message && (
-          <div style={{ fontSize: 12, color: 'var(--text-dim)', marginTop: 3 }}>{result.message}</div>
+          <div style={{ fontSize: 12.5, color: '#5A2A2A', marginTop: 3, lineHeight: 1.5 }}>{result.message}</div>
         )}
       </div>
       <button onClick={onDismiss} style={{
         background: 'none', border: 'none', cursor: 'pointer',
-        color: 'var(--text-dim)', fontSize: 18,
+        color: '#7A3030', fontSize: 18,
         width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
         borderRadius: '50%', padding: 0, transition: 'color 0.15s',
       }}
@@ -996,6 +999,8 @@ export default function AttendanceMonitoring() {
   const [scannerFocused, setScannerFocused] = useState(true);
   const [delConfirm,  setDelConfirm]  = useState(null);
   const resultTimer                   = useRef(null);
+  const scanInFlight                  = useRef(new Set());   // scans currently being processed (blocks rapid double-fires)
+  const lastLoggedRef                 = useRef(new Map());   // id -> last successful log time (fallback if the DB check fails)
 
   // Tab bar: drag with the mouse to scroll left/right (touch swipe works natively).
   const tabsDragRef = useRef(null);
@@ -1088,14 +1093,56 @@ export default function AttendanceMonitoring() {
     return () => supabase.removeChannel(channel);
   }, [campusId]);
 
+  // Auto-dismiss the scan result: the longer the message, the longer it stays.
+  useEffect(() => {
+    if (!scanResult) return undefined;
+    const text = [scanResult.title, scanResult.student?.full_name, scanResult.message].filter(Boolean).join(' ');
+    const t = setTimeout(() => setScanResult(null), getToastDuration(text));
+    return () => clearTimeout(t);
+  }, [scanResult]);
+
   const handleScan = useCallback(async (raw) => {
     const parsed = parseQR(raw);
     if (!parsed) {
       setScanResult({ type: 'error', title: 'Invalid QR Code', message: 'Could not parse student data. Ensure the correct QR format is used.' });
-      clearTimeout(resultTimer.current);
-      resultTimer.current = setTimeout(() => setScanResult(null), 5000);
       return;
     }
+    // ── 5-minute cooldown ────────────────────────────────────────────────
+    // Identify the person by ID number (falls back to name when no ID).
+    const cooldownKey = (parsed.id_no || parsed.full_name).toLowerCase();
+    if (scanInFlight.current.has(cooldownKey)) return; // same scan still being saved
+    scanInFlight.current.add(cooldownKey);
+    try {
+      const nowMs = Date.now();
+      let lastMs = null;
+      try {
+        // Source of truth: the saved logs, so the cooldown also holds across
+        // page reloads and other scanner devices on the same campus.
+        const since = new Date(nowMs - SCAN_COOLDOWN_MS).toISOString();
+        let cq = supabase.from('attendance_logs').select('time_in')
+          .gte('time_in', since)
+          .order('time_in', { ascending: false }).limit(1);
+        cq = parsed.id_no ? cq.eq('id_no', parsed.id_no) : cq.eq('full_name', parsed.full_name);
+        if (campusId) cq = cq.eq('campus_id', campusId);
+        const { data: recent, error: recentErr } = await cq;
+        if (recentErr) throw recentErr;
+        lastMs = recent?.[0]?.time_in ? new Date(recent[0].time_in).getTime() : null;
+      } catch (checkErr) {
+        console.error('[Attendance] Cooldown check failed, using in-session record:', checkErr);
+        lastMs = lastLoggedRef.current.get(cooldownKey) ?? null;
+      }
+      if (lastMs != null && !Number.isNaN(lastMs) && nowMs - lastMs < SCAN_COOLDOWN_MS) {
+        const remainSec = Math.max(1, Math.ceil((SCAN_COOLDOWN_MS - (nowMs - lastMs)) / 1000));
+        const mm = Math.floor(remainSec / 60), ss = remainSec % 60;
+        setScanResult({
+          type: 'warn',
+          title: 'Already Logged',
+          student: parsed,
+          message: `Last logged at ${fmtTime(lastMs)}. Please wait ${mm > 0 ? `${mm}m ` : ''}${ss}s before scanning again.`,
+        });
+        return;
+      }
+
     const now    = new Date();
     const record = {
       id_no: parsed.id_no, full_name: parsed.full_name, program: parsed.program,
@@ -1116,12 +1163,14 @@ export default function AttendanceMonitoring() {
         }));
         return [data, ...prev];
       });
+      lastLoggedRef.current.set(cooldownKey, now.getTime());
       setScanResult({ type: 'success', title: `Attendance Logged — ${fmtTime(now)}`, student: parsed, message: `Time-in recorded at ${fmtTime(now)}` });
     } catch (err) {
       setScanResult({ type: 'error', title: 'Database Error', message: `Could not save record. ${err.message || ''}`, student: parsed });
     }
-    clearTimeout(resultTimer.current);
-    resultTimer.current = setTimeout(() => setScanResult(null), 6000);
+    } finally {
+      scanInFlight.current.delete(cooldownKey);
+    }
   }, [campusId]);
 
   const handleDelete = useCallback(async (id) => {
@@ -1169,11 +1218,9 @@ export default function AttendanceMonitoring() {
           <ScannerPanel onScan={handleScan} scannerReady={scannerReady} />
         </div>
 
-        {scanResult && (
-          <div style={{ marginBottom: 16 }}>
-            <ScanResult result={scanResult} onDismiss={() => setScanResult(null)} />
-          </div>
-        )}
+        <FloatingToast show={!!scanResult} toastKey={scanResult ? `${scanResult.title}|${scanResult.message}` : ''} radius={12}>
+          {scanResult ? <ScanResult result={scanResult} onDismiss={() => setScanResult(null)} /> : null}
+        </FloatingToast>
 
         <TodayTable
           records={records}

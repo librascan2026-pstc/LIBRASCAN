@@ -5,6 +5,7 @@ import {
   Briefcase, GraduationCap, Hash, Landmark, BookOpen, Camera,
 } from 'lucide-react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
+import { ToastCard, scheduleToastClear } from '../utils/toast';
 
 /* ── Empty-state illustration: soft halo, floating disc, blush people, gold "add" badge ── */
 function UsersEmptyIcon({ size = 96 }) {
@@ -567,13 +568,7 @@ const CSS = `
 `;
 
 function Toast({ msg, isErr }) {
-  if (!msg) return null;
-  return (
-    <div className="lbm-toast">
-      <span className="lbm-toast-dot" style={{ background: isErr ? DANGER : SUCCESS }} />
-      {msg}
-    </div>
-  );
+  return <ToastCard msg={msg} isError={isErr} />;
 }
 
 /* ── Account rules (mirrors the Admin portal's User Management) ─────────── */
@@ -1171,7 +1166,7 @@ export default function UserManagement() {
   const [campusFilter, setCampusFilter] = useState('all');
   const [page,       setPage]       = useState(1);
 
-  const showToast = (msg, isErr = false) => { setToast({ msg, isErr }); setTimeout(() => setToast({ msg: '', isErr: false }), 4500); };
+  const showToast = (msg, isErr = false) => { setToast({ msg, isErr }); scheduleToastClear('lbm', msg, () => setToast({ msg: '', isErr: false })); };
 
   const load = useCallback(async () => {
     setLoading(true);

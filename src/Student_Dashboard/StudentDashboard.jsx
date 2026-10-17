@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '../supabaseClient';
 import { searchOpenLibrary } from '../utils/openLibraryApi';
+import { ToastCard, getToastDuration } from '../utils/toast';
 import {
   getNotifPrefs,
   setNotifPref,
@@ -386,6 +387,19 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
   box-shadow:0 4px 20px rgba(80,0,0,.06);
 }
 .sdb-settings-panel > .sdb-stabs { margin-bottom:22px; }
+/* History page: the tab bar is wrapped so the date picker (+ visit total) can sit on the tab row,
+   vertically centred between the panel's top border (22px padding) and the tab underline.
+   Same spacing as the plain tab bar above. */
+.sdb-hist-tabrow { position:relative; }
+.sdb-hist-tabrow > .sdb-stabs { margin-bottom:22px; }
+.sdb-hist-datebar {
+  position:absolute; right:0; top:calc(50% - 17.5px - 11px); z-index:2;
+  display:flex; align-items:center; gap:10px;
+}
+@media (max-width:820px) {
+  .sdb-hist-datebar { position:static; justify-content:flex-end; margin:0 0 14px; }
+}
+@media (max-width:640px) { .sdb-hist-tabrow > .sdb-stabs { margin-bottom:16px; } }
 /* PageProfile renders its own .sdb-module wrapper — neutralize its
    max-width/margin/padding only when it lands inside this framed panel,
    so the profile tab's content still fits flush inside the one border
@@ -2026,46 +2040,82 @@ html { scrollbar-width:auto; scrollbar-color:var(--maroon-mid) var(--bg-base); }
 .lm-notif-menu-item--danger { color: #8B3A3A; }
 .lm-notif-menu-item--danger:hover { background: rgba(139,58,58,0.12); color: #7A3030; }
 
-/* "Notification deleted" undo toast — bottom-right of the screen */
+/* "Notification deleted" undo toast — same look as the page toasts (green card, top-right) */
 .lm-notif-undo-toast {
   position: fixed;
-  right: 28px;
-  bottom: 28px;
+  top: calc(24px + env(safe-area-inset-top, 0px));
+  right: 16px;
+  bottom: auto;
   display: flex;
   align-items: center;
-  gap: 14px;
-  background: #2A1414;
-  color: #F5ECE0;
-  padding: 12px 16px;
-  border-radius: 10px;
-  box-shadow: 0 12px 30px rgba(0,0,0,0.35);
-  font-family: var(--font-sans);
-  font-size: 12.5px;
-  z-index: 3000;
-  animation: lm-notif-undo-in 0.2s ease both;
+  gap: 10px;
+  box-sizing: border-box;
+  max-width: min(440px, calc(100vw - 32px));
+  background: #E6F4EA;
+  color: #1E5B2B;
+  border: 1px solid rgba(46,125,50,0.50);
+  padding: 14px 22px;
+  border-radius: 12px;
+  box-shadow: 0 14px 36px rgba(30,40,30,0.20);
+  font-family: var(--font-sans, system-ui, sans-serif);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.5;
+  z-index: 99999;
+  opacity: 0;
+  /* same fade-in as the page toasts, then fades out just before the 6s undo window closes */
+  animation:
+    lm-notif-undo-in 260ms ease forwards,
+    lm-notif-undo-out 360ms ease 5640ms forwards;
+}
+.lm-notif-undo-toast::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2E7D32;
+  flex-shrink: 0;
 }
 @keyframes lm-notif-undo-in {
-  0%   { opacity: 0; transform: translateY(10px); }
+  0%   { opacity: 0; transform: translateY(-12px); }
   100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes lm-notif-undo-out {
+  0%   { opacity: 1; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(-8px); }
 }
 .lm-notif-undo-text { white-space: nowrap; }
 .lm-notif-undo-btn {
   background: none;
   border: none;
-  color: #E8C77A;
+  color: #1E5B2B;
+  font-family: inherit;
   font-weight: 700;
-  font-size: 12.5px;
+  font-size: 13px;
+  text-decoration: underline;
   cursor: pointer;
   padding: 2px 4px;
+  margin-left: 6px;
   white-space: nowrap;
 }
-.lm-notif-undo-btn:hover { text-decoration: underline; }
+.lm-notif-undo-btn:hover { color: #14421E; }
 @media (max-width: 560px) {
   .lm-notif-undo-toast {
     left: 12px;
     right: 12px;
-    bottom: 16px;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    bottom: auto;
+    max-width: none;
   }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lm-notif-undo-toast {
+    animation:
+      lm-notif-undo-fade-in 260ms ease forwards,
+      lm-notif-undo-fade-out 360ms ease 5640ms forwards;
+  }
+  @keyframes lm-notif-undo-fade-in  { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes lm-notif-undo-fade-out { from { opacity: 1; } to { opacity: 0; } }
 }
 
 
@@ -2634,7 +2684,13 @@ const STUDENT_DUE_STAGE_INFO = {
   today:   { label: 'Due Today', color: '#C2570C' },
   overdue: { label: 'Overdue',   color: '#B23A3A' },
 };
+// Notifications that mirror a toast look like that toast: green = success, red = error.
+const TOAST_NOTIF_INFO = {
+  success: { label: 'Success', color: '#2E7D32' },
+  error:   { label: 'Error',   color: '#C0392B' },
+};
 function getStudentNotifTypeInfo(n) {
+  if (n?.extra?.source === 'toast') return n.extra.isError ? TOAST_NOTIF_INFO.error : TOAST_NOTIF_INFO.success;
   const base = STUDENT_NOTIF_TYPES[n?.type] || STUDENT_NOTIF_TYPES.SYSTEM_ALERT;
   if (n?.type !== 'DUE_DATE_REMINDER') return base;
   const id = String(n?.id || '');
@@ -2749,6 +2805,7 @@ function saveNewArrivalSeen(uid, set) {
 }
 
 function getStudentNotifTarget(n) {
+  if (n?.extra?.source === 'toast') return null; // a toast has nothing to open — clicking just marks it read
   switch (n?.type) {
     case 'BORROW_APPROVED':
     case 'BORROW_CANCELLED':
@@ -3049,17 +3106,7 @@ function availCfg(copies) {
 
 /* Toast */
 function Toast({ msg, isError }) {
-  if (!msg) return null;
-  return (
-    <div className="sdb-toast" style={{
-      background: isError ? 'rgba(100,0,0,.96)' : 'rgba(30,0,0,.95)',
-      border: `1px solid ${isError ? 'rgba(239,154,154,.40)' : 'rgba(201,168,76,.35)'}`,
-      color: '#F5E4A8',
-    }}>
-      <span className="sdb-toast-dot" style={{ background: isError ? '#ef9a9a' : '#81c784' }} />
-      {msg}
-    </div>
-  );
+  return <ToastCard msg={msg} isError={isError} />;
 }
 
 /* Badge */
@@ -3148,6 +3195,15 @@ function Modal({ maxWidth = 520, onClose, children }) {
   );
 }
 
+/* Every toast is also announced here so the bell + Notification History can record it
+   (listener lives in the main dashboard component). */
+const TOAST_NOTIF_EVENT = 'librascan-toast-shown';
+function announceToast(msg, isError) {
+  try {
+    window.dispatchEvent(new CustomEvent(TOAST_NOTIF_EVENT, { detail: { msg, isError: !!isError } }));
+  } catch { /* non-browser environment */ }
+}
+
 /* useToast hook */
 function useToast() {
   const [toast, setToast] = useState({ msg:'', isError:false });
@@ -3155,7 +3211,8 @@ function useToast() {
   const show = useCallback((msg, isError = false) => {
     setToast({ msg, isError });
     clearTimeout(ref.current);
-    ref.current = setTimeout(() => setToast({ msg:'', isError:false }), 3200);
+    ref.current = setTimeout(() => setToast({ msg:'', isError:false }), getToastDuration(msg));
+    announceToast(msg, isError);
   }, []);
   return { toast, show };
 }
@@ -3616,7 +3673,7 @@ function PageHome({ user, profile, onNavigate }) {
           </div>
         </div>
       </div>
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </div>
   );
 }
@@ -4123,7 +4180,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
         </Modal>
       )}
 
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </div>
     </>
   );
@@ -4292,7 +4349,7 @@ function PageFavorites({ user, onNavigate }) {
           </div>
         </Modal>
       )}
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </div>
     </>
   );
@@ -4301,7 +4358,7 @@ function PageFavorites({ user, onNavigate }) {
 /* ═══════════════════════════════════════════════════════
    PAGE: BORROWING HISTORY
 ═══════════════════════════════════════════════════════ */
-function PageHistory({ user }) {
+function PageHistory({ user, embedded = false, dateFilter = '' }) {
   const [rows,    setRows]    = useState([]);
   const [loading, setLoading] = useState(true);
   const [search,  setSearch]  = useState('');
@@ -4462,16 +4519,12 @@ function PageHistory({ user }) {
 
   const filtered = rows.filter(r=>{
     const q = search.toLowerCase();
-    return (!q||(r.book_title||'').toLowerCase().includes(q)) && (!statusF||effectiveStatus(r)===statusF);
+    return (!q||(r.book_title||'').toLowerCase().includes(q)) && (!statusF||effectiveStatus(r)===statusF)
+      && (!dateFilter || localDayKey(r.created_at) === dateFilter);
   });
 
-  return (
+  const historyBody = (
     <>
-      <PageHero title="Borrowing History" sub="Track what you borrowed, due dates, and return status." />
-      <div className="sdb-module sdb-cat-module">
-
-      <div className="sdb-cat-panel">
-      <div className="sdb-hist-inner">
       <div className="sdb-filters">
         <div className="sdb-search-wrap">
           <span className="sdb-search-icon">{Ic.search}</span>
@@ -4539,10 +4592,250 @@ function PageHistory({ user }) {
           </tbody>
         </table>
       </div>
+    </>
+  );
+
+  // Student portal embeds this inside the tabbed History page (hero + panel supplied by the parent).
+  if (embedded) {
+    return (
+      <>
+        {historyBody}
+        <Toast msg={toast.msg} isError={toast.isError} />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <PageHero title="Borrowing History" sub="Track what you borrowed, due dates, and return status." />
+      <div className="sdb-module sdb-cat-module">
+
+      <div className="sdb-cat-panel">
+      <div className="sdb-hist-inner">
+      {historyBody}
       </div>
       </div>
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </div>
+    </>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════
+   PAGE: HISTORY (students only) — Book History + Visit Log History tabs
+   Employees keep the original PageHistory above, unchanged.
+═══════════════════════════════════════════════════════ */
+
+// Normalise an ID for exact, case-insensitive comparison.
+const normId = (v) => String(v ?? '').trim().toLowerCase();
+const localDayKey = (iso) => {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// "2026-10-01" -> "Oct 1, 2026" (parsed as local, not UTC)
+const prettyDayKey = (k) => {
+  const [y, m, d] = String(k).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Calendar-icon date filter — same behaviour as the librarian's Visitor History picker:
+// click the icon to open the native calendar; picking a day filters to that day only.
+function HistoryDateFilter({ value, onChange }) {
+  const inputRef = useRef(null);
+  const openPicker = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    try {
+      if (typeof el.showPicker === 'function') { el.showPicker(); return; }
+    } catch { /* fall through to focus/click */ }
+    el.focus();
+    el.click();
+  };
+  const btn = {
+    height: 35, borderRadius: 9, cursor: 'pointer', background: 'var(--cream-light)',
+    fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600, color: 'var(--maroon)',
+  };
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      <button
+        type="button" onClick={openPicker}
+        title={value ? `Showing ${prettyDayKey(value)} — click to change` : 'Filter by date'}
+        aria-label={value ? `Filtering by ${prettyDayKey(value)}. Change date` : 'Filter by date'}
+        style={{
+          ...btn, display: 'inline-flex', alignItems: 'center', gap: 6, padding: '0 12px', whiteSpace: 'nowrap',
+          border: value ? '1.5px solid #C9A84C' : '1.5px solid rgba(139,0,0,0.18)',
+          boxShadow: value ? '0 0 0 2px rgba(201,168,76,0.35)' : 'none',
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        {value && <span>{prettyDayKey(value)}</span>}
+      </button>
+      {value && (
+        <button
+          type="button" onClick={() => onChange('')} title="Clear date" aria-label="Clear date filter"
+          style={{ ...btn, width: 30, border: '1.5px solid rgba(139,0,0,0.18)', fontSize: 15, fontWeight: 700, lineHeight: 1 }}
+        >×</button>
+      )}
+      <input
+        ref={inputRef} type="date" value={value} tabIndex={-1} aria-hidden="true"
+        onChange={e => onChange(e.target.value)}
+        style={{ position: 'absolute', left: 0, bottom: 0, width: 1, height: 1, opacity: 0, pointerEvents: 'none', border: 0, padding: 0 }}
+      />
+    </div>
+  );
+}
+
+function PageVisitLogs({ user, dateFilter = '', onCountChange }) {
+  const [rows,    setRows]    = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [noNumber, setNoNumber] = useState(false);
+  const [studentNumber, setStudentNumber] = useState(null);
+
+  // 1) Resolve the logged-in student's own student number (never taken from user input).
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.id) { setLoading(false); return undefined; }
+    (async () => {
+      try {
+        const { data: prof, error } = await supabase.from('profiles')
+          .select('student_number').eq('id', user.id).maybeSingle();
+        if (error) console.error('[VisitLogs] profile lookup failed:', error);
+        const num = prof?.student_number ? String(prof.student_number).trim() : '';
+        if (cancelled) return;
+        if (!num) { setNoNumber(true); setRows([]); setLoading(false); return; }
+        setNoNumber(false);
+        setStudentNumber(num);
+      } catch (e) {
+        console.error('[VisitLogs] profile lookup failed:', e);
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
+
+  // 2) Load only this student's visits (matched on attendance_logs.id_no) + live updates.
+  useEffect(() => {
+    if (!studentNumber) return undefined;
+    let cancelled = false;
+    const mine = (r) => normId(r?.id_no) === normId(studentNumber);   // client-side guard: exact match only
+    const likeSafe = studentNumber.replace(/[\\%_]/g, m => `\\${m}`);
+
+    (async () => {
+      setLoading(true);
+      try {
+        const { data, error } = await supabase.from('attendance_logs')
+          .select('id,id_no,full_name,program,time_in,date,status')
+          .ilike('id_no', likeSafe)                 // exact, case-insensitive (wildcards escaped)
+          .order('time_in', { ascending: false })
+          .limit(1000);
+        if (error) throw error;
+        if (!cancelled) setRows((data || []).filter(mine));
+      } catch (e) {
+        console.error('[VisitLogs] load failed:', e);
+        if (!cancelled) setRows([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    const ch = supabase.channel(`student-visit-logs-${user?.id}`)
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'attendance_logs', filter: `id_no=eq.${studentNumber}` },
+        (payload) => {
+          if (!mine(payload.new)) return;
+          setRows(prev => prev.some(r => r.id === payload.new.id) ? prev : [payload.new, ...prev]);
+        })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'attendance_logs' },
+        (payload) => setRows(prev => prev.filter(r => r.id !== payload.old?.id)))
+      .subscribe();
+
+    return () => { cancelled = true; supabase.removeChannel(ch); };
+  }, [studentNumber, user?.id]);
+
+  const filtered = rows.filter(r => !dateFilter || localDayKey(r.time_in) === dateFilter);
+
+  // Report the visit total to the tab row (hidden there while loading).
+  useEffect(() => {
+    if (onCountChange) onCountChange(loading ? null : filtered.length);
+  }, [loading, filtered.length, onCountChange]);
+  const visitStatus = (st) => (String(st || '').toLowerCase() === 'time-out'
+    ? { label:'Time Out', color:'#1D6FA5', bg:'rgba(59,130,246,.12)', border:'rgba(59,130,246,.28)' }
+    : { label:'Time In',  color:'#178A4C', bg:'rgba(34,197,94,.12)',  border:'rgba(34,197,94,.28)' });
+
+  return (
+    <>
+      <div className="sdb-table-wrap">
+        <table>
+          <thead><tr>
+            <th>Date</th>
+            <th>Time In</th>
+            <th>Program</th>
+            <th>Status</th>
+          </tr></thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={4}><Spinner /></td></tr>
+            ) : filtered.length === 0 ? (
+              <tr><td colSpan={4} style={{ textAlign:'center', padding:50, color:'var(--text-muted)', fontFamily:'var(--font-sans)' }}>
+                {noNumber
+                  ? 'No student number is set on your profile, so visit logs can’t be matched yet.'
+                  : rows.length === 0 ? 'No library visits recorded yet.' : 'No visits match the selected date.'}
+              </td></tr>
+            ) : filtered.map(r => (
+              <tr key={r.id}>
+                <td style={{ fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>{fmtDate(r.time_in)}</td>
+                <td style={{ fontFamily:'var(--font-sans)', whiteSpace:'nowrap' }}>{fmtTime(r.time_in)}</td>
+                <td style={{ fontFamily:'var(--font-sans)' }}>{r.program || '—'}</td>
+                <td><Badge {...visitStatus(r.status)} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function PageStudentHistory({ user }) {
+  const [histTab, setHistTab] = useState('books');
+  const [histDate, setHistDate] = useState('');   // shared by both tabs (local calendar day, YYYY-MM-DD)
+  const [visitCount, setVisitCount] = useState(null); // reported by the Visit Log tab (null while loading)
+  const HISTORY_TABS = [
+    { id:'books',  label:'Book History',      icon: Ic.borrowed },
+    { id:'visits', label:'Visit Log History', icon: Ic.clock    },
+  ];
+
+  return (
+    <>
+      <PageHero title="History" sub="Your book borrowing history and library visit logs." />
+      <div className="sdb-module sdb-cat-module">
+        <div className="sdb-settings-panel">
+          <div className="sdb-hist-tabrow">
+            <div className="sdb-stabs">
+              {HISTORY_TABS.map(t => (
+                <button
+                  key={t.id}
+                  className={`sdb-stab${histTab===t.id?' on':''}`}
+                  onClick={() => setHistTab(t.id)}
+                >
+                  {t.icon} {t.label}
+                </button>
+              ))}
+            </div>
+            <div className="sdb-hist-datebar">
+              {histTab === 'visits' && visitCount != null && (
+                <div className="sdb-count">{visitCount} visit{visitCount !== 1 ? 's' : ''}</div>
+              )}
+              <HistoryDateFilter value={histDate} onChange={setHistDate} />
+            </div>
+          </div>
+
+          {histTab === 'books'  && <PageHistory user={user} embedded dateFilter={histDate} />}
+          {histTab === 'visits' && <PageVisitLogs user={user} dateFilter={histDate} onCountChange={setVisitCount} />}
+        </div>
+      </div>
     </>
   );
 }
@@ -4793,7 +5086,7 @@ function PageProfile({ user, profile, onProfileUpdate }) {
           {Field({ label:'Email Address', fkey:'email',      type:'email', readOnly:true })}
         </div>
       </div>
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </div>
   );
 }
@@ -5234,7 +5527,7 @@ function PageSettings({ user, profile, onProfileUpdate, onSignOut }) {
       {/* Floating logout — same look/behavior as the Super Admin Settings page */}
       <SettingsLogoutFab onSignOut={onSignOut} />
 
-      {toast.msg && <Toast msg={toast.msg} isError={toast.isError} />}
+      <Toast msg={toast.msg} isError={toast.isError} />
     </>
   );
 }
@@ -6189,13 +6482,14 @@ export default function StudentDashboard({ user, onSignOut }) {
   const displayName = `${firstName} ${lastName}`.trim();
   const initials    = [firstName[0],lastName[0]].filter(Boolean).join('').toUpperCase()||'S';
   const avatarUrl   = profile?.avatar_url || null;
+  const isEmployee  = (profile?.role || user?.user_metadata?.role) === 'employee';
 
   const content = () => {
     switch(activeTab) {
       case 'home':      return <PageHome      user={user} profile={profile} onNavigate={navigate} />;
       case 'catalog':   return <PageCatalog   user={user} initialCategory={catalogCategory} initialCampus={catalogCampus} />;
       case 'favorites': return <PageFavorites user={user} onNavigate={navigate} />;
-      case 'history':   return <PageHistory   user={user} />;
+      case 'history':   return isEmployee ? <PageHistory user={user} /> : <PageStudentHistory user={user} />;
       case 'profile':   return <PageProfile   user={user} profile={profile} onProfileUpdate={setProfile} />;
       case 'settings':  return <PageSettings  user={user} profile={profile} onProfileUpdate={setProfile} onSignOut={()=>setShowLogout(true)} />;
       default:          return <PageHome      user={user} profile={profile} onNavigate={navigate} />;
@@ -6556,7 +6850,7 @@ export default function StudentDashboard({ user, onSignOut }) {
       )}
 
       {deletedNotifToast && createPortal(
-        <div className="lm-notif-undo-toast" role="status">
+        <div key={deletedNotifToast.id} className="lm-notif-undo-toast" role="status">
           <span className="lm-notif-undo-text">Notification deleted</span>
           <button type="button" className="lm-notif-undo-btn" onClick={undoDeleteStudentNotification}>
             Undo

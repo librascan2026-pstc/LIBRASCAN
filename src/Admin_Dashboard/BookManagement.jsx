@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { FloatingToast, getToastDuration, ToastCard, scheduleToastClear } from '../utils/toast';
 
 
 const BORROW_LIMIT = 3; 
@@ -262,7 +263,7 @@ function Badge({ status }) {
 }
 
 
-function Toast({ msg, type }) { return null; }
+function Toast({ msg, type }) { return <ToastCard msg={msg} isError={type === 'error'} />; }
 
 
 function StepDot({ n, active, done, label }) {
@@ -524,7 +525,7 @@ function ScanResultCard({ result }) {
       {!ok && (
         <div style={{ padding:'14px 18px' }}>
           <div style={{ display:'flex', alignItems:'flex-start', gap:8, padding:'11px 14px', borderRadius:10, background:'rgba(180,80,80,0.08)', border:`1px solid ${cfg.innerBorder}` }}>
-            <span style={{ color:'#8b3030', fontSize:14, flexShrink:0 }}>✕</span>
+            <span style={{ width:8, height:8, borderRadius:'50%', background:'#8b3030', flexShrink:0, marginTop:7 }} />
             <span style={{ fontSize:13, color:'#7a2a2a', fontFamily:'var(--font-sans)', lineHeight:1.65, fontWeight:500 }}>{result.message || 'Unknown error'}</span>
           </div>
         </div>
@@ -1159,17 +1160,21 @@ export default function BookManagement({ initialTab, focusNonce }) {
 
   const showToast = useCallback((msg, type='success') => {
     setToast({ msg, type });
-    setTimeout(() => setToast({ msg:'', type:'success' }), 3800);
+    scheduleToastClear('bm', msg, () => setToast({ msg:'', type:'success' }));
   }, []);
 
   const showResult = useCallback((result) => {
     if (resultTimerRef.current) clearTimeout(resultTimerRef.current);
     setLastResult(result);
     setResultVisible(true);
+    // On-screen time scales with how much there is to read.
+    const shownText = result?.type === 'success'
+      ? `${result.data?.book_title || ''} ${result.data?.student_name || ''}`
+      : (result?.message || '');
     resultTimerRef.current = setTimeout(() => {
       setResultVisible(false);
       setTimeout(() => setLastResult(null), 600);
-    }, 3400);
+    }, getToastDuration(shownText));
   }, []);
 
 
@@ -2437,21 +2442,9 @@ export default function BookManagement({ initialTab, focusNonce }) {
         )}
 
         
-        {lastResult && (
-          <div
-            key={lastResult.time?.getTime?.() ?? Math.random()}
-            style={{
-              padding:'0 28px 20px',
-              opacity: resultVisible ? 1 : 0,
-              transform: resultVisible ? 'translateY(0) scale(1)' : 'translateY(6px) scale(0.99)',
-              transition: resultVisible
-                ? 'opacity 0.45s cubic-bezier(0.22,1,0.36,1), transform 0.45s cubic-bezier(0.22,1,0.36,1)'
-                : 'opacity 0.55s ease, transform 0.55s ease',
-            }}
-          >
-            <ScanResultCard result={lastResult} />
-          </div>
-        )}
+        <FloatingToast show={resultVisible && !!lastResult} toastKey={lastResult?.time?.getTime?.()} radius={14}>
+          {lastResult ? <ScanResultCard result={lastResult} /> : null}
+        </FloatingToast>
 
         
         <div style={{
@@ -3072,7 +3065,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
         </div>
       )}
 
-      <Toast msg={toast.msg} type={toast.type} />
+      <Toast msg={activeTab === 'scanner' ? '' : toast.msg} type={toast.type} />
 
       <style>{`
         @keyframes bm-slideUp {

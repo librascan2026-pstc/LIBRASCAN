@@ -7,6 +7,7 @@ import {
   Landmark, School, Folder, Calendar, ShieldCheck,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
+import { ToastCard, scheduleToastClear } from '../utils/toast';
 
 /* ============================================================================
    LIBRASCAN — Campus Management Hub
@@ -943,22 +944,7 @@ function EmptyState({ hasCampuses, onAddCampus, onAddCourse, type = 'campus' }) 
 
 /* ─── Toast ─────────────────────────────────────────────────────────────── */
 function Toast({ msg, isErr }) {
-  return (
-    <motion.div
-      className="cmh-toast"
-      role="status"
-      initial={{ opacity: 0, y: 16, scale: 0.96 }}
-      animate={{ opacity: 1, y: 0, scale: 1 }}
-      exit={{ opacity: 0, y: 16, scale: 0.96 }}
-      transition={{ duration: 0.2 }}
-      style={{ borderColor: isErr ? 'rgba(239,68,68,0.35)' : BORDER }}
-    >
-      {isErr
-        ? <AlertTriangle size={16} color={DANGER} style={{ flexShrink: 0 }} />
-        : <CheckCircle2 size={16} color={SUCCESS} style={{ flexShrink: 0 }} />}
-      {msg}
-    </motion.div>
-  );
+  return <ToastCard msg={msg} isError={isErr} />;
 }
 
 /* ─── Confirm dialog ──────────────────────────────────────────────────────
@@ -1723,7 +1709,7 @@ export default function CampusManagementHub() {
 
   const showToast = (msg, isErr = false) => {
     setToast({ msg, isErr });
-    setTimeout(() => setToast({ msg: '', isErr: false }), 3500);
+    scheduleToastClear('cmh', msg, () => setToast({ msg: '', isErr: false }));
   };
 
   const load = useCallback(async () => {
@@ -2163,9 +2149,7 @@ export default function CampusManagementHub() {
       )}
 
       {/* Toast */}
-      <AnimatePresence>
-        {toast.msg && <Toast msg={toast.msg} isErr={toast.isErr} />}
-      </AnimatePresence>
+      <Toast msg={toast.msg} isErr={toast.isErr} />
 
       {/* Confirm dialog */}
       <AnimatePresence>

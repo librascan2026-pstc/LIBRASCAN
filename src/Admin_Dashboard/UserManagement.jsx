@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { ToastCard, scheduleToastClear } from '../utils/toast';
 
 const G  = '#C9A84C';
 const GP = '#F5E4A8';
@@ -90,26 +91,7 @@ function RoleBadge({ role }) {
 }
 
 function Toast({ message, isError }) {
-  if (!message) return null;
-  return (
-    <div style={{
-      position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
-      background: isError ? 'rgba(100,0,0,0.96)' : 'var(--maroon-deep)',
-      border: `1px solid ${isError ? 'rgba(239,154,154,0.40)' : 'rgba(201,168,76,0.35)'}`,
-      borderRadius: 12, padding: '13px 22px',
-      display: 'flex', alignItems: 'center', gap: 10,
-      fontFamily: 'var(--font-sans)', fontSize: 13, color: GP,
-      boxShadow: '0 10px 32px rgba(40,0,0,0.44)',
-      animation: 'lm-toast-in 0.3s cubic-bezier(0.34,1.56,0.64,1)',
-      maxWidth: 340,
-    }}>
-      <span style={{
-        width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-        background: isError ? '#ef9a9a' : '#81c784',
-      }} />
-      {message}
-    </div>
-  );
+  return <ToastCard msg={message} isError={isError} />;
 }
 
 // Custom dropdown used for the Department field. The native <select> popup is
@@ -742,7 +724,7 @@ export default function UserManagement({ onStatsRefresh }) {
 
   const showToast = (msg, isError = false) => {
     setToast(msg); setToastError(isError);
-    setTimeout(() => setToast(''), 3500);
+    scheduleToastClear('um', msg, () => setToast(''));
   };
 
   const loadUsers = useCallback(async () => {

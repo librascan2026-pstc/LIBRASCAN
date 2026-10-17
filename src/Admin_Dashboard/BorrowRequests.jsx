@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
+import { ToastCard, getToastDuration } from '../utils/toast';
 
 
 const G    = '#C9A84C';
@@ -308,7 +309,7 @@ export default function BorrowRequests({ onBadgeCount }) {
   const showBanner = (msg, ok = true) => {
     if (bannerTimer.current) clearTimeout(bannerTimer.current);
     setBanner({ msg, ok });
-    bannerTimer.current = setTimeout(() => setBanner(null), 3500);
+    bannerTimer.current = setTimeout(() => setBanner(null), getToastDuration(msg));
   };
 
 
@@ -462,17 +463,7 @@ export default function BorrowRequests({ onBadgeCount }) {
     <div style={{ fontFamily:'var(--font-sans)' }}>
 
    
-      {banner && (
-        <div style={{
-          margin:'0 0 16px', padding:'12px 18px', borderRadius:10,
-          background: banner.ok ? 'rgba(46,125,50,0.10)' : 'rgba(139,0,0,0.08)',
-          border:`1.5px solid ${banner.ok ? 'rgba(90,158,92,0.30)' : 'rgba(139,0,0,0.20)'}`,
-          color: banner.ok ? '#2e6b30' : MAR,
-          fontSize:13, fontWeight:600,
-        }}>
-          {banner.msg}
-        </div>
-      )}
+      <ToastCard msg={banner ? banner.msg : ''} isError={banner ? !banner.ok : false} />
 
   
       <div style={{

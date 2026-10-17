@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { supabase, supabaseAdmin } from '../supabaseClient';
 import { useAuth } from '../Login_SignUp/useAuth';
 import { getMfaStatus, enableMfa, disableMfa, forgetThisDevice, getSessions, revokeSession } from '../utils/mfaClient';
+import { ToastCard, scheduleToastClear } from '../utils/toast';
 import {
   getNotifPrefTypesForRole,
   getNotifPrefs,
@@ -887,16 +888,7 @@ const ROLES = {
 };
 
 function Toast({ msg, ok }) {
-  if (!msg) return null;
-  return (
-    <div className={`s-toast ${ok ? 'ok' : 'err'}`}>
-      {ok
-        ? <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2E7D32" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
-        : <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C0392B" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-      }
-      {msg}
-    </div>
-  );
+  return <ToastCard msg={msg} isError={!ok} />;
 }
 
 function RoleBadge({ role }) {
@@ -1769,7 +1761,7 @@ export default function Settings({ user, onSignOut }) {
 
   const toast = (msg, ok = true) => {
     setTMsg(msg); setTOk(ok);
-    setTimeout(() => setTMsg(''), 3500);
+    scheduleToastClear('settings', msg, () => setTMsg(''));
   };
 
   const TABS = [

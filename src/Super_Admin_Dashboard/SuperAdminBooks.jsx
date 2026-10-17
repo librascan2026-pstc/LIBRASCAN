@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
 import { notifyLibrariansOfRegistration } from './notifyLibrariansOfRegistration';
+import { ToastCard, scheduleToastClear } from '../utils/toast';
 
 /* ── Analog clock illustration (matches the "Nothing Pending" reference) ── */
 function AnalogClockIcon({ size = 64 }) {
@@ -852,7 +853,7 @@ export default function SuperAdminBooks() {
 
   const flashMsg = (type, text) => {
     setActionMsg({ type, text });
-    setTimeout(() => setActionMsg(null), 3200);
+    scheduleToastClear('sab', text, () => setActionMsg(null));
   };
 
   // Confirming registers the book into the live, campus-facing catalog.
@@ -1010,12 +1011,7 @@ export default function SuperAdminBooks() {
         </>
       )}
 
-      {actionMsg && (
-        <div className={`sab-action-banner ${actionMsg.type}`}>
-          {actionMsg.type === 'success' ? <Check size={15} /> : <Ban size={15} />}
-          {actionMsg.text}
-        </div>
-      )}
+      <ToastCard msg={actionMsg ? actionMsg.text : ''} isError={actionMsg ? actionMsg.type !== 'success' : false} />
 
       {loading ? (
         <div className="sab-shimmer sab-skel-table" />

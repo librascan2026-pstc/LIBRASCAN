@@ -24,6 +24,14 @@ export const NOTIF_PREF_TYPES = [
     roles: ['student'],
   },
   {
+    key:   'BOOK_BORROWED',
+    label: 'Book Borrowed',
+    desc:  'A book is borrowed from the library.',
+    icon:  'book',
+    color: '#E08E45',
+    roles: ['library_manager'],
+  },
+  {
     key:   'BOOK_RETURNED',
     label: 'Book Returned',
     desc:  'A borrowed book is checked back in to the library.',
