@@ -5,7 +5,7 @@ import {
   NAV_LINKS, SECTION_COPY, STAT_TARGETS, FEATURES, PORTALS,
   APP_SCREENSHOTS, FAQS, ADVISER, TEAM, CAMPUSES,
 } from './constants'
-import { QR_URL, IS_QR_A_LINK, QR_SIZE, QR_RECTS } from './qrData'
+import { QR_URL, QR_SIZE, QR_RECTS } from './qrData'
 import { supabase } from './supabaseClient'
 
 import { AuthProvider }            from './Login_SignUp/AuthContext'
@@ -370,7 +370,7 @@ function UnderConstructionModal({ onClose }) {
 // Renders a real link to the app build when one is available, otherwise a
 // button that opens the "under construction" notice.
 function AppLink({ className, label, onOpenApp, children }) {
-  if (IS_QR_A_LINK) {
+  if (QR_URL) {
     return (
       <a className={className} href={QR_URL} target="_blank" rel="noopener noreferrer" aria-label={label}>
         {children}
@@ -439,12 +439,12 @@ function HeroSection({ onNavClick, onGetStarted, onOpenApp }) {
               <div className="ls-badge__sub">Just now</div>
             </div>
 
-            <AppLink className="ls-qr__code" onOpenApp={onOpenApp}
-              label={IS_QR_A_LINK ? 'Open the LibraScan app download page' : 'App download is under construction'}>
+            <div className="ls-qr__code" role="img" aria-label="QR code. Scan it with your phone camera to open the LibraScan download page">
               <LiteralQRCode />
               <span className="ls-qr__scan" aria-hidden="true" />
-            </AppLink>
+            </div>
             <p className="ls-qr__caption">Scan to download the app</p>
+            <p className="ls-qr__url">download.psulibrascan.com</p>
 
             <div className="ls-badge ls-badge--br">
               <div className="ls-badge__title">Visitor Logged</div>
@@ -614,137 +614,109 @@ function BenefitsSection() {
   )
 }
 
-// ─── Application carousel (auto-running, draggable, arrows) ──────────────────
-function AppCarousel({ items }) {
-  const viewportRef = useRef(null)
-  const trackRef    = useRef(null)
-  const st = useRef({ pos: 0, vel: 0, dragging: false, paused: false, visible: true, lastX: 0, lastT: 0, anim: null })
-  const [dragging, setDragging] = useState(false)
+// ─── Android App card carousel ───────────────────────────────────────────────
+// Three lineups of cards (Student, Librarian, Super Admin). Every lineup starts
+// with application.png, followed by that portal's screenshots from constants.js.
+// The cards are always fanned out. Hover (mouse), tap (touch) or focus (keyboard)
+// brings a card to the front: it straightens and the others tilt away.
+const APP_DECKS = [
+  { id: 'student',    label: 'Student',     prefix: '/User' },
+  { id: 'librarian',  label: 'Librarian',   prefix: '/adminportal' },
+  { id: 'superadmin', label: 'Super Admin', prefix: '/superadmin' },
+].map((d) => ({
+  ...d,
+  shots: [
+    { src: '/application.png', alt: 'LibraScan app opening on a phone' },
+    ...APP_SCREENSHOTS.filter((s) => s.src.startsWith(d.prefix)),
+  ],
+}))
 
-  useEffect(() => {
-    const track = trackRef.current
-    const viewport = viewportRef.current
-    if (!track || !viewport) return
-    const s = st.current
-    // Always runs; people who prefer reduced motion get a calmer speed.
-    const SPEED = prefersReducedMotion() ? 22 : 40 // px per second
-    let raf
-    let last = performance.now()
-
-    let io
-    if (typeof IntersectionObserver !== 'undefined') {
-      io = new IntersectionObserver(([e]) => { s.visible = e.isIntersecting })
-      io.observe(viewport)
-    }
-
-    const tick = (now) => {
-      const dt = Math.min(now - last, 64)
-      last = now
-      const half = track.scrollWidth / 2
-      if (s.visible && half > 0) {
-        if (s.anim) {
-          const t = Math.min((now - s.anim.t0) / s.anim.dur, 1)
-          s.pos = s.anim.from + (s.anim.to - s.anim.from) * (1 - Math.pow(1 - t, 3))
-          if (t >= 1) s.anim = null
-        } else if (!s.dragging) {
-          if (Math.abs(s.vel) > 0.01) {
-            s.pos += s.vel * dt
-            s.vel *= Math.pow(0.92, dt / 16.7)
-          } else {
-            s.vel = 0
-            if (!s.paused) s.pos += (SPEED * dt) / 1000
-          }
-        }
-        // Seamless loop: the track holds the list twice, so wrap at half.
-        const wrapped = ((s.pos % half) + half) % half
-        const shift = wrapped - s.pos
-        if (shift) {
-          s.pos = wrapped
-          if (s.anim) { s.anim.from += shift; s.anim.to += shift }
-        }
-        track.style.transform = `translate3d(${-s.pos}px,0,0)`
-      }
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    return () => { cancelAnimationFrame(raf); io?.disconnect() }
-  }, [])
-
-  const onPointerDown = (e) => {
-    if (e.pointerType === 'mouse' && e.button !== 0) return
-    const s = st.current
-    s.dragging = true
-    s.anim = null
-    s.vel = 0
-    s.lastX = e.clientX
-    s.lastT = performance.now()
-    setDragging(true)
-    e.currentTarget.setPointerCapture?.(e.pointerId)
+// One card picture; shows the logo if the file is missing.
+function AppShot({ src, alt }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return (
+      <div className="ls-fan__fallback">
+        <img src="/LibraryLogo.png" alt="" draggable={false} />
+        <strong>LibraScan</strong>
+      </div>
+    )
   }
-  const onPointerMove = (e) => {
-    const s = st.current
-    if (!s.dragging) return
-    const now = performance.now()
-    const dx = e.clientX - s.lastX
-    const dt = Math.max(now - s.lastT, 1)
-    s.pos -= dx
-    s.vel = Math.max(-3, Math.min(3, 0.7 * s.vel + 0.3 * (-dx / dt)))
-    s.lastX = e.clientX
-    s.lastT = now
-  }
-  const endDrag = () => {
-    const s = st.current
-    if (!s.dragging) return
-    s.dragging = false
-    setDragging(false)
-    if (performance.now() - s.lastT > 90) s.vel = 0 // held still before release → no fling
-  }
+  return (
+    <img
+      className="ls-fan__photo"
+      src={src}
+      alt={alt}
+      loading="lazy"
+      draggable={false}
+      onError={() => setFailed(true)}
+    />
+  )
+}
 
-  const nudge = (dir) => {
-    const s = st.current
-    const kids = trackRef.current?.children
-    if (!kids) return
-    const step = kids.length > 1 ? kids[1].offsetLeft - kids[0].offsetLeft : 220
-    s.vel = 0
-    s.anim = { from: s.pos, to: s.pos + dir * step * 2, t0: performance.now(), dur: 650 }
-  }
+function AppCardCarousel() {
+  const [deck, setDeck]     = useState(0)
+  const [active, setActive] = useState(0)
+
+  const { id: deckId, label: deckLabel, shots } = APP_DECKS[deck]
+  const COUNT = shots.length
+
+  const select = (i) => setActive(i)
+  const chooseDeck = (i) => { setDeck(i); setActive(0) }
 
   const onKeyDown = (e) => {
-    if (e.key === 'ArrowRight') { e.preventDefault(); nudge(1) }
-    if (e.key === 'ArrowLeft')  { e.preventDefault(); nudge(-1) }
+    if (e.key === 'ArrowRight') { e.preventDefault(); select(Math.min(COUNT - 1, active + 1)) }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); select(Math.max(0, active - 1)) }
   }
 
   return (
-    <div className="ls-carousel" role="region" aria-roledescription="carousel" aria-label="App screenshots">
-      <button type="button" className="ls-carousel__arrow ls-carousel__arrow--prev" aria-label="Previous screenshots" onClick={() => nudge(-1)}>
-        <ChevronIcon dir="left" size={26} />
-      </button>
-
+    <div className="ls-fan-wrap">
       <div
-        ref={viewportRef}
-        className={`ls-carousel__viewport${dragging ? ' is-dragging' : ''}`}
-        tabIndex={0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
+        className="ls-fan"
+        role="region"
+        aria-roledescription="carousel"
+        aria-label={`LibraScan ${deckLabel} app screens`}
         onKeyDown={onKeyDown}
       >
-        <div ref={trackRef} className="ls-carousel__track">
-          {[...items, ...items].map((it, i) => {
-            const isClone = i >= items.length
-            return (
-              <figure key={i} className="ls-shot" aria-hidden={isClone || undefined}>
-                <img src={it.src} alt={isClone ? '' : it.alt} draggable={false} loading="lazy" />
-              </figure>
-            )
-          })}
-        </div>
+        {shots.map((s, i) => {
+          const isActive = i === active
+          const side = i < active ? -1 : i > active ? 1 : 0
+          const x = (i - (COUNT - 1) / 2) * 38 + side * 34
+          const r = side * (Math.abs(i - active) * 2.5 + 2)
+          const z = COUNT - Math.abs(i - active)
+          return (
+            <div
+              key={`${deckId}-${s.src}`}
+              className={`ls-fan__card${isActive ? ' is-active' : ''}${!isActive ? ' is-dim' : ''}`}
+              style={{ '--x': x, '--r': r, zIndex: z }}
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${i + 1} of ${COUNT}`}
+              tabIndex={0}
+              onPointerEnter={(e) => { if (e.pointerType === 'mouse') select(i) }}
+              onFocus={() => select(i)}
+              onClick={() => select(i)}
+            >
+              <AppShot src={s.src} alt={s.alt} />
+            </div>
+          )
+        })}
+        <p className="ls-fan__hint" aria-hidden="true">Hover or tap a card</p>
       </div>
 
-      <button type="button" className="ls-carousel__arrow ls-carousel__arrow--next" aria-label="Next screenshots" onClick={() => nudge(1)}>
-        <ChevronIcon dir="right" size={26} />
-      </button>
+      <div className="ls-fan__tabs" role="group" aria-label="Choose a portal">
+        {APP_DECKS.map((d, i) => (
+          <button
+            key={d.id}
+            type="button"
+            className={`ls-fan__tab${deck === i ? ' is-on' : ''}`}
+            aria-pressed={deck === i}
+            onClick={() => chooseDeck(i)}
+          >
+            {d.label}
+          </button>
+        ))}
+      </div>
     </div>
   )
 }
@@ -754,11 +726,24 @@ function ApplicationSection({ onOpenApp }) {
     <section id="application" className="ls-section ls-apps" aria-labelledby="application-title">
       <div className="ls-container ls-container--wide">
         <SectionHeading id="application-title" accent="Application" sub={SECTION_COPY.application} />
-        <Reveal index={1}>
-          <AppCarousel items={APP_SCREENSHOTS} />
-        </Reveal>
-        <Reveal index={2} className="ls-apps__cta">
-          <AppLink className="ls-install" onOpenApp={onOpenApp}>Install Mobile App</AppLink>
+        <Reveal index={1} className="ls-get">
+          <div className="ls-get__media">
+            <AppCardCarousel />
+          </div>
+          <div className="ls-get__body">
+            <span className="ls-get__eyebrow">Android App</span>
+            <h3 className="ls-get__title">Get LibraScan on your phone</h3>
+            <p className="ls-get__text">
+              Scan books, send borrow requests, and track due dates from your pocket.
+              Use the button to open the download page.
+            </p>
+            <div className="ls-get__actions">
+              <div className="ls-get__cta">
+                <AppLink className="ls-install" onOpenApp={onOpenApp}>Get My Mobile App</AppLink>
+                <span className="ls-get__url">download.psulibrascan.com</span>
+              </div>
+            </div>
+          </div>
         </Reveal>
       </div>
     </section>
