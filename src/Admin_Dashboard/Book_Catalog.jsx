@@ -195,14 +195,15 @@ function Toast({ message, type = 'success' }) {
 
 function StatusBadge({ status }) {
   const avail = status === 'Available';
+  const missing = status === 'Missing';
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
       padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
       fontFamily: 'var(--font-sans)',
-      background: avail ? 'rgba(46,125,50,0.10)' : 'rgba(198,40,40,0.10)',
-      color: avail ? '#5a9e5c' : '#c0564e',
-      border: `1px solid ${avail ? 'rgba(90,158,92,0.25)' : 'rgba(192,86,78,0.25)'}`,
+      background: avail ? 'rgba(46,125,50,0.10)' : (missing ? 'rgba(201,122,27,0.12)' : 'rgba(198,40,40,0.10)'),
+      color: avail ? '#5a9e5c' : (missing ? '#b8741a' : '#c0564e'),
+      border: `1px solid ${avail ? 'rgba(90,158,92,0.25)' : (missing ? 'rgba(201,122,27,0.32)' : 'rgba(192,86,78,0.25)')}`,
     }}>
       <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
       {status || 'Available'}
@@ -1459,12 +1460,105 @@ function DeleteModal({ book, loading, onClose, onConfirm }) {
   );
 }
 
+// Confirmation dialog for marking a single copy Missing / Found. Same look as DeleteModal.
+// Errors stay inside the dialog and it cannot be dismissed while the update is saving.
+function CopyStatusModal({ copy, action, busy, error, onClose, onConfirm }) {
+  const toMissing = action === 'missing';
+  const cancelRef = useRef(null);
+
+  useEffect(() => {
+    if (cancelRef.current) cancelRef.current.focus();
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [busy, onClose]);
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(10,0,0,0.78)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 1000, backdropFilter: 'blur(8px)',
+      animation: 'lm-fade-in 0.2s ease',
+    }}
+      onClick={e => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div style={{
+        background: 'var(--cream)', borderRadius: 20, width: '100%', maxWidth: 380,
+        border: '2px solid rgba(201,168,76,0.35)',
+        boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+        animation: 'lm-modal-in 0.28s cubic-bezier(0.34,1.56,0.64,1)',
+        overflow: 'hidden',
+      }}>
+        <div style={{
+          background: 'linear-gradient(135deg, #8B0000, #6B0000)',
+          padding: '18px 24px', borderBottom: '2px solid rgba(201,168,76,0.3)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: '#F5E4A8', fontWeight: 700 }}>
+              {toMissing ? 'Mark Copy as Missing' : 'Mark Copy as Found'}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'rgba(245,228,168,0.6)', fontFamily: 'var(--font-sans)', marginTop: 2 }}>
+              {toMissing ? 'It cannot be borrowed until it is found' : 'It will be available for borrowing again'}
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: '20px 24px' }}>
+          <div style={{
+            padding: '12px 14px', borderRadius: 10, marginBottom: error ? 12 : 18,
+            background: 'rgba(139,0,0,0.06)', border: '1px solid rgba(139,0,0,0.15)',
+            textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#1a0000', fontFamily: 'var(--font-sans)', marginBottom: 3 }}>{copy.book?.title || 'Untitled book'}</div>
+            <div style={{ fontSize: 12, color: '#6b4040', fontFamily: 'var(--font-sans)' }}>
+              Mark Copy #{copy.copy_number} as {toMissing ? 'Missing' : 'Found'}?
+            </div>
+          </div>
+          {error && (
+            <div role="alert" style={{
+              padding: '10px 12px', borderRadius: 10, marginBottom: 18, textAlign: 'center',
+              fontSize: 12, lineHeight: 1.5, fontFamily: 'var(--font-sans)', color: '#c0564e',
+              background: 'rgba(192,86,78,0.08)', border: '1px solid rgba(192,86,78,0.3)',
+            }}>{error}</div>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <button ref={cancelRef} onClick={onClose} disabled={busy} style={{
+              padding: '12px', borderRadius: 10, border: '1.5px solid rgba(139,0,0,0.2)',
+              background: 'transparent', cursor: busy ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600, color: '#8B0000',
+            }}>Cancel</button>
+            <button onClick={onConfirm} disabled={busy} style={{
+              padding: '12px', borderRadius: 10, border: 'none',
+              background: busy ? 'rgba(139,0,0,0.35)' : 'linear-gradient(135deg, #8B0000, #6B0000)',
+              cursor: busy ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 700, color: '#F5E4A8',
+              boxShadow: busy ? 'none' : '0 4px 14px rgba(139,0,0,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            }}>
+              {busy
+                ? <><span style={{ width: 12, height: 12, border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff', borderRadius: '50%', animation: 'lm-spin 0.65s linear infinite', display: 'inline-block' }}/> Saving…</>
+                : (error ? 'Try again' : (toMissing ? 'Mark Missing' : 'Mark Found'))}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Book_Catalog() {
   // Phase 9 — campus isolation
   const { profile } = useAuth();
   const campusId = profile?.campus_id ?? null;
 
   const [books, setBooks]         = useState([]);
+  // book_id -> number of copies marked Missing. Kept separate from `books` on purpose:
+  // book objects are spread into the save payload, so a new field there would hit the DB.
+  const [missingByBook, setMissingByBook] = useState({});
+  // Mark Missing / Found confirmation dialog: { copy, action: 'missing' | 'found' } or null.
+  const [copyStatusModal, setCopyStatusModal] = useState(null);
+  const [copyStatusBusy, setCopyStatusBusy]   = useState(false);
+  const [copyStatusError, setCopyStatusError] = useState(null);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
   const [genreFilter, setGenreFilter]   = useState('all');
@@ -1557,9 +1651,10 @@ export default function Book_Catalog() {
 
       const copiesMap = {};
       (copiesData || []).forEach(c => {
-        if (!copiesMap[c.book_id]) copiesMap[c.book_id] = { total: 0, available: 0 };
+        if (!copiesMap[c.book_id]) copiesMap[c.book_id] = { total: 0, available: 0, missing: 0 };
         copiesMap[c.book_id].total += 1;
         if (c.status === 'Available') copiesMap[c.book_id].available += 1;
+        if (c.status === 'Missing') copiesMap[c.book_id].missing += 1;
       });
 
       const bookIdSet = new Set((booksData || []).map(b => b.id));
@@ -1569,22 +1664,27 @@ export default function Book_Catalog() {
         borrowedCountMap[r.book_id] = (borrowedCountMap[r.book_id] || 0) + 1;
       });
 
+      const missingMap = {};
       const merged = (booksData || []).map(b => {
         const activeBorrowed = borrowedCountMap[b.id] || 0;
         const counts = copiesMap[b.id];
         const total = counts ? counts.total : (parseInt(b.copies) || 0);
+        const missingN = counts ? counts.missing : 0;
+        if (missingN > 0) missingMap[b.id] = missingN;
         // Never let "available" exceed what active borrowings say is actually out,
-        // even if book_copies.status wasn't updated correctly.
-        const available = Math.max(0, Math.min(counts ? counts.available : total, total - activeBorrowed));
+        // even if book_copies.status wasn't updated correctly. Missing copies are
+        // neither available nor out on loan.
+        const available = Math.max(0, Math.min(counts ? counts.available : total, total - missingN - activeBorrowed));
         if (!counts && !activeBorrowed) return b;
         return {
           ...b,
           copies:           total,
           available_copies: available,
-          status:           available > 0 ? 'Available' : (total > 0 ? 'Borrowed' : b.status),
+          status:           available > 0 ? 'Available' : (total > 0 ? ((missingN > 0 && total - available - missingN <= 0) ? 'Missing' : 'Borrowed') : b.status),
         };
       });
 
+      setMissingByBook(missingMap);
       setBooks(merged);
     } catch (err) {
       showToast('Failed to load books: ' + err.message, 'error');
@@ -2134,6 +2234,77 @@ export default function Book_Catalog() {
     }
   };
 
+  // A physical copy that cannot be found. Only an Available copy can go missing
+  // (a borrowed one must be returned first). It stops counting as Available and is
+  // shown as Missing everywhere until it is marked found again. The row buttons only
+  // open the confirmation dialog; confirmCopyStatusChange does the actual update.
+  const handleMarkCopyMissing = (copy) => {
+    if (copy.status !== 'Available') {
+      showToast('Only an available copy can be marked as missing.', 'error');
+      return;
+    }
+    setCopyStatusError(null);
+    setCopyStatusModal({ copy, action: 'missing' });
+  };
+
+  // The missing copy turned up — back on the shelf as Available.
+  const handleMarkCopyFound = (copy) => {
+    if (copy.status !== 'Missing') {
+      showToast('Only a missing copy can be marked as found.', 'error');
+      return;
+    }
+    setCopyStatusError(null);
+    setCopyStatusModal({ copy, action: 'found' });
+  };
+
+  const closeCopyStatusModal = useCallback(() => {
+    if (copyStatusBusy) return;
+    setCopyStatusModal(null);
+    setCopyStatusError(null);
+  }, [copyStatusBusy]);
+
+  const confirmCopyStatusChange = async () => {
+    if (!copyStatusModal || copyStatusBusy) return;
+    const { copy, action } = copyStatusModal;
+    const toMissing = action === 'missing';
+    setCopyStatusBusy(true);
+    setCopyStatusError(null);
+    setCopyActionId(copy.copy_id);
+    try {
+      if (toMissing) {
+        const { data: activeLoan, error: loanErr } = await supabaseAdmin
+          .from('borrowings').select('id').eq('copy_label', copy.copy_id).ilike('status', 'borrowed').limit(1);
+        if (loanErr) throw loanErr;
+        if (activeLoan && activeLoan.length) throw new Error('This copy has an active loan. Return it first.');
+      }
+      const { data: updated, error } = await supabaseAdmin
+        .from('book_copies').update({ status: toMissing ? 'Missing' : 'Available' })
+        .eq('copy_id', copy.copy_id).eq('status', toMissing ? 'Available' : 'Missing').select('copy_id');
+      if (error) throw error;
+      if (!updated || !updated.length) {
+        fetchCopies(false);
+        throw new Error('This copy was changed by someone else. The inventory has been refreshed.');
+      }
+      await recomputeBookAggregate(copy.book_id);
+      showToast(toMissing
+        ? `Copy #${copy.copy_number} marked as Missing.`
+        : `Copy #${copy.copy_number} marked as Found — now Available.`);
+      setCopyStatusModal(null);
+      fetchCopies(false);
+      fetchBooks(false);
+    } catch (err) {
+      const msg = err?.message || 'Update failed.';
+      setCopyStatusError(
+        /check constraint|invalid input value for enum/i.test(msg)
+          ? 'The database does not accept the Missing status yet. Run add_missing_copy_status.sql in the Supabase SQL Editor, then try again.'
+          : msg
+      );
+    } finally {
+      setCopyStatusBusy(false);
+      setCopyActionId(null);
+    }
+  };
+
   // Same rule as the per-book copy QR modal: only an Available copy can be
   // removed from inventory; a Borrowed one must be returned first.
   const handleDeleteCopy = async (copy) => {
@@ -2233,9 +2404,10 @@ export default function Book_Catalog() {
       ? parseInt(b.available_copies)
       : parseInt(b.copies) || 0;
     const total = parseInt(b.copies) || 0;
+    const missingN = missingByBook[b.id] || 0;
     return {
       ...b,
-      status: avail > 0 ? 'Available' : (total > 0 ? 'Borrowed' : 'Borrowed'),
+      status: avail > 0 ? 'Available' : ((missingN > 0 && total - avail - missingN <= 0) ? 'Missing' : 'Borrowed'),
     };
   });
 
@@ -2243,7 +2415,7 @@ export default function Book_Catalog() {
     const q = search.toLowerCase();
     const matchSearch = !q || [b.title, b.authors, b.isbn, b.call_number, b.publisher].join(' ').toLowerCase().includes(q);
     const matchGenre  = genreFilter === 'all' || b.genre === genreFilter;
-    const matchStatus = statusFilter === 'all' || b.status === statusFilter;
+    const matchStatus = statusFilter === 'all' || (statusFilter === 'Missing' ? (missingByBook[b.id] || 0) > 0 : b.status === statusFilter);
     const matchShelf  = shelfFilter === 'all' || b.shelf_location === shelfFilter;
     return matchSearch && matchGenre && matchStatus && matchShelf;
   });
@@ -2347,7 +2519,8 @@ export default function Book_Catalog() {
     const av = Number.isFinite(parsed) ? parsed : (b.status === 'Available' ? (parseInt(b.copies) || 0) : 0);
     return s + av;
   }, 0);
-  const borrowedCount   = totalCopies - availableCount;
+  const missingCount    = booksWithStatus.reduce((s, b) => s + (missingByBook[b.id] || 0), 0);
+  const borrowedCount   = Math.max(0, totalCopies - availableCount - missingCount);
 
   const selectStyle = {
     padding: '8px 12px', borderRadius: 8,
@@ -2367,6 +2540,7 @@ export default function Book_Catalog() {
           { label: 'Total Copies', value: totalCopies },
           { label: 'Available', value: availableCount },
           { label: 'Borrowed', value: borrowedCount },
+          { label: 'Missing', value: missingCount },
         ].map(({ label, value }) => (
           <div key={label} className="bc-stat" style={{
             padding: '8px 16px', borderRadius: 8,
@@ -2589,6 +2763,7 @@ export default function Book_Catalog() {
               <option value="all">All Status</option>
               <option value="Available">Available</option>
               <option value="Borrowed">Borrowed</option>
+              <option value="Missing">Missing</option>
             </select>
             <div className="bc-gd" ref={shelfMenuRef}>
               <button
@@ -2765,7 +2940,7 @@ export default function Book_Catalog() {
             <option value="shelf:asc">Sort: Shelf Location (A–Z)</option>
             <option value="shelf:desc">Sort: Shelf Location (Z–A)</option>
             <option value="status:asc">Sort: Status (Available first)</option>
-            <option value="status:desc">Sort: Status (Borrowed first)</option>
+            <option value="status:desc">Sort: Status (Missing / Borrowed first)</option>
           </select>
         )}
         {activeTab === 'pending' && (
@@ -2844,6 +3019,8 @@ export default function Book_Catalog() {
           onGenerateMissing={handleGenerateMissing}
           generating={generatingMissing}
           onFix={handleMarkCopyAvailable}
+          onMissing={handleMarkCopyMissing}
+          onFound={handleMarkCopyFound}
           onDelete={handleDeleteCopy}
           onViewQr={setQrPreviewCopy}
           actionId={copyActionId}
@@ -2930,12 +3107,45 @@ export default function Book_Catalog() {
       ) : filtered.length === 0 ? (
         <div className="lm-empty">
           <div className="lm-empty-icon">📚</div>
-          <div className="lm-empty-text">No books found</div>
+          <div className="lm-empty-text">{statusFilter === 'Missing' ? 'No missing books' : 'No books found'}</div>
           <div className="lm-empty-sub">
-            {search ? 'Try a different search term or clear filters.' : 'Add your first book to get started.'}
+            {search
+              ? 'Try a different search term or clear filters.'
+              : (statusFilter === 'Missing'
+                  ? 'Every copy is accounted for. Missing copies are tracked in the Inventory tab.'
+                  : 'Add your first book to get started.')}
           </div>
+          {statusFilter === 'Missing' && (
+            <button onClick={() => setActiveTab('inventory')} style={{
+              marginTop: 14, padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+              border: '1px solid rgba(201,168,76,0.45)', background: 'rgba(201,168,76,0.18)',
+              color: '#8a6d1f', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            }}>
+              Go to Inventory
+            </button>
+          )}
         </div>
       ) : (
+        <>
+        {statusFilter === 'Missing' && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16,
+            padding: '12px 16px', borderRadius: 10,
+            background: 'rgba(201,168,76,0.10)', border: '1px solid rgba(201,168,76,0.32)',
+          }}>
+            <span style={{ color: '#8a6d1f', flexShrink: 0 }}>{Ic.alert}</span>
+            <div style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>
+              <strong style={{ color: '#8a6d1f' }}>{filtered.length}</strong> {filtered.length === 1 ? 'title has' : 'titles have'} missing copies — open the Inventory tab to see exactly which copies are missing.
+            </div>
+            <button onClick={() => setActiveTab('inventory')} style={{
+              flexShrink: 0, padding: '7px 14px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+              border: '1px solid rgba(201,168,76,0.45)', background: 'rgba(201,168,76,0.18)',
+              color: '#8a6d1f', fontFamily: 'var(--font-sans)', cursor: 'pointer',
+            }}>
+              View in Inventory
+            </button>
+          </div>
+        )}
         <div className="bc-grid" style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))',
@@ -2945,6 +3155,7 @@ export default function Book_Catalog() {
             <BookCard
               key={book.id}
               book={book}
+              missing={missingByBook[book.id] || 0}
               onView={() => setViewBook(book)}
               onEdit={() => openEdit(book)}
               onDelete={() => setDeleteBook(book)}
@@ -2952,6 +3163,7 @@ export default function Book_Catalog() {
             />
           ))}
         </div>
+        </>
       )}
 
       {showForm && (
@@ -2981,11 +3193,21 @@ export default function Book_Catalog() {
       {qrPreviewCopy && (
         <CopyQrPreviewModal copy={qrPreviewCopy} onClose={() => setQrPreviewCopy(null)} />
       )}
+      {copyStatusModal && (
+        <CopyStatusModal
+          copy={copyStatusModal.copy}
+          action={copyStatusModal.action}
+          busy={copyStatusBusy}
+          error={copyStatusError}
+          onClose={closeCopyStatusModal}
+          onConfirm={confirmCopyStatusChange}
+        />
+      )}
     </div>
   );
 }
 
-function BookCard({ book, onView, onEdit, onDelete, Ic }) {
+function BookCard({ book, onView, onEdit, onDelete, Ic, missing = 0 }) {
   const [hov, setHov] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
@@ -3099,13 +3321,22 @@ function BookCard({ book, onView, onEdit, onDelete, Ic }) {
         }}>
           {book.authors || '—'}
         </div>
-        <div style={{ marginTop: 9 }}>
+        <div style={{ marginTop: 9, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6 }}>
           <span style={{
             fontSize: 12, fontWeight: 500, fontFamily: 'var(--font-sans)',
             color: 'var(--text-muted)',
           }}>
             {book.status || 'Available'}: {avail}/{total} copies
           </span>
+          {missing > 0 && (
+            <span style={{
+              padding: '1px 8px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+              fontFamily: 'var(--font-sans)', color: '#8a5a12',
+              background: 'rgba(201,122,27,0.14)', border: '1px solid rgba(201,122,27,0.32)',
+            }}>
+              {missing} missing
+            </span>
+          )}
         </div>
       </div>
 
@@ -3250,7 +3481,7 @@ const INV_SORT_FIELDS = {
 
 function InventoryPanel({
   loading, rows, hasAny, search, shortfalls, onGenerateMissing, generating,
-  onFix, onDelete, onViewQr, actionId, ActionBtn, Ic, sort, onSort,
+  onFix, onMissing, onFound, onDelete, onViewQr, actionId, ActionBtn, Ic, sort, onSort,
 }) {
   if (loading) {
     return (
@@ -3341,6 +3572,8 @@ function InventoryPanel({
                   idx={idx}
                   busy={actionId === copy.copy_id}
                   onFix={() => onFix(copy)}
+                  onMissing={() => onMissing(copy)}
+                  onFound={() => onFound(copy)}
                   onDelete={() => onDelete(copy)}
                   onViewQr={() => onViewQr(copy)}
                   ActionBtn={ActionBtn}
@@ -3355,7 +3588,7 @@ function InventoryPanel({
   );
 }
 
-function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, Ic }) {
+function InventoryRow({ copy, idx, busy, onFix, onMissing, onFound, onDelete, onViewQr, ActionBtn, Ic }) {
   const [hov, setHov] = useState(false);
   const book = copy.book || {};
   return (
@@ -3424,6 +3657,12 @@ function InventoryRow({ copy, idx, busy, onFix, onDelete, onViewQr, ActionBtn, I
           <ActionBtn variant="qr" onClick={onViewQr}>{Ic.qr} QR</ActionBtn>
           {copy.stale && (
             <ActionBtn variant="fix" onClick={busy ? undefined : onFix}>{Ic.wrench} {busy ? '…' : 'Mark Available'}</ActionBtn>
+          )}
+          {copy.status === 'Available' && (
+            <ActionBtn variant="qr" onClick={busy ? undefined : onMissing}>{Ic.alert} {busy ? '…' : 'Missing'}</ActionBtn>
+          )}
+          {copy.status === 'Missing' && (
+            <ActionBtn variant="fix" onClick={busy ? undefined : onFound}>{Ic.wrench} {busy ? '…' : 'Mark Found'}</ActionBtn>
           )}
           {copy.status === 'Available' && (
             <ActionBtn variant="delete" onClick={busy ? undefined : onDelete}>{Ic.trash}</ActionBtn>

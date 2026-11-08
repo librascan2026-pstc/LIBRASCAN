@@ -1737,6 +1737,25 @@ export default function BookManagement({ initialTab, focusNonce }) {
       console.log('[BookScan] studentUUID:', studentUUID, '| studentNumber:', readableStudentNo, '| name:', student.full_name);
 
     
+      // PERF: these three reads only need values that are already known, so they are started
+      // now and run in parallel with the open-borrow lookup below, instead of one after another
+      // later. They are still READ in the same order as before (borrow limit -> copy state),
+      // so every validation message and outcome is unchanged.
+      const preflightP = Promise.all([
+        studentUUID
+          ? supabaseAdmin.from('borrowings').select('id')
+              .eq('student_id', studentUUID).eq('status', 'Borrowed')
+          : null,
+        student.full_name
+          ? supabaseAdmin.from('borrowings').select('id')
+              .ilike('student_name', `${student.full_name.trim()}%`).eq('status', 'Borrowed')
+          : null,
+        resolvedCopyId
+          ? supabaseAdmin.from('book_copies').select('status').eq('copy_id', resolvedCopyId).maybeSingle()
+          : (bookRecord?.id ? supabaseAdmin.from('book_copies').select('status').eq('book_id', bookRecord.id) : null),
+      ]);
+      preflightP.catch(() => {});   // if we exit early the result is simply unused; real errors still surface where it is awaited
+
       const { data: openBorrowRows, error: openBorrowErr } = await supabaseAdmin
         .from('borrowings')
         .select('*')
@@ -1798,18 +1817,15 @@ export default function BookManagement({ initialTab, focusNonce }) {
 
       if (isBorrow) {
         let borrowedRows = [];
+        const preflightRes = await preflightP;
      
         if (studentUUID) {
-          const { data: byId } = await supabaseAdmin
-            .from('borrowings').select('id')
-            .eq('student_id', studentUUID).eq('status', 'Borrowed');
+          const { data: byId } = preflightRes[0];
           borrowedRows = byId || [];
         }
 
         if (student.full_name) {
-          const { data: byName } = await supabaseAdmin
-            .from('borrowings').select('id')
-            .ilike('student_name', `${student.full_name.trim()}%`).eq('status', 'Borrowed');
+          const { data: byName } = preflightRes[1];
           const byNameRows = byName || [];
           const seen = new Set(borrowedRows.map(r => r.id));
           byNameRows.forEach(r => { if (!seen.has(r.id)) borrowedRows.push(r); });
@@ -1824,12 +1840,30 @@ export default function BookManagement({ initialTab, focusNonce }) {
 
 
         if (resolvedCopyId) {
-          const { data: thisCopy } = await supabaseAdmin
-            .from('book_copies').select('status').eq('copy_id', resolvedCopyId).maybeSingle();
+          const { data: thisCopy } = preflightRes[2];
           if (thisCopy?.status === 'Borrowed') {
             playErrorSound();
             showToast('This copy is already borrowed. Scan a different copy.', 'error');
             showResult({ type:'error', message:'Copy is already borrowed.', time: new Date() });
+            setStep(0); setStudent(null); processingRef.current = false; return;
+          }
+          // A copy marked Missing in Book Management cannot be lent out.
+          if (thisCopy?.status === 'Missing') {
+            playErrorSound();
+            showToast('This copy is marked as MISSING and cannot be borrowed. Mark it as Found in Book Management first.', 'error');
+            showResult({ type:'error', message:`Copy is marked as Missing — "${bookTitle}" cannot be borrowed.`, time: new Date() });
+            setStep(0); setStudent(null); processingRef.current = false; return;
+          }
+        } else if (bookRecord?.id) {
+          // Book scanned without a specific copy: refuse when every copy that is not out
+          // on loan has been marked Missing (nothing real is left to hand over).
+          const { data: bookCopyRows } = preflightRes[2];
+          const missingN = (bookCopyRows || []).filter(c => c.status === 'Missing').length;
+          const availN   = (bookCopyRows || []).filter(c => c.status === 'Available').length;
+          if (missingN > 0 && availN === 0) {
+            playErrorSound();
+            showToast(`No copy of "${bookTitle}" can be borrowed — ${missingN} cop${missingN === 1 ? 'y is' : 'ies are'} marked as MISSING.`, 'error');
+            showResult({ type:'error', message:`"${bookTitle}" is marked as Missing — no copy available to borrow.`, time: new Date() });
             setStep(0); setStudent(null); processingRef.current = false; return;
           }
         }
@@ -1850,10 +1884,11 @@ export default function BookManagement({ initialTab, focusNonce }) {
       }
 
     
-      {
-        const { total, available } = await syncBooksFromCopies(bookRecord.id);
-        console.log('[BookScan] books table synced — total:', total, '| available:', available);
-      }
+      // PERF: sync the book's counters while the borrowing / return row is being written
+      // (awaited right after that write, before anything can roll back or finish).
+      const syncP = syncBooksFromCopies(bookRecord.id)
+        .then(r => { console.log('[BookScan] books table synced — total:', r.total, '| available:', r.available); return r; })
+        .catch(err => { console.warn('[BookScan] books sync failed:', err?.message); return null; });
 
       if (isBorrow) {
  
@@ -1884,6 +1919,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
 
         const { data: newTx, error: txErr } = await supabaseAdmin
           .from('borrowings').insert([txPayload]).select().single();
+        await syncP;
 
         if (txErr) {
           console.error('[BookScan] Insert error:', txErr);
@@ -1972,6 +2008,7 @@ export default function BookManagement({ initialTab, focusNonce }) {
           .from('borrowings')
           .update({ status: 'Returned', returned_at: returnedAt })
           .eq('id', existingBorrow.id);  
+        await syncP;
 
         if (retErr) {
           console.error('[BookScan] Return update error:', retErr);

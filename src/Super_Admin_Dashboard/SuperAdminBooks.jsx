@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, cloneElement } from 'react';
 import {
   BookOpen, Library, PackageCheck, PackageX, Search, ChevronLeft, ChevronRight,
   Building2, X, Hash, MapPin, User, Layers, Clock, Check, Ban,
-  Barcode, Tag, Calendar, FileText, Landmark, Globe, Palette, BookMarked, ZoomIn,
+  Barcode, Tag, Calendar, FileText, Landmark, Globe, Palette, BookMarked, ZoomIn, ClipboardList, Download, Printer, Lock, UserCheck,
 } from 'lucide-react';
 import { supabaseAdmin } from '../supabaseClient';
 import { notifyLibrariansOfRegistration } from './notifyLibrariansOfRegistration';
@@ -583,6 +583,49 @@ const CSS = `
     .sab-hero { flex-wrap: wrap; gap: 14px; }
     .sab-hero-left { flex: 1 1 100%; }
   }
+
+  /* ---------- Borrowing & Returning History tab ---------- */
+  .sab-hx-btn {
+    display: inline-flex; align-items: center; gap: 7px; padding: 10px 16px; border-radius: 999px;
+    border: 1.5px solid ${BORDER}; background: ${CARD}; color: ${MAROON};
+    font-family: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    transition: border-color 0.16s, box-shadow 0.16s, background 0.16s;
+  }
+  .sab-hx-btn:hover:not(:disabled) { border-color: rgba(122,0,0,0.35); }
+  .sab-hx-btn.active { border-color: ${GOLD}; box-shadow: 0 0 0 3px rgba(212,175,55,0.28); }
+  .sab-hx-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+  .sab-hx-datewrap { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+  .sab-hx-clear {
+    width: 34px; height: 34px; border-radius: 999px; border: 1.5px solid ${BORDER}; background: ${CARD};
+    color: ${MAROON}; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+  }
+  .sab-hx-clear:hover { border-color: rgba(122,0,0,0.35); }
+  .sab-hx-pop {
+    position: absolute; top: calc(100% + 8px); right: 0; z-index: 60; min-width: 270px;
+    background: ${CARD}; border: 1.5px solid ${BORDER}; border-radius: 16px; padding: 16px;
+    box-shadow: 0 16px 40px rgba(59,42,37,0.18); display: flex; flex-direction: column; gap: 12px;
+  }
+  .sab-hx-pop label { display: flex; flex-direction: column; gap: 5px; font-size: 10.5px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: ${TEXT_MUTED}; }
+  .sab-hx-pop input[type="date"] {
+    padding: 9px 12px; border-radius: 10px; border: 1.5px solid ${BORDER}; background: #fff;
+    font-family: inherit; font-size: 13px; color: ${TEXT}; outline: none;
+  }
+  .sab-hx-pop input[type="date"]:focus { border-color: ${MAROON}; box-shadow: 0 0 0 3px ${MAROON_SOFT}; }
+  .sab-hx-pop-hint { font-size: 11.5px; color: ${TEXT_MUTED}; line-height: 1.5; }
+  .sab-hx-pop-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .sab-hx-pop-actions button {
+    padding: 8px 14px; border-radius: 999px; border: 1.5px solid ${BORDER}; background: transparent;
+    font-family: inherit; font-size: 12px; font-weight: 700; color: ${MAROON}; cursor: pointer;
+  }
+  .sab-hx-pop-actions button.primary { background: ${MAROON}; border-color: ${MAROON}; color: #fff; }
+  .sab-hx-table { min-width: 720px; }
+  .sab-hx-table tbody tr { cursor: default; }
+  .sab-table.sab-hx-table thead th, .sab-table.sab-hx-table tbody td { display: table-cell !important; }
+  .sab-hx-sub { font-size: 11px; color: ${TEXT_MUTED}; margin-top: 1px; }
+  .sab-hx-mono { font-size: 12px; font-family: monospace; font-weight: 700; letter-spacing: 0.03em; }
+  .sab-hx-dot-borrowed { background: ${ORANGE}; box-shadow: 0 0 0 3px rgba(249,115,22,0.16); }
+  .sab-hx-note { font-size: 12px; color: ${TEXT_MUTED}; margin: 0 0 10px; display: flex; align-items: center; gap: 6px; }
+  .sab-hx-retry { margin-top: 14px; }
 `;
 
 const ACCENTS = {
@@ -624,6 +667,143 @@ function StatSkeleton() {
   );
 }
 
+/* ── Borrowing & Returning History helpers ─────────────────────────────── */
+// Independent Super Admin backup table (see super_admin_borrowing_history.sql).
+// It is filled by a database trigger on `borrowings` and is append-only, so a
+// librarian deleting a transaction never removes the Super Admin's record.
+const TX_TABLE = 'super_admin_borrowing_history';
+const TX_FETCH_STEP = 1000;
+
+// Supabase returns at most 1000 rows per request, which would silently cut off
+// the copy / borrowing counts on a big system. Reads every page; same
+// { data, error } shape as a normal query.
+async function fetchAllRows(makeQuery) {
+  const all = [];
+  for (let from = 0; ; from += TX_FETCH_STEP) {
+    const { data, error } = await makeQuery().range(from, from + TX_FETCH_STEP - 1);
+    if (error) return { data: null, error };
+    all.push(...(data || []));
+    if (!data || data.length < TX_FETCH_STEP) break;
+  }
+  return { data: all, error: null };
+}
+// Independent Super Admin backup of every library visit (see super_admin_visit_history.sql).
+// Filled by a database trigger on `attendance_logs` and never deleted from, so a
+// librarian removing a visitor record never removes the Super Admin's copy.
+const VISIT_TABLE = 'super_admin_visit_history';
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Local (not UTC) calendar day, so a date pick matches what the table shows in PH time.
+const localDay = (v) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const todayStr = () => localDay(new Date());
+const prettyDay = (s) => {
+  const [y, m, d] = String(s).split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+const fmtTxDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+const fmtTxTime = (iso) => iso ? new Date(iso).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—';
+const fmtTxFull = (iso) => iso ? `${fmtTxDate(iso)} · ${fmtTxTime(iso)}` : '—';
+
+// "From" only (or "To" only) = that single day; both = inclusive range, either order.
+function normalizeRange(from, to) {
+  let start = from || to;
+  let end = to || from;
+  if (!start) return null;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+const rangeLabel = (r) => !r ? '' : (r.start === r.end ? prettyDay(r.start) : `${prettyDay(r.start)} – ${prettyDay(r.end)}`);
+
+const txStudentNo = (r) => {
+  const embedded = String(r.student_name || '').match(/\[([^\]]+)\]$/)?.[1]?.trim() || '';
+  const fromId = r.student_id && !UUID_RE.test(String(r.student_id).trim()) ? String(r.student_id).trim() : '';
+  return String(r.student_number || '').trim() || embedded || fromId || '';
+};
+const txStudentName = (r) => (r.student_name || '').replace(/\s*\[.*?\]\s*$/, '') || r.student_name || '';
+const txActivityTime = (r) => Math.max(
+  r.borrowed_at ? Date.parse(r.borrowed_at) || 0 : 0,
+  r.returned_at ? Date.parse(r.returned_at) || 0 : 0,
+  r.recorded_at ? Date.parse(r.recorded_at) || 0 : 0,
+);
+const visitTime = (r) => Date.parse(r.time_in || r.recorded_at || '') || 0;
+const tsOf = (v) => (v ? Date.parse(v) || 0 : 0);
+const idCmp = (a, b) => String(a.id ?? '').localeCompare(String(b.id ?? ''));
+// Borrowing & Returning History order: newest BORROWED timestamp first. A later return
+// never moves a row up. Ties fall back to when the record was saved, then the return
+// time, then id, so the order is always the same.
+const txCompare = (a, b) =>
+  (tsOf(b.borrowed_at || b.recorded_at) - tsOf(a.borrowed_at || a.recorded_at)) ||
+  (tsOf(b.recorded_at) - tsOf(a.recorded_at)) ||
+  (tsOf(b.returned_at) - tsOf(a.returned_at)) ||
+  idCmp(a, b);
+// Visit History order: newest visit (time-in) first; ties -> newest saved, then id.
+const visitCompare = (a, b) =>
+  (visitTime(b) - visitTime(a)) ||
+  (tsOf(b.recorded_at) - tsOf(a.recorded_at)) ||
+  idCmp(a, b);
+const visitStatusLabel = (s) => String(s || '').toLowerCase() === 'time-out' ? 'Time Out' : 'Time In';
+const escHtml = (v) => String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const slug = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'campus';
+
+function DateRangeFilter({ from, to, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    const onKey  = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const range = normalizeRange(from, to);
+  return (
+    <div className="sab-hx-datewrap" ref={wrapRef}>
+      <button
+        type="button"
+        className={`sab-hx-btn${range ? ' active' : ''}`}
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title="Filter by date or date range"
+      >
+        <Calendar size={14} /> {range ? rangeLabel(range) : 'Date'}
+      </button>
+      {range && (
+        <button type="button" className="sab-hx-clear" onClick={() => onChange('', '')} aria-label="Clear date filter" title="Clear date filter">
+          <X size={13} />
+        </button>
+      )}
+      {open && (
+        <div className="sab-hx-pop" role="dialog" aria-label="Filter by date">
+          <label>From
+            <input type="date" value={from} max={to || undefined} onChange={e => onChange(e.target.value, to)} />
+          </label>
+          <label>To
+            <input type="date" value={to} min={from || undefined} onChange={e => onChange(from, e.target.value)} />
+          </label>
+          <div className="sab-hx-pop-hint">Leave “To” empty to view a single day.</div>
+          <div className="sab-hx-pop-actions">
+            <button type="button" onClick={() => onChange(todayStr(), '')}>Today</button>
+            <button type="button" onClick={() => onChange('', '')}>Clear</button>
+            <button type="button" className="primary" onClick={() => setOpen(false)}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SuperAdminBooks() {
   const [loading, setLoading]   = useState(true);
   const [books, setBooks]       = useState([]);
@@ -654,16 +834,47 @@ export default function SuperAdminBooks() {
   const loadedOnceRef  = useRef(false);   // true after the first successful load
   const reloadBooksRef = useRef(null);
 
+  // Borrowing & Returning History tab — reads the Super Admin's own backup table,
+  // never the librarians' `borrowings` table.
+  const [txRows, setTxRows]       = useState([]);
+  const [txLoading, setTxLoading] = useState(false);
+  const [txError, setTxError]     = useState(null);   // { message, missing }
+  const [txSearch, setTxSearch]   = useState('');
+  const [txStatus, setTxStatus]   = useState('all');
+  const [txFrom, setTxFrom]       = useState('');
+  const [txTo, setTxTo]           = useState('');
+  const [txPage, setTxPage]       = useState(1);
+  const [txCampusCounts, setTxCampusCounts] = useState({});
+  const txSeqRef    = useRef(0);      // newest load wins; stale responses are dropped
+  const reloadTxRef = useRef(null);
+
+  // Visit History tab — reads the Super Admin's own backup table, never the
+  // librarians' `attendance_logs` table. Independent of the borrowing history.
+  const [vRows, setVRows]       = useState([]);
+  const [vLoading, setVLoading] = useState(false);
+  const [vError, setVError]     = useState(null);   // { message, missing }
+  const [vSearch, setVSearch]   = useState('');
+  const [vStatus, setVStatus]   = useState('all');
+  const [vFrom, setVFrom]       = useState('');
+  const [vTo, setVTo]           = useState('');
+  const [vPage, setVPage]       = useState(1);
+  const [vCampusCounts, setVCampusCounts] = useState({});
+  const vSeqRef    = useRef(0);      // newest load wins; stale responses are dropped
+  const reloadVRef = useRef(null);
+
   useEffect(() => {
     async function load(silent = false) {
       const mySeq = ++loadSeqRef.current;
       if (!silent) setLoading(true);
       try {
-        const [campusRes, booksRes, copiesRes, genreRes] = await Promise.all([
+        const [campusRes, booksRes, copiesRes, genreRes, activeBorrowRes] = await Promise.all([
           supabaseAdmin.from('campuses').select('id, campus_name, campus_code, is_active'),
           supabaseAdmin.from('books').select('*').order('created_at', { ascending: false }),
-          supabaseAdmin.from('book_copies').select('book_id, status'),
+          fetchAllRows(() => supabaseAdmin.from('book_copies').select('book_id, status').order('copy_id', { ascending: true })),
           supabaseAdmin.from('campus_genres').select('id, campus_id, name, created_at').order('created_at', { ascending: true }),
+          // Active borrowings = what is really out on loan (same source of truth the
+          // librarian's Book Catalog uses; book_copies.status can fall out of sync).
+          fetchAllRows(() => supabaseAdmin.from('borrowings').select('book_id, status').ilike('status', 'borrowed').order('id', { ascending: true })),
         ]);
 
         // A failed background refresh must never wipe the list that is already
@@ -677,10 +888,21 @@ export default function SuperAdminBooks() {
 
         const copyMap = {};
         allCopies.forEach(c => {
-          if (!copyMap[c.book_id]) copyMap[c.book_id] = { total: 0, available: 0 };
+          if (!copyMap[c.book_id]) copyMap[c.book_id] = { total: 0, available: 0, missing: 0 };
           copyMap[c.book_id].total += 1;
           if (c.status === 'Available') copyMap[c.book_id].available += 1;
+          if (c.status === 'Missing') copyMap[c.book_id].missing += 1;
         });
+
+        // Active borrowings per book. If that query failed, null -> fall back to
+        // the copy statuses only (the previous behaviour).
+        const activeBorrowMap = activeBorrowRes.error ? null : {};
+        if (activeBorrowMap) {
+          (activeBorrowRes.data || []).forEach(r => {
+            if (r.book_id == null) return;
+            activeBorrowMap[r.book_id] = (activeBorrowMap[r.book_id] || 0) + 1;
+          });
+        }
 
         const campusMap = {};
         allCampuses.forEach(c => { campusMap[c.id] = c; });
@@ -689,11 +911,23 @@ export default function SuperAdminBooks() {
           const counts = copyMap[b.id];
           const total     = counts ? counts.total : (parseInt(b.copies) || 0);
           const available = counts ? counts.available : (b.status === 'Available' ? total : 0);
+          // Copies actually out on loan — same reconciliation as the librarian's Book Catalog:
+          // never fewer than the active borrowings, never more than the copies that exist.
+          // Missing copies are neither available nor out on loan, so they are left out of "borrowed".
+          const missing = counts ? (counts.missing || 0) : 0;
+          let borrowedCopies = Math.max(0, total - available - missing);
+          if (activeBorrowMap) {
+            const copyAvailable = counts ? counts.available : total;
+            const reconciledAvail = Math.max(0, Math.min(copyAvailable, total - missing - (activeBorrowMap[b.id] || 0)));
+            borrowedCopies = total - missing - reconciledAvail;
+          }
           return {
             ...b,
+            borrowed_copies: borrowedCopies,
+            missing_copies: missing,
             copies: total,
             available_copies: available,
-            status: available > 0 ? 'Available' : (total > 0 ? 'Borrowed' : (b.status || 'Available')),
+            status: available > 0 ? 'Available' : ((missing > 0 && borrowedCopies <= 0) ? 'Missing' : (total > 0 ? 'Borrowed' : (b.status || 'Available'))),
             campus: campusMap[b.campus_id] || null,
           };
         });
@@ -739,6 +973,7 @@ export default function SuperAdminBooks() {
         .channel(`sab-books-live-${Math.random().toString(36).slice(2)}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'books' }, schedule)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'book_copies' }, schedule)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowings' }, schedule)
         .subscribe();
     } catch { /* realtime unavailable — polling below still keeps it accurate */ }
 
@@ -813,7 +1048,7 @@ export default function SuperAdminBooks() {
     return baseBooks.filter(b => {
       if (campusFilter !== 'all' && b.campus_id !== campusFilter) return false;
       if (genreFilter !== 'all' && b.genre !== genreFilter) return false;
-      if (activeTab === 'book' && statusFilter !== 'all' && b.status !== statusFilter) return false;
+      if (activeTab === 'book' && statusFilter !== 'all' && (statusFilter === 'Missing' ? !(b.missing_copies > 0) : b.status !== statusFilter)) return false;
       if (!q) return true;
       const hay = [b.title, b.authors, b.isbn, b.call_number, b.campus?.campus_name].filter(Boolean).join(' ').toLowerCase();
       return hay.includes(q);
@@ -832,7 +1067,9 @@ export default function SuperAdminBooks() {
   const stats = useMemo(() => {
     const totalCopies     = scopedBooks.reduce((s, b) => s + (parseInt(b.copies) || 0), 0);
     const availableCopies = scopedBooks.reduce((s, b) => s + (parseInt(b.available_copies) || 0), 0);
-    const borrowedCopies  = Math.max(0, totalCopies - availableCopies);
+    // Per campus: summed from each book's reconciled borrowed count (scopedBooks already
+    // follows the selected campus chip; "All Campuses" is the sum of every campus).
+    const borrowedCopies  = scopedBooks.reduce((s, b) => s + (Number.isFinite(b.borrowed_copies) ? b.borrowed_copies : 0), 0);
     // "Pending Requests" always reflects the system-wide total of book
     // registration requests awaiting Super Admin review, regardless of
     // which campus is currently selected in the filter.
@@ -855,6 +1092,561 @@ export default function SuperAdminBooks() {
     setActionMsg({ type, text });
     scheduleToastClear('sab', text, () => setActionMsg(null));
   };
+
+  // ── Borrowing & Returning History ───────────────────────────────────────
+  // History only exists for ONE selected campus. With "All Campuses" selected
+  // nothing is fetched, kept in memory or rendered.
+  const historyActive = activeTab === 'history';
+  const historyLocked = historyActive && campusFilter === 'all';
+
+  useEffect(() => {
+    if (!historyActive || campusFilter === 'all') {
+      txSeqRef.current += 1;           // drop anything still in flight
+      reloadTxRef.current = null;
+      setTxRows([]);
+      setTxError(null);
+      setTxLoading(false);
+      return undefined;
+    }
+    const campusId = campusFilter;
+
+    async function load(silent = false) {
+      const seq = ++txSeqRef.current;
+      if (!silent) { setTxLoading(true); setTxRows([]); setTxError(null); }   // never flash another campus's rows
+      try {
+        const all = [];
+        for (let from = 0; ; from += TX_FETCH_STEP) {
+          const { data, error } = await supabaseAdmin
+            .from(TX_TABLE)
+            .select('*')
+            .eq('campus_id', campusId)
+            .order('recorded_at', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, from + TX_FETCH_STEP - 1);
+          if (seq !== txSeqRef.current) return;
+          if (error) throw error;
+          all.push(...(data || []));
+          if (!data || data.length < TX_FETCH_STEP) break;
+        }
+        all.sort(txCompare);
+        setTxRows(all);
+        setTxError(null);
+      } catch (err) {
+        if (seq !== txSeqRef.current) return;
+        console.error('[SuperAdminBooks] history load error:', err?.message);
+        const msg = err?.message || 'Could not load the borrowing history.';
+        // A failed background refresh keeps what is already on screen.
+        if (!silent) setTxError({ message: msg, missing: err?.code === '42P01' || err?.code === 'PGRST205' || /does not exist|schema cache/i.test(msg) });
+      }
+      if (seq === txSeqRef.current) setTxLoading(false);
+    }
+
+    reloadTxRef.current = load;
+    load(false);
+
+    let timer = null;
+    let ch = null;
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => load(true), 1500); };
+    try {
+      ch = supabaseAdmin
+        .channel(`sab-history-live-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: TX_TABLE }, schedule)
+        .subscribe();
+    } catch { /* realtime unavailable — polling below still keeps it current */ }
+    const pollId = setInterval(() => { if (!document.hidden) load(true); }, 30000);
+    const onVisible = () => { if (!document.hidden) load(true); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      txSeqRef.current += 1;
+      reloadTxRef.current = null;
+      clearInterval(pollId);
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (ch) { try { supabaseAdmin.removeChannel(ch); } catch { /* already closed */ } }
+    };
+  }, [historyActive, campusFilter]);
+
+  // Per-campus record counts for the campus chips while this tab is open.
+  useEffect(() => {
+    if (!historyActive || !campuses.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(campuses.map(async c => {
+        const { count, error } = await supabaseAdmin
+          .from(TX_TABLE).select('id', { count: 'exact', head: true }).eq('campus_id', c.id);
+        return [c.id, error ? null : (count || 0)];
+      }));
+      if (cancelled) return;
+      setTxCampusCounts(prev => {
+        const next = { ...prev };
+        entries.forEach(([id, n]) => { if (n !== null) next[id] = n; });
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [historyActive, campuses, txRows.length]);
+
+  const txTotalCount = useMemo(
+    () => Object.values(txCampusCounts).reduce((s, n) => s + (n || 0), 0),
+    [txCampusCounts]
+  );
+
+  const txRange = useMemo(() => normalizeRange(txFrom, txTo), [txFrom, txTo]);
+
+  const txFiltered = useMemo(() => {
+    if (campusFilter === 'all') return [];
+    const q = txSearch.trim().toLowerCase();
+    return txRows.filter(r => {
+      if (r.campus_id !== campusFilter) return false;                          // defensive: never show another campus
+      if (txStatus !== 'all' && String(r.status || '').toLowerCase() !== txStatus) return false;
+      if (txRange) {
+        const days = [localDay(r.borrowed_at), localDay(r.returned_at)].filter(Boolean);
+        if (!days.some(d => d >= txRange.start && d <= txRange.end)) return false;
+      }
+      if (!q) return true;
+      return [txStudentName(r), txStudentNo(r), r.book_title, r.copy_label]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }, [txRows, campusFilter, txSearch, txStatus, txRange]);
+
+  useEffect(() => { setTxPage(1); }, [campusFilter, txSearch, txStatus, txFrom, txTo, activeTab]);
+
+  const txTotalPages = Math.max(1, Math.ceil(txFiltered.length / PAGE_SIZE));
+  const txPaged = txFiltered.slice((txPage - 1) * PAGE_SIZE, txPage * PAGE_SIZE);
+
+  // Download / Print always follow the current view (campus + status + date range + search).
+  const txExportRows = () => txFiltered.map(r => ({
+    'Student No.': txStudentNo(r),
+    'Name':        txStudentName(r),
+    'Program':     r.student_program || '',
+    'Campus':      r.campus_name || selectedCampusName || '',
+    'Book Title':  r.book_title || '',
+    'Copy Label':  r.copy_label || '',
+    'Status':      r.status || '',
+    'Borrowed At': r.borrowed_at ? fmtTxFull(r.borrowed_at) : '—',
+    'Returned At': r.returned_at ? fmtTxFull(r.returned_at) : 'Not yet returned',
+  }));
+
+  const txViewLabel = () =>
+    (txStatus === 'all' ? 'All Status' : txStatus.charAt(0).toUpperCase() + txStatus.slice(1)) +
+    (txRange ? ` · ${rangeLabel(txRange)}` : '');
+
+  const downloadTxHistory = () => {
+    if (historyLocked) return;
+    const rows = txExportRows();
+    if (!rows.length) { flashMsg('error', txRange ? `No transactions for ${rangeLabel(txRange)}.` : 'No transactions to download.'); return; }
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;          // stop spreadsheet formula injection
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+    const rangePart = txRange ? (txRange.start === txRange.end ? txRange.start : `${txRange.start}_to_${txRange.end}`) : todayStr();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `borrowing-returning-history-${slug(selectedCampusName)}-${txStatus}-${rangePart}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const printTxHistory = () => {
+    if (historyLocked) return;
+    const rows = txExportRows();
+    if (!rows.length) { flashMsg('error', txRange ? `No transactions for ${rangeLabel(txRange)}.` : 'No transactions to print.'); return; }
+    const cols = Object.keys(rows[0]);
+    const label = `${selectedCampusName || 'Campus'} · ${txViewLabel()}`;
+    const win = window.open('', '_blank');
+    if (!win) { flashMsg('error', 'Please allow pop-ups to print.'); return; }
+    const thead = cols.map(c => `<th>${escHtml(c)}</th>`).join('');
+    const tbody = rows.map(r => `<tr>${cols.map(c => `<td>${escHtml(r[c] || '—')}</td>`).join('')}</tr>`).join('');
+    win.document.write(`<html><head><title>Borrowing &amp; Returning History — ${escHtml(label)}</title><style>body{font-family:sans-serif;font-size:12px;color:#1a0000}h2{color:#7A0000;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#7A0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;letter-spacing:0.04em;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>Borrowing &amp; Returning History</h2><p style="color:#888;font-size:11px">${escHtml(label)} · ${rows.length} record${rows.length === 1 ? '' : 's'} · ${escHtml(new Date().toLocaleString('en-PH'))}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const historyContent = historyLocked ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><Lock size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">Select a campus to view its history</div>
+        <div className="sab-empty-sub">
+          Borrowing and returning records are shown one campus at a time. Choose a campus above to see its transactions.
+        </div>
+      </div>
+    </div>
+  ) : txLoading ? (
+    <div className="sab-shimmer sab-skel-table" />
+  ) : txError ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><ClipboardList size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">{txError.missing ? 'History table not set up yet' : 'Could not load the history'}</div>
+        <div className="sab-empty-sub">
+          {txError.missing
+            ? 'Run super_admin_borrowing_history.sql once in the Supabase SQL Editor, then reload this tab.'
+            : txError.message}
+        </div>
+        <button type="button" className="sab-hx-btn sab-hx-retry" onClick={() => reloadTxRef.current && reloadTxRef.current(false)}>
+          Try again
+        </button>
+      </div>
+    </div>
+  ) : txFiltered.length === 0 ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><ClipboardList size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">{txRows.length ? 'No matching transactions' : 'No transactions yet'}</div>
+        <div className="sab-empty-sub">
+          {txRows.length
+            ? (txRange ? `Nothing found for ${rangeLabel(txRange)}. Try a different date or clear the filters.` : 'Try a different search term or clear filters.')
+            : `Borrowing and returning activity for ${selectedCampusName || 'this campus'} will appear here.`}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div className="sab-table-wrap">
+      <div className="sab-table-scroll">
+        <table className="sab-table sab-hx-table">
+          <thead>
+            <tr>
+              {['Student Number', 'Student Name', 'Book Title', 'Status', 'Borrowed At', 'Returned At'].map(h => <th key={h}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {txPaged.map(r => {
+              const isReturned = String(r.status || '').toLowerCase() === 'returned';
+              const no = txStudentNo(r);
+              return (
+                <tr key={r.id}>
+                  <td>{no ? <span className="sab-hx-mono">{no}</span> : <span className="sab-hx-sub" style={{ fontStyle: 'italic' }}>no ID recorded</span>}</td>
+                  <td>
+                    <div style={{ fontWeight: 800, fontSize: 13 }}>{txStudentName(r) || '—'}</div>
+                    {r.student_program && <div className="sab-hx-sub">{r.student_program}</div>}
+                  </td>
+                  <td style={{ maxWidth: 240 }}>
+                    <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.book_title || '—'}</div>
+                    {r.copy_label && <div className="sab-hx-sub" style={{ fontFamily: 'monospace' }}>{r.copy_label}</div>}
+                  </td>
+                  <td>
+                    <div className="sab-status-row">
+                      <span className={`sab-status-dot${isReturned ? '' : ' sab-hx-dot-borrowed'}`} />
+                      <span className="sab-status-label" style={{ color: isReturned ? '#178A4C' : '#C2570C' }}>{isReturned ? 'Returned' : (r.status || 'Borrowed')}</span>
+                    </div>
+                  </td>
+                  <td>
+                    {r.borrowed_at ? (
+                      <>
+                        <div style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtTxDate(r.borrowed_at)}</div>
+                        <div className="sab-hx-sub">{fmtTxTime(r.borrowed_at)}</div>
+                      </>
+                    ) : '—'}
+                  </td>
+                  <td>
+                    {r.returned_at ? (
+                      <>
+                        <div style={{ fontSize: 12, whiteSpace: 'nowrap', color: '#178A4C' }}>{fmtTxDate(r.returned_at)}</div>
+                        <div className="sab-hx-sub">{fmtTxTime(r.returned_at)}</div>
+                      </>
+                    ) : (
+                      <span className="sab-hx-sub" style={{ fontStyle: 'italic' }}>{isReturned ? '—' : 'Still out'}</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sab-pagination">
+        <div className="sab-pagination-info">
+          Showing {(txPage - 1) * PAGE_SIZE + 1}–{Math.min(txPage * PAGE_SIZE, txFiltered.length)} of {txFiltered.length}
+          {selectedCampusName ? ` · ${selectedCampusName}` : ''}
+        </div>
+        {txTotalPages > 1 && (
+          <div className="sab-pagination-btns">
+            <button className="sab-page-btn" onClick={() => setTxPage(p => Math.max(1, p - 1))} disabled={txPage === 1} aria-label="Previous page">
+              <ChevronLeft size={14} />
+            </button>
+            <button className="sab-page-btn" onClick={() => setTxPage(p => Math.min(txTotalPages, p + 1))} disabled={txPage === txTotalPages} aria-label="Next page">
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  // ── Visit History ───────────────────────────────────────────────────────
+  // Same rule as the borrowing history: records exist for ONE selected campus.
+  // With "All Campuses" selected nothing is fetched, kept in memory or rendered.
+  const visitActive = activeTab === 'visits';
+  const visitLocked = visitActive && campusFilter === 'all';
+
+  useEffect(() => {
+    if (!visitActive || campusFilter === 'all') {
+      vSeqRef.current += 1;            // drop anything still in flight
+      reloadVRef.current = null;
+      setVRows([]);
+      setVError(null);
+      setVLoading(false);
+      return undefined;
+    }
+    const campusId = campusFilter;
+
+    async function load(silent = false) {
+      const seq = ++vSeqRef.current;
+      if (!silent) { setVLoading(true); setVRows([]); setVError(null); }   // never flash another campus's rows
+      try {
+        const all = [];
+        for (let from = 0; ; from += TX_FETCH_STEP) {
+          const { data, error } = await supabaseAdmin
+            .from(VISIT_TABLE)
+            .select('*')
+            .eq('campus_id', campusId)
+            .order('time_in', { ascending: false })
+            .order('id', { ascending: true })
+            .range(from, from + TX_FETCH_STEP - 1);
+          if (seq !== vSeqRef.current) return;
+          if (error) throw error;
+          all.push(...(data || []));
+          if (!data || data.length < TX_FETCH_STEP) break;
+        }
+        all.sort(visitCompare);
+        setVRows(all);
+        setVError(null);
+      } catch (err) {
+        if (seq !== vSeqRef.current) return;
+        console.error('[SuperAdminBooks] visit history load error:', err?.message);
+        const msg = err?.message || 'Could not load the visit history.';
+        // A failed background refresh keeps what is already on screen.
+        if (!silent) setVError({ message: msg, missing: err?.code === '42P01' || err?.code === 'PGRST205' || /does not exist|schema cache/i.test(msg) });
+      }
+      if (seq === vSeqRef.current) setVLoading(false);
+    }
+
+    reloadVRef.current = load;
+    load(false);
+
+    let timer = null;
+    let ch = null;
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => load(true), 1500); };
+    try {
+      ch = supabaseAdmin
+        .channel(`sab-visits-live-${Math.random().toString(36).slice(2)}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: VISIT_TABLE }, schedule)
+        .subscribe();
+    } catch { /* realtime unavailable — polling below still keeps it current */ }
+    const pollId = setInterval(() => { if (!document.hidden) load(true); }, 30000);
+    const onVisible = () => { if (!document.hidden) load(true); };
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      vSeqRef.current += 1;
+      reloadVRef.current = null;
+      clearInterval(pollId);
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+      if (ch) { try { supabaseAdmin.removeChannel(ch); } catch { /* already closed */ } }
+    };
+  }, [visitActive, campusFilter]);
+
+  // Per-campus visit counts for the campus chips while this tab is open.
+  useEffect(() => {
+    if (!visitActive || !campuses.length) return undefined;
+    let cancelled = false;
+    (async () => {
+      const entries = await Promise.all(campuses.map(async c => {
+        const { count, error } = await supabaseAdmin
+          .from(VISIT_TABLE).select('id', { count: 'exact', head: true }).eq('campus_id', c.id);
+        return [c.id, error ? null : (count || 0)];
+      }));
+      if (cancelled) return;
+      setVCampusCounts(prev => {
+        const next = { ...prev };
+        entries.forEach(([id, n]) => { if (n !== null) next[id] = n; });
+        return next;
+      });
+    })();
+    return () => { cancelled = true; };
+  }, [visitActive, campuses, vRows.length]);
+
+  const vTotalCount = useMemo(
+    () => Object.values(vCampusCounts).reduce((s, n) => s + (n || 0), 0),
+    [vCampusCounts]
+  );
+
+  const vRange = useMemo(() => normalizeRange(vFrom, vTo), [vFrom, vTo]);
+
+  const vFiltered = useMemo(() => {
+    if (campusFilter === 'all') return [];
+    const q = vSearch.trim().toLowerCase();
+    return vRows.filter(r => {
+      if (String(r.campus_id) !== String(campusFilter)) return false;          // defensive: never show another campus
+      if (vStatus !== 'all' && String(r.status || '').toLowerCase() !== vStatus) return false;
+      if (vRange) {
+        const d = localDay(r.time_in);
+        if (!d || d < vRange.start || d > vRange.end) return false;
+      }
+      if (!q) return true;
+      return [r.full_name, r.id_no, r.program]
+        .some(v => String(v || '').toLowerCase().includes(q));
+    });
+  }, [vRows, campusFilter, vSearch, vStatus, vRange]);
+
+  useEffect(() => { setVPage(1); }, [campusFilter, vSearch, vStatus, vFrom, vTo, activeTab]);
+
+  const vTotalPages = Math.max(1, Math.ceil(vFiltered.length / PAGE_SIZE));
+  const vPaged = vFiltered.slice((vPage - 1) * PAGE_SIZE, vPage * PAGE_SIZE);
+
+  // Download / Print always follow the current view (campus + status + date range + search).
+  const vExportRows = () => vFiltered.map(r => ({
+    'Student ID': r.id_no || '',
+    'Full Name':  r.full_name || '',
+    'Program':    r.program || '',
+    'Campus':     r.campus_name || selectedCampusName || '',
+    'Date':       fmtTxDate(r.time_in),
+    'Time In':    fmtTxTime(r.time_in),
+    'Status':     visitStatusLabel(r.status),
+  }));
+
+  const vViewLabel = () =>
+    (vStatus === 'all' ? 'All Status' : visitStatusLabel(vStatus)) +
+    (vRange ? ` · ${rangeLabel(vRange)}` : '');
+
+  const downloadVisitHistory = () => {
+    if (visitLocked) return;
+    const rows = vExportRows();
+    if (!rows.length) { flashMsg('error', vRange ? `No visitor records for ${rangeLabel(vRange)}.` : 'No visitor records to download.'); return; }
+    const cols = Object.keys(rows[0]);
+    const esc = (v) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;          // stop spreadsheet formula injection
+      return `"${s.replace(/"/g, '""')}"`;
+    };
+    const csv = [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n');
+    const rangePart = vRange ? (vRange.start === vRange.end ? vRange.start : `${vRange.start}_to_${vRange.end}`) : todayStr();
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }));
+    a.download = `visit-history-${slug(selectedCampusName)}-${vStatus}-${rangePart}.csv`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  const printVisitHistory = () => {
+    if (visitLocked) return;
+    const rows = vExportRows();
+    if (!rows.length) { flashMsg('error', vRange ? `No visitor records for ${rangeLabel(vRange)}.` : 'No visitor records to print.'); return; }
+    const cols = Object.keys(rows[0]);
+    const label = `${selectedCampusName || 'Campus'} · ${vViewLabel()}`;
+    const win = window.open('', '_blank');
+    if (!win) { flashMsg('error', 'Please allow pop-ups to print.'); return; }
+    const thead = cols.map(c => `<th>${escHtml(c)}</th>`).join('');
+    const tbody = rows.map(r => `<tr>${cols.map(c => `<td>${escHtml(r[c] || '—')}</td>`).join('')}</tr>`).join('');
+    win.document.write(`<html><head><title>Visit History — ${escHtml(label)}</title><style>body{font-family:sans-serif;font-size:12px;color:#1a0000}h2{color:#7A0000;margin-bottom:2px}table{width:100%;border-collapse:collapse;margin-top:12px}th{background:#7A0000;color:#F5E4A8;padding:8px;text-align:left;font-size:10px;letter-spacing:0.04em;text-transform:uppercase}td{padding:7px 8px;border-bottom:1px solid #eee}@media print{@page{margin:1.2cm}}</style></head><body><h2>Visit History</h2><p style="color:#888;font-size:11px">${escHtml(label)} · ${rows.length} record${rows.length === 1 ? '' : 's'} · ${escHtml(new Date().toLocaleString('en-PH'))}</p><table><thead><tr>${thead}</tr></thead><tbody>${tbody}</tbody></table></body></html>`);
+    win.document.close();
+    win.focus();
+    win.print();
+  };
+
+  const visitContent = visitLocked ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><Lock size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">Select a campus to view its visit history</div>
+        <div className="sab-empty-sub">
+          Visitor attendance records are shown one campus at a time. Choose a campus above to see its visits.
+        </div>
+      </div>
+    </div>
+  ) : vLoading ? (
+    <div className="sab-shimmer sab-skel-table" />
+  ) : vError ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><UserCheck size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">{vError.missing ? 'Visit history table not set up yet' : 'Could not load the visit history'}</div>
+        <div className="sab-empty-sub">
+          {vError.missing
+            ? 'Run super_admin_visit_history.sql once in the Supabase SQL Editor, then reload this tab.'
+            : vError.message}
+        </div>
+        <button type="button" className="sab-hx-btn sab-hx-retry" onClick={() => reloadVRef.current && reloadVRef.current(false)}>
+          Try again
+        </button>
+      </div>
+    </div>
+  ) : vFiltered.length === 0 ? (
+    <div className="sab-table-wrap bare">
+      <div className="sab-empty">
+        <div className="sab-empty-illus"><UserCheck size={30} strokeWidth={1.8} /></div>
+        <div className="sab-empty-title">{vRows.length ? 'No matching visitor records' : 'No visitor records yet'}</div>
+        <div className="sab-empty-sub">
+          {vRows.length
+            ? (vRange ? `Nothing found for ${rangeLabel(vRange)}. Try a different date or clear the filters.` : 'Try a different search term or clear filters.')
+            : `Visitor attendance for ${selectedCampusName || 'this campus'} will appear here.`}
+        </div>
+      </div>
+    </div>
+  ) : (
+    <div className="sab-table-wrap">
+      <div className="sab-table-scroll">
+        <table className="sab-table sab-hx-table">
+          <thead>
+            <tr>
+              {['Student ID', 'Full Name', 'Program', 'Date', 'Time In', 'Status'].map(h => <th key={h}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {vPaged.map(r => {
+              const isOut = String(r.status || '').toLowerCase() === 'time-out';
+              return (
+                <tr key={r.id}>
+                  <td>{r.id_no ? <span className="sab-hx-mono">{r.id_no}</span> : <span className="sab-hx-sub" style={{ fontStyle: 'italic' }}>no ID recorded</span>}</td>
+                  <td><div style={{ fontWeight: 800, fontSize: 13 }}>{r.full_name || '—'}</div></td>
+                  <td style={{ maxWidth: 240 }}>
+                    <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.program || '—'}</div>
+                  </td>
+                  <td><div style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtTxDate(r.time_in)}</div></td>
+                  <td><div style={{ fontSize: 12, whiteSpace: 'nowrap' }}>{fmtTxTime(r.time_in)}</div></td>
+                  <td>
+                    <div className="sab-status-row">
+                      <span className={`sab-status-dot${isOut ? ' sab-hx-dot-borrowed' : ''}`} />
+                      <span className="sab-status-label" style={{ color: isOut ? '#C2570C' : '#178A4C' }}>{visitStatusLabel(r.status)}</span>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="sab-pagination">
+        <div className="sab-pagination-info">
+          Showing {(vPage - 1) * PAGE_SIZE + 1}–{Math.min(vPage * PAGE_SIZE, vFiltered.length)} of {vFiltered.length}
+          {selectedCampusName ? ` · ${selectedCampusName}` : ''}
+        </div>
+        {vTotalPages > 1 && (
+          <div className="sab-pagination-btns">
+            <button className="sab-page-btn" onClick={() => setVPage(p => Math.max(1, p - 1))} disabled={vPage === 1} aria-label="Previous page">
+              <ChevronLeft size={14} />
+            </button>
+            <button className="sab-page-btn" onClick={() => setVPage(p => Math.min(vTotalPages, p + 1))} disabled={vPage === vTotalPages} aria-label="Next page">
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   // Confirming registers the book into the live, campus-facing catalog.
   const handleConfirm = async (book) => {
@@ -996,7 +1788,7 @@ export default function SuperAdminBooks() {
               className={`sab-campus-chip${campusFilter === 'all' ? ' active' : ''}`}
               onClick={() => setCampusFilter('all')}
             >
-              All Campuses <span className="cnt">{baseBooks.length}</span>
+              All Campuses <span className="cnt">{historyActive ? txTotalCount : visitActive ? vTotalCount : baseBooks.length}</span>
             </div>
             {campuses.map(c => (
               <div
@@ -1004,7 +1796,7 @@ export default function SuperAdminBooks() {
                 className={`sab-campus-chip${campusFilter === c.id ? ' active' : ''}`}
                 onClick={() => setCampusFilter(c.id)}
               >
-                {c.campus_name} <span className="cnt">{campusCounts[c.id] || 0}</span>
+                {c.campus_name} <span className="cnt">{historyActive ? (txCampusCounts[c.id] || 0) : visitActive ? (vCampusCounts[c.id] || 0) : (campusCounts[c.id] || 0)}</span>
               </div>
             ))}
           </div>
@@ -1017,7 +1809,57 @@ export default function SuperAdminBooks() {
         <div className="sab-shimmer sab-skel-table" />
       ) : (
         <>
+          {!historyLocked && !visitLocked && (
           <div className="sab-toolbar">
+            {historyActive ? (
+              <>
+                <div className="sab-search">
+                  <Search size={16} />
+                  <input
+                    value={txSearch}
+                    onChange={e => setTxSearch(e.target.value)}
+                    placeholder="Search student, book, or copy..."
+                    aria-label="Search transactions"
+                  />
+                </div>
+                <select className="sab-select" value={txStatus} onChange={e => setTxStatus(e.target.value)} aria-label="Filter by status">
+                  <option value="all">All Status</option>
+                  <option value="borrowed">Borrowed</option>
+                  <option value="returned">Returned</option>
+                </select>
+                <DateRangeFilter from={txFrom} to={txTo} onChange={(f, t) => { setTxFrom(f); setTxTo(t); }} />
+                <button type="button" className="sab-hx-btn" onClick={downloadTxHistory} disabled={txLoading || !!txError} title="Download this campus's history (CSV)">
+                  <Download size={14} /> Download
+                </button>
+                <button type="button" className="sab-hx-btn" onClick={printTxHistory} disabled={txLoading || !!txError} title="Print this campus's history">
+                  <Printer size={14} /> Print
+                </button>
+              </>
+            ) : visitActive ? (
+              <>
+                <div className="sab-search">
+                  <Search size={16} />
+                  <input
+                    value={vSearch}
+                    onChange={e => setVSearch(e.target.value)}
+                    placeholder="Search student ID, name, or program..."
+                    aria-label="Search visitor records"
+                  />
+                </div>
+                <select className="sab-select" value={vStatus} onChange={e => setVStatus(e.target.value)} aria-label="Filter by status">
+                  <option value="all">All Status</option>
+                  <option value="time-in">Time In</option>
+                </select>
+                <DateRangeFilter from={vFrom} to={vTo} onChange={(f, t) => { setVFrom(f); setVTo(t); }} />
+                <button type="button" className="sab-hx-btn" onClick={downloadVisitHistory} disabled={vLoading || !!vError} title="Download this campus's visit history (CSV)">
+                  <Download size={14} /> Download
+                </button>
+                <button type="button" className="sab-hx-btn" onClick={printVisitHistory} disabled={vLoading || !!vError} title="Print this campus's visit history">
+                  <Printer size={14} /> Print
+                </button>
+              </>
+            ) : (
+              <>
             <div className="sab-search">
               <Search size={16} />
               <input
@@ -1036,9 +1878,13 @@ export default function SuperAdminBooks() {
                 <option value="all">All Status</option>
                 <option value="Available">Available</option>
                 <option value="Borrowed">Borrowed</option>
+                <option value="Missing">Missing</option>
               </select>
             )}
+              </>
+            )}
           </div>
+          )}
 
           {/* Catalog table */}
           <div className="sab-selector-head" style={{ marginTop: 8 }}>
@@ -1056,9 +1902,22 @@ export default function SuperAdminBooks() {
                 <Clock size={14} /> Pending Requests
                 {pendingBooks.length > 0 && <span className="sab-tab-count">{pendingBooks.length}</span>}
               </button>
+              <button
+                className={`sab-tab${activeTab === 'history' ? ' active' : ''}`}
+                onClick={() => setActiveTab('history')}
+              >
+                <ClipboardList size={14} /> Borrowing &amp; Returning History
+              </button>
+              <button
+                className={`sab-tab${activeTab === 'visits' ? ' active' : ''}`}
+                onClick={() => setActiveTab('visits')}
+              >
+                <UserCheck size={14} /> Visit History
+              </button>
             </div>
           </div>
 
+          {historyActive ? historyContent : visitActive ? visitContent : (
           <div className={`sab-table-wrap${filtered.length === 0 ? ' bare' : ''}`}>
             {filtered.length === 0 ? (
               <div className="sab-empty">
@@ -1193,11 +2052,16 @@ export default function SuperAdminBooks() {
                           </td>
                           <td>
                             <div className="sab-status-row">
-                              <span className={`sab-status-dot${b.status === 'Available' ? '' : ' off'}`} />
-                              <span className="sab-status-label" style={{ color: b.status === 'Available' ? '#178A4C' : DANGER }}>
+                              <span className={`sab-status-dot${b.status === 'Available' ? '' : (b.status === 'Missing' ? ' sab-hx-dot-borrowed' : ' off')}`} />
+                              <span className="sab-status-label" style={{ color: b.status === 'Available' ? '#178A4C' : (b.status === 'Missing' ? '#C2570C' : DANGER) }}>
                                 {b.status}
                               </span>
                             </div>
+                            {b.missing_copies > 0 && (
+                              <div style={{ fontSize: 11, fontWeight: 600, color: '#C2570C', marginTop: 2 }}>
+                                {b.missing_copies} missing
+                              </div>
+                            )}
                           </td>
                         </tr>
                       ))}
@@ -1223,6 +2087,7 @@ export default function SuperAdminBooks() {
               </>
             )}
           </div>
+          )}
         </>
       )}
 
@@ -1281,7 +2146,7 @@ export default function SuperAdminBooks() {
           ['Total Pages',          FileText,  b.pages],
           ['Shelf Location',       MapPin,    b.shelf_location],
           ['Genre',                BookMarked, b.genre],
-          ['Copies',               BookOpen,  `${availCount} available / ${b.copies} total`],
+          ['Copies',               BookOpen,  `${availCount} available / ${b.copies} total${b.missing_copies > 0 ? ` · ${b.missing_copies} missing` : ''}`],
           ['Color',                Palette,   b.color],
         ].filter(([, , v]) => v !== undefined && v !== null && String(v).trim() !== '');
 

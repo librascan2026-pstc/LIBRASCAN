@@ -4002,7 +4002,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
             ? (olLoading ? 'Loading…' : `${filteredOl.length} online book${filteredOl.length!==1?'s':''}`)
             : loading
             ? 'Loading…'
-            : `${filtered.length} book${filtered.length!==1?'s':''}${filteredOl.length ? ` · ${filteredOl.length} from Open Library` : ''}`}
+            : `${filtered.length} book${filtered.length!==1?'s':''}${filteredOl.length ? ` · ${filteredOl.length} from Online Book` : ''}`}
         </div>
       </div>
 
@@ -4045,7 +4045,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
       {(search.trim().length >= 2 || onlineOnly) && (
         <>
           <div className="sdb-ol-section-label">
-            <span>From Open Library</span>
+            <span>From Online Book</span>
           </div>
           {olLoading ? (
             <div className="sdb-book-grid">
@@ -4054,14 +4054,14 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
               ))}
             </div>
           ) : olError ? (
-            <div className="sdb-ol-error">Open Library results unavailable right now — {olError}</div>
+            <div className="sdb-ol-error">Online Book results unavailable right now — {olError}</div>
           ) : filteredOl.length === 0 ? (
-            <div className="sdb-ol-error">No matching Open Library results for this search.</div>
+            <div className="sdb-ol-error">No matching Online Book results for this search.</div>
           ) : (
             <div className="sdb-book-grid sdb-bk-grid">
               {filteredOl.map(book => (
                 <div key={book.id} className="sdb-bk-card" onClick={()=>setSelected(book)}>
-                  <span className="sdb-ol-tag">Open Library</span>
+                  <span className="sdb-ol-tag">Online Book</span>
                   <div className="sdb-bk-cover">
                     <BookCover src={book.cover_image_url} title={book.title} width="100%" height="100%" />
                   </div>
@@ -4099,7 +4099,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
             <span className="sdb-bd-hdr-ico">{BD_ICONS.book}</span>
             <div className="sdb-bd-hdr-text">
               <div className="sdb-bd-hdr-title">Book Details</div>
-              <div className="sdb-bd-hdr-sub">{selected.category || 'Open Library'}</div>
+              <div className="sdb-bd-hdr-sub">{selected.category || 'Online Book'}</div>
             </div>
             <button className="sdb-modal-close" onClick={()=>setSelected(null)}>{Ic.close}</button>
           </div>
@@ -4108,7 +4108,7 @@ function PageCatalog({ user, initialCategory = '', initialCampus = '' }) {
               <div className="sdb-bd-cover">
                 <BookCover src={selected.cover_image_url_lg||selected.cover_image_url} title={selected.title} width="100%" height="100%" />
               </div>
-              <span className="sdb-ol-tag" style={{ position:'static' }}>Open Library</span>
+              <span className="sdb-ol-tag" style={{ position:'static' }}>Online Book</span>
               <span className="sdb-ol-status" style={{ marginTop:0 }}>{selected.availability.label}</span>
               {selected.availability.canRead ? (
                 <button className="sdb-bd-btn sdb-bd-btn-gold" onClick={()=>openExternal(selected.availability.actionUrl)}>Read Free</button>
